@@ -1,0 +1,156 @@
+test_agent_cannot_approve (test_backend.HTTPTests.test_agent_cannot_approve) ... ok
+test_agent_output_hidden_until_publish (test_backend.HTTPTests.test_agent_output_hidden_until_publish) ... ok
+test_device_requires_paired_origin (test_backend.HTTPTests.test_device_requires_paired_origin) ... ok
+test_dns_rebinding_host_rejected (test_backend.HTTPTests.test_dns_rebinding_host_rejected) ... ok
+test_invalid_body_has_generic_error (test_backend.HTTPTests.test_invalid_body_has_generic_error) ... ok
+test_page_origin_cannot_call_broker (test_backend.HTTPTests.test_page_origin_cannot_call_broker) ... ok
+test_cloud_tag_rejected (test_backend.PolicyTests.test_cloud_tag_rejected) ... ok
+test_extra_fields_and_numeric_booleans_blocked (test_backend.PolicyTests.test_extra_fields_and_numeric_booleans_blocked) ... ok
+test_funds_reviewer_never_needs_balance (test_backend.PolicyTests.test_funds_reviewer_never_needs_balance) ... ok
+test_model_cannot_add_prose_or_reorder (test_backend.PolicyTests.test_model_cannot_add_prose_or_reorder) ... ok
+test_prompt_injection_rejected (test_backend.PolicyTests.test_prompt_injection_rejected) ... ok
+test_redaction (test_backend.PolicyTests.test_redaction) ... ok
+test_task_contract (test_backend.PolicyTests.test_task_contract) ... ok
+test_two_stage_review (test_backend.PolicyTests.test_two_stage_review) ... ok
+test_veto_cannot_be_overridden (test_backend.PolicyTests.test_veto_cannot_be_overridden) ... ok
+test_clock_rollback_cannot_extend_lease (test_backend.StoreTests.test_clock_rollback_cannot_extend_lease) ... ok
+test_expiry_checked_without_alarm (test_backend.StoreTests.test_expiry_checked_without_alarm) ... ok
+test_model_failure_fails_closed (test_backend.StoreTests.test_model_failure_fails_closed) ... ok
+test_no_payloads_in_audit (test_backend.StoreTests.test_no_payloads_in_audit) ... ok
+test_only_final_approval_releases (test_backend.StoreTests.test_only_final_approval_releases) ... ok
+test_origin_binding (test_backend.StoreTests.test_origin_binding) ... ok
+test_privacy_budget_persists_across_restart_and_revoke (test_backend.StoreTests.test_privacy_budget_persists_across_restart_and_revoke) ... ok
+test_revocation_during_model_review (test_backend.StoreTests.test_revocation_during_model_review) ... ok
+test_revoke_erases_broker_output (test_backend.StoreTests.test_revoke_erases_broker_output) ... ok
+test_stale_preview_fails (test_backend.StoreTests.test_stale_preview_fails) ... ok
+
+----------------------------------------------------------------------
+Ran 25 tests in 3.167s
+
+OK
+TAP version 13
+# Subtest: USD uses exact integer cents and grouped amounts
+ok 1 - USD uses exact integer cents and grouped amounts
+  ---
+  duration_ms: 0.925931
+  type: 'test'
+  ...
+# Subtest: reject ambiguous or unsupported amount: 1,00.00
+ok 2 - reject ambiguous or unsupported amount: 1,00.00
+  ---
+  duration_ms: 0.273931
+  type: 'test'
+  ...
+# Subtest: reject ambiguous or unsupported amount: 12.3
+ok 3 - reject ambiguous or unsupported amount: 12.3
+  ---
+  duration_ms: 0.083616
+  type: 'test'
+  ...
+# Subtest: reject ambiguous or unsupported amount: 1.234
+ok 4 - reject ambiguous or unsupported amount: 1.234
+  ---
+  duration_ms: 0.064507
+  type: 'test'
+  ...
+# Subtest: reject ambiguous or unsupported amount: 1e6
+ok 5 - reject ambiguous or unsupported amount: 1e6
+  ---
+  duration_ms: 0.064277
+  type: 'test'
+  ...
+# Subtest: reject ambiguous or unsupported amount: NaN
+ok 6 - reject ambiguous or unsupported amount: NaN
+  ---
+  duration_ms: 0.075944
+  type: 'test'
+  ...
+# Subtest: reject ambiguous or unsupported amount: Infinity
+ok 7 - reject ambiguous or unsupported amount: Infinity
+  ---
+  duration_ms: 0.059069
+  type: 'test'
+  ...
+# Subtest: reject ambiguous or unsupported amount: 12 480,72
+ok 8 - reject ambiguous or unsupported amount: 12 480,72
+  ---
+  duration_ms: 0.055564
+  type: 'test'
+  ...
+# Subtest: reject ambiguous or unsupported amount: 0.01 USD
+ok 9 - reject ambiguous or unsupported amount: 0.01 USD
+  ---
+  duration_ms: 0.221002
+  type: 'test'
+  ...
+# Subtest: reject ambiguous or unsupported amount: 012.00
+ok 10 - reject ambiguous or unsupported amount: 012.00
+  ---
+  duration_ms: 0.27934
+  type: 'test'
+  ...
+# Subtest: reject ambiguous or unsupported amount: Available: $10.00
+ok 11 - reject ambiguous or unsupported amount: Available: $10.00
+  ---
+  duration_ms: 0.118298
+  type: 'test'
+  ...
+# Subtest: reject ambiguous or unsupported amount: $10.00 $20.00
+ok 12 - reject ambiguous or unsupported amount: $10.00 $20.00
+  ---
+  duration_ms: 0.05956
+  type: 'test'
+  ...
+# Subtest: reject ambiguous or unsupported amount: -1.00
+ok 13 - reject ambiguous or unsupported amount: -1.00
+  ---
+  duration_ms: 0.04655
+  type: 'test'
+  ...
+# Subtest: fees and user reserve are included without floating point
+ok 14 - fees and user reserve are included without floating point
+  ---
+  duration_ms: 0.197607
+  type: 'test'
+  ...
+# Subtest: result has no exact balance, account identifier, or amount
+ok 15 - result has no exact balance, account identifier, or amount
+  ---
+  duration_ms: 0.554684
+  type: 'test'
+  ...
+# Subtest: origins are exact and securely normalized
+ok 16 - origins are exact and securely normalized
+  ---
+  duration_ms: 0.195464
+  type: 'test'
+  ...
+# Subtest: sensitive patterns are removed before the local model
+ok 17 - sensitive patterns are removed before the local model
+  ---
+  duration_ms: 1.910421
+  type: 'test'
+  ...
+# Subtest: Unicode normalization defeats simple obfuscation
+ok 18 - Unicode normalization defeats simple obfuscation
+  ---
+  duration_ms: 0.38607
+  type: 'test'
+  ...
+# Subtest: extension has minimal site access and no session harvesting APIs
+ok 19 - extension has minimal site access and no session harvesting APIs
+  ---
+  duration_ms: 0.306721
+  type: 'test'
+  ...
+1..19
+# tests 19
+# suites 0
+# pass 19
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 58.902027
+PASS: pairing, request, capture stub, review, withheld preview, raw-field clear, publish, revoke; zero JavaScript errors.
+Chrome APIs, model verdicts and browser fetch were mocked. The actual broker HTTP and application logic ran.

@@ -1,0 +1,32 @@
+services:
+  egress:
+    image: node:24-bookworm-slim
+    command: ["node", "/egress.mjs"]
+    volumes: ["./egress.mjs:/egress.mjs:ro"]
+    environment: {AGENTGATE_URL: "${AGENTGATE_URL:?Set the coordinator URL}"}
+    networks: [inside, outside]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    extra_hosts: ["host.docker.internal:host-gateway"]
+  assistant:
+    build: {context: "..", dockerfile: "isolation/Dockerfile"}
+    environment:
+      AGENTGATE_URL: "${AGENTGATE_URL}"
+      AGENTGATE_AGENT_TOKEN: "${AGENTGATE_AGENT_TOKEN:?Set only the agent-role token}"
+      HTTP_PROXY: http://egress:3128
+      HTTPS_PROXY: http://egress:3128
+      NODE_USE_ENV_PROXY: "1"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+    networks: [inside]
+    depends_on: [egress]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp", "/home/node:uid=1000,gid=1000", "/work:uid=1000,gid=1000"]
+    read_only: true
+    stdin_open: true
+    tty: true
+networks:
+  inside: {internal: true}
+  outside: {}

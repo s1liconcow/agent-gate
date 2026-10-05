@@ -1,0 +1,24 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {checkedActionDecision} from '../extension/action-guard.mjs';
+import {scope, action} from '../shared/protocol.mjs';
+const task = scope({goal: 'Email Ali about doggie daycare.', origins: ['https://mail.example'], permissions: ['read', 'fill', 'click', 'navigate'], ttl_seconds: 300, disclosure: 'local_planner', interaction: 'local_gate', start_url: 'https://mail.example/inbox'});
+const allow = {decision: 'allow', within_purpose: true}, confirm = {decision: 'confirm', within_purpose: true}, deny = {decision: 'deny', within_purpose: false};
+const current = label => ({origin: task.origins[0], text: '', controls: [{ref: 'a'.repeat(32), role: 'button', label, approval: 'per_action'}]});
+const click = {type: 'click', ref: 'a'.repeat(32)};
+test('purpose checks require agreement for automatic intermediate actions', () => {
+  assert.equal(checkedActionDecision(task, current('Open Ali’s message'), click, allow, allow), 'allow');
+  assert.equal(checkedActionDecision(task, current('Open Ali’s message'), click, allow, confirm), 'confirm');
+  assert.equal(checkedActionDecision(task, current('Open Ali’s message'), click, allow, deny), 'deny');
+});
+test('known commitments and native form submissions always require phone approval', () => {
+  for (const label of ['Send email', 'Pay $200.00', 'Delete message', 'Save event', 'Publish post', 'Buy tickets']) assert.equal(checkedActionDecision(task, current(label), click, allow, allow), 'confirm');
+  assert.equal(checkedActionDecision(task, current('Continue'), click, allow, allow, true), 'confirm');
+});
+test('local check output cannot invent authority or override the origin boundary', () => {
+  assert.throws(() => checkedActionDecision(task, current('Inbox'), click, {decision: 'allow', scope: '*'}, allow));
+  assert.throws(() => checkedActionDecision(task, null, {type: 'open_tab', url: 'https://other.example'}, allow, allow));
+  assert.deepEqual(action({type: 'open_tab', url: 'https://mail.example/inbox'}, task, null), {type: 'open_tab', url: 'https://mail.example/inbox'});
+  assert.throws(() => scope({...task, start_url: 'https://other.example/inbox'}));
+  assert.throws(() => scope({...task, disclosure: 'manual'}));
+});

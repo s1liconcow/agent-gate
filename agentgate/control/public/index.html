@@ -1,0 +1,10 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0d1117"><title>AgentGate · approvals</title><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg"><link rel="stylesheet" href="/style.css"><script type="module" src="/app.mjs"></script></head><body>
+<header><a class="brand" href="/" aria-label="AgentGate home"><img src="/icon.svg" alt="" width="34" height="34">AgentGate</a><span id="connection" class="status">Connecting</span></header>
+<main class="phone"><div class="intro"><h1>Your browser.<br>Your say.</h1><p>Approve a purpose. Keep control of what your assistant can see and do.</p></div>
+<div id="message" role="status" class="message" hidden></div>
+<section id="pairing" hidden><h2>Pair this phone</h2><p>A private signing key will stay on this device. Enter the one-time code from your desktop setup.</p><form id="pairForm"><label>Pairing code<input id="pairCode" type="password" required autocomplete="off"></label><button>Pair this phone</button></form><p class="hint">Use your phone as the approval device. The browser bridge has a different credential.</p></section>
+<section id="inbox" hidden><div class="section-heading"><h2>Approvals <span id="count" class="count">0</span></h2><button id="refresh" class="secondary compact">Refresh</button></div><div id="requests"></div></section>
+<section id="connectorSection" hidden><h2>Assistant connections</h2><div id="connectors"></div></section>
+<section id="browserSection" hidden><h2>Browser connections</h2><div id="browsers"></div></section>
+<details id="device" hidden><summary>Device settings</summary><p id="fingerprint" class="hint"></p><div class="actions"><button id="notifications" class="secondary">Enable notifications</button></div><p class="hint">Connect your desktop by scanning the extension's QR code. Your signing key stays on this phone. Notifications contain no task details.</p></details>
+<footer>Personal assistant gateway · prototype 0.5<br>Website login and MFA stay with you.</footer></main></body></html>
