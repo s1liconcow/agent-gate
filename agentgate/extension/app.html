@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentGate | Private answers</title><link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+<header><div class="brand"><span class="mark">ag</span><div>AgentGate<small>USER-CONTROLLED WEB ACCESS</small></div></div><span class="pill">LOCAL PROTOTYPE · 0.1</span></header>
+<main>
+  <section class="intro"><p class="eyebrow">YOUR DATA. YOUR DECISION.</p><h1>Give the answer.<br>Keep the private details.</h1><p class="lede">Approve one purpose-bound answer from a page you choose. Credentials stay in your browser.</p></section>
+  <div id="message" class="message" role="status" aria-live="polite" hidden></div>
+  <div class="layout">
+    <aside>
+      <section class="card compact"><p class="eyebrow">TRUSTED SOURCE</p><h2 id="sourceOrigin">No source selected</h2><p class="muted">Highlight relevant text on a website, then click the AgentGate toolbar button.</p><span class="pill subtle">Read-only · Main frame only</span></section>
+      <section class="card compact"><p class="eyebrow">PRIVACY BOUNDARY</p><div class="boundary"><div>Your signed-in browser<small>Passwords, session, exact balance</small></div><span>↓</span><div>Local policy + independent AI<small>Minimize and check relevance</small></div><span>↓</span><div>You approve the preview<small>One immutable answer</small></div><span>↓</span><div>Connected assistant<small>Approved answer only</small></div></div></section>
+      <details class="card compact" id="pairing"><summary>Device pairing</summary><label>Extension ID<input id="extensionId" readonly></label><label>Device key<input id="deviceKey" type="password" autocomplete="off" placeholder="Paste the device key from setup"></label><button id="saveKey" class="secondary">Pair local broker</button><p class="muted small">Endpoint: 127.0.0.1:8765. The key is stored locally in trusted extension storage. Give the assistant only the separate agent key.</p></details>
+    </aside>
+    <div class="content">
+      <section class="card"><div class="section-heading"><div><p class="eyebrow">01 / SCOPE</p><h2>Review the request</h2></div><button id="refresh" class="secondary">Refresh requests</button></div>
+        <div id="reviewerMode" class="notice">Connect the local broker to check the review mode.</div>
+        <label>Request<select id="requests"><option value="">No requests loaded</option></select></label>
+        <div id="taskDetails" hidden><div class="task-line"><span>Website</span><strong id="taskOrigin"></strong></div><div class="task-line"><span>Lease</span><strong id="taskTtl"></strong></div><div class="task-purpose" id="taskPurpose"></div><div class="task-line"><span>Allowed output</span><strong id="taskKind"></strong></div><p id="taskStatus" class="muted small"></p></div>
+        <details class="create"><summary>Create a local test request</summary><label>Purpose<textarea id="purpose" rows="2">Check whether the selected account has sufficient available balance for a $250 transfer.</textarea></label><div class="row"><label>Operation<select id="kind"><option value="funds_check">Balance sufficiency</option><option value="redact_selection">Relevant text excerpt</option></select></label><label>Amount (USD)<input id="amount" value="250.00" inputmode="decimal"></label><label>Lease (seconds)<input id="ttl" type="number" min="30" max="600" value="300"></label></div><button id="create" class="secondary">Create request for this origin</button></details>
+      </section>
+      <section class="card"><div class="section-heading"><div><p class="eyebrow">02 / MINIMIZE</p><h2>Select the minimum evidence</h2></div><button id="capture" class="secondary">Read highlighted text</button></div>
+        <div id="fundsFields"><label>Available balance (local only)<input id="balance" autocomplete="off" inputmode="decimal" placeholder="Highlight one amount, or enter it here"></label><div class="row"><label>Known fees (USD)<input id="fees" value="0.00" inputmode="decimal" autocomplete="off"></label><label>Keep-aside buffer (USD)<input id="buffer" value="0.00" inputmode="decimal" autocomplete="off"></label></div><p class="muted small">Integer-cent arithmetic computes the predicate here. The exact balance is never sent to the broker or reviewer. A sufficient balance does not establish transfer eligibility. No transfer is submitted.</p></div>
+        <div id="textFields" hidden><label>Selected passage (pre-redacted locally)<textarea id="selection" rows="6" maxlength="12000" spellcheck="false" placeholder="Highlight only task-relevant text, then capture it."></textarea></label><p class="muted small">Pattern redaction runs before the local reviewer. Names and other contextual details still require semantic review and your judgment. Never paste passwords here.</p></div>
+        <label class="check"><input id="scopeConsent" type="checkbox"><span>I approve this origin and purpose. I checked the source, correct account and available-balance label where applicable.</span></label>
+        <button id="review" disabled>Prepare private answer</button>
+      </section>
+      <section class="card preview"><div class="section-heading"><div><p class="eyebrow">03 / RELEASE</p><h2>Exactly what the assistant receives</h2></div><span id="previewState" class="pill subtle">Nothing released</span></div>
+        <p id="emptyPreview" class="muted">Prepare an answer to see the proposed release. The assistant cannot access a preview.</p><pre id="output" hidden></pre><p id="reviewSummary" class="muted small"></p>
+        <label class="check"><input id="releaseConsent" type="checkbox" disabled><span>I reviewed this exact output and approve sharing it with the connected assistant.</span></label>
+        <div class="row actions"><button id="publish" disabled>Approve & release answer</button><button id="revoke" class="danger" disabled>Revoke this request</button></div>
+        <p class="muted small">Revocation stops further retrieval. It cannot erase data already delivered, or log you out of the website.</p>
+      </section>
+    </div>
+  </div>
+  <footer>Single-user development build. Keep the assistant away from the unrestricted browser, device key and broker files. Start with the included synthetic demo.</footer>
+</main>
+</body></html>

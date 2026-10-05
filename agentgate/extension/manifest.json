@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "AgentGate - private, approved answers",
+  "version": "0.1.0",
+  "description": "Release a minimal, reviewed answer from a user-selected page through an expiring local lease.",
+  "minimum_chrome_version": "114",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": {"service_worker": "worker.js", "type": "module"},
+  "action": {"default_title": "Review with AgentGate"},
+  "options_page": "app.html",
+  "content_security_policy": {"extension_pages": "script-src 'self'; object-src 'none'; connect-src http://127.0.0.1:8765; frame-src 'none'; base-uri 'none'"}
+}

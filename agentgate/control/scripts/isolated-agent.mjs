@@ -1,0 +1,12 @@
+import {spawn, spawnSync} from 'node:child_process';
+import {readFile} from 'node:fs/promises';
+import {resolve} from 'node:path';
+import {homedir} from 'node:os';
+const [client = 'codex', ...args] = process.argv.slice(2);
+if (!['codex', 'claude'].includes(client)) throw new Error('Choose codex or claude.');
+const config = JSON.parse(await readFile(resolve(process.env.AGENTGATE_CONFIG_DIR || resolve(homedir(), '.agentgate-control'), 'config.json'), 'utf8'));
+const url = config.url.startsWith('http://127.0.0.1:') ? config.url.replace('127.0.0.1', 'host.docker.internal') : config.url;
+const command = process.env.AGENTGATE_CONTAINER_ENGINE || 'docker';
+const child = spawn(command, ['compose', '-f', new URL('../isolation/compose.yaml', import.meta.url).pathname, 'run', '--rm', '--build', 'assistant', client, ...args], {stdio: 'inherit', env: {...process.env, AGENTGATE_URL: url, AGENTGATE_AGENT_TOKEN: config.agent_token}});
+child.on('error', () => { console.error('The container engine is unavailable. Start Docker, or set AGENTGATE_CONTAINER_ENGINE to a compatible engine with Compose.'); process.exitCode = 1; });
+child.on('exit', code => process.exitCode = code ?? 1);
