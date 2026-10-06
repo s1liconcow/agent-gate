@@ -1,0 +1,40 @@
+{
+  "name": "agentgate-control",
+  "version": "0.7.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "build": "node scripts/build.mjs",
+    "build:trial": "npm run build && node scripts/build-trial.mjs",
+    "dev": "node scripts/dev.mjs",
+    "deploy": "npm run build && wrangler deploy",
+    "test": "node --test tests/*.test.mjs",
+    "test:e2e": "node tests/e2e.mjs",
+    "test:inbox": "node tests/inbox-browser.mjs",
+    "test:draft": "node tests/draft-browser.mjs",
+    "test:chrome-ai": "node scripts/chrome-ai-check.mjs",
+    "benchmark:inbox": "node scripts/inbox-benchmark.mjs",
+    "benchmark:grants": "node scripts/granted-read-benchmark.mjs",
+    "benchmark:elements": "node scripts/element-benchmark.mjs",
+    "test:grants": "node tests/e2e.mjs --bounded-fixture",
+    "mcp": "node mcp/server.mjs",
+    "isolated": "node scripts/isolated-agent.mjs",
+    "bundle:api": "npm run build && node scripts/bundle.mjs",
+    "demos": "python3 -m http.server 8080 --bind 127.0.0.1 --directory demos",
+    "check": "npm run build && npm test && wrangler deploy --dry-run"
+  },
+  "dependencies": {
+    "@block65/webcrypto-web-push": "2.0.0",
+    "@cloudflare/workers-oauth-provider": "^1.2.1",
+    "@modelcontextprotocol/sdk": "1.32.0",
+    "qrcode": "^1.5.4",
+    "undici": "^7.30.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "esbuild": "^0.28.1",
+    "wrangler": "4.147.0"
+  }
+}

@@ -1,0 +1,10 @@
+# Optional Apple-GPU experiment dependencies, not AgentGate runtime dependencies.
+mlx-lm==0.32.0
+mlx==0.32.3
+torch==2.8.0
+transformers==5.10.2
+peft==0.19.1
+safetensors==0.8.0
+huggingface-hub==1.33.0
+httpx==0.28.1
+numpy==2.5.3
