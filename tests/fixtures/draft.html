@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Synthetic draft control regression</title>
+<style>body{font:16px sans-serif}td{padding:4px}[hidden]{display:none}</style>
+<aside><div role="button" id="compose">Compose</div><a href="#inbox">Inbox</a></aside>
+<div role="main"><h1>Inbox</h1><div role="toolbar"><button>Select</button><button>Refresh</button><button>More</button></div><table><tbody id="messages"></tbody></table></div>
+<div role="dialog" aria-labelledby="draft-title" id="draft" hidden>
+  <h2 id="draft-title">New Message</h2>
+  <textarea name="to" aria-label="Recipients"></textarea>
+  <input name="subjectbox" placeholder="Subject" value="EXISTING_PRIVATE_SUBJECT">
+  <div role="textbox" contenteditable="true" aria-label="Message Body">EXISTING_PRIVATE_BODY</div>
+  <div role="button" id="send">Send</div>
+  <div role="button" aria-label="Save &amp; close" id="close">Close</div>
+  <input type="password" aria-label="Password" value="PRIVATE_PASSWORD">
+  <input autocomplete="one-time-code" aria-label="Security code" value="PRIVATE_MFA">
+  <button hidden>Hidden control</button>
+</div>
+<script>
+  for (let i = 0; i < 100; i++) {
+    const row = document.createElement('tr'); row.className = 'zA'; row.setAttribute('role', 'row');
+    row.innerHTML = '<td>Unrelated message ' + i + '</td><td><button>Star message</button></td>';
+    document.querySelector('#messages').append(row);
+  }
+  document.querySelector('#compose').onclick = () => { document.querySelector('#draft').hidden = false; };
+  document.querySelector('#close').onclick = () => { document.querySelector('#draft').hidden = true; };
+  window.syntheticSends = 0;
+  document.querySelector('#send').onclick = () => { window.syntheticSends++; };
+</script>
+</html>

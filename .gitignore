@@ -47,22 +47,23 @@ outputs/
 *.pem
 *.key
 # Generated prototype captures and raw test logs stay local.
-/agentgate/docs/test-output.txt
-/agentgate/docs/prototype-preview.png
+/legacy/v0.1/docs/test-output.txt
+/legacy/v0.1/docs/prototype-preview.png
 # Unrelated local files and build outputs; npm run build recreates these.
 /calpico_camera_*.jpg
-/agentgate/control/src/generated-assets.mjs
-/agentgate/control/public/protocol.mjs
-/agentgate/control/public/browser-pairing.mjs
-/agentgate/control/public/qr.mjs
-/agentgate/control/extension/protocol.mjs
-/agentgate/control/extension/browser-pairing.mjs
-/agentgate/control/extension/qr.mjs
-/agentgate/control/extension/policy.mjs
-/agentgate/control/extension/style.css
-/agentgate/control/extension/icon.svg
-/agentgate/control/extension/xpath.js
-/agentgate/control/extension/xpath.mjs
-/agentgate/control/public/xpath.mjs
-/agentgate/control/public/read-grants.mjs
-/agentgate/control/extension/read-grants.mjs
+/snap insurance*.jpg
+/src/generated-assets.mjs
+/public/protocol.mjs
+/public/browser-pairing.mjs
+/public/qr.mjs
+/extension/protocol.mjs
+/extension/browser-pairing.mjs
+/extension/qr.mjs
+/extension/policy.mjs
+/extension/style.css
+/extension/icon.svg
+/extension/xpath.js
+/extension/xpath.mjs
+/public/xpath.mjs
+/public/read-grants.mjs
+/extension/read-grants.mjs
