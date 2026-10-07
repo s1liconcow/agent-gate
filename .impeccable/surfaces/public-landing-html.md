@@ -17,6 +17,8 @@ OWN-WORLD: Inherit AgentGate's near-black navy, mint approval color, pale blue s
 
 STORY: A synthetic task asks for Ali's daycare email. The owner approves purpose and origin; only relevant source text enters the assistant view. A later consequential action pauses for exact phone approval. Visitors explore this sequence and can read setup details.
 
+POSITIONING: The acting assistant and the checker have separate roles. In on-device mode, a browser-local model reviews what the remote assistant can see and do against the signed purpose; the phone approves consequential actions. Optional remote inference changes the privacy boundary and must be described as such.
+
 FIRST VIEWPORT: Header above an asymmetric split. A large plain-language offer and mint demo action fill the left. A broad specimen at right shows private browser rows, a vertical scope boundary, the bounded assistant view, and a phone approval receipt. The demo action scrolls to the interactive specimen.
 
 FORM: Disclosure ledger, candidate 6 in the surface roll (seed 776f150c). The card preview at `.impeccable/mocks/decision/disclosure-ledger.png` is a critique reference. The signature interaction advances a synthetic task through scoped approval, filtered disclosure, and exact-action approval.
