@@ -1,0 +1,17 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Coffee shop checkout</title>
+<main><h1>Review order</h1><p id="cart">Two blue coffee mugs · quantity 2</p><p>Shipping $5.00</p><p id="total">Order total: $25.00 USD</p>
+<form id="checkout" action="/order" method="post">
+<label>Email<input name="email" type="email" autocomplete="email" value="shopper@example.test" required></label>
+<label>Country<select name="country" autocomplete="country" required><option value="US" selected>United States</option><option value="CA">Canada</option></select></label>
+<label>Card number<input name="card" autocomplete="cc-number" required pattern="[0-9]{16}"></label>
+<label>Security code<input name="cvc" autocomplete="cc-csc" required pattern="[0-9]{3}"></label>
+<label>Delivery name<input name="delivery" autocomplete="shipping name" required></label>
+<input name="cart_id" type="hidden" value="cart-two-blue-mugs">
+<button id="order" type="submit" disabled>Place order</button>
+</form></main>
+<script>
+window.orders = 0;
+const form = document.getElementById('checkout');
+form.addEventListener('input', () => { document.getElementById('order').disabled = !form.checkValidity(); });
+form.addEventListener('submit', event => { event.preventDefault(); window.orders++; });
+</script></html>

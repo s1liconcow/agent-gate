@@ -6,6 +6,8 @@
   "scripts": {
     "setup": "node scripts/setup.mjs",
     "build": "node scripts/build.mjs",
+    "build:purpose": "node scripts/build-purpose.mjs",
+    "test:purpose-browser": "node scripts/purpose-browser-check.mjs",
     "build:pages": "node scripts/build-pages.mjs",
     "build:trial": "npm run build && node scripts/build-trial.mjs",
     "dev": "node scripts/dev.mjs",
@@ -14,6 +16,8 @@
     "test:e2e": "node tests/e2e.mjs",
     "test:inbox": "node tests/inbox-browser.mjs",
     "test:draft": "node tests/draft-browser.mjs",
+    "test:checkout": "node tests/checkout-browser.mjs",
+    "test:checkout-e2e": "npm run build && node tests/checkout-e2e.mjs",
     "test:chrome-ai": "node scripts/chrome-ai-check.mjs",
     "benchmark:inbox": "node scripts/inbox-benchmark.mjs",
     "benchmark:grants": "node scripts/granted-read-benchmark.mjs",
@@ -28,7 +32,9 @@
   "dependencies": {
     "@block65/webcrypto-web-push": "2.0.0",
     "@cloudflare/workers-oauth-provider": "^1.2.1",
+    "@huggingface/tokenizers": "0.2.0",
     "@modelcontextprotocol/sdk": "1.32.0",
+    "onnxruntime-web": "1.30.0",
     "qrcode": "^1.5.4",
     "undici": "^7.30.0",
     "zod": "^3.25.76"

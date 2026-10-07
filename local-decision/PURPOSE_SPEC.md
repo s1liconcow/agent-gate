@@ -5,8 +5,11 @@ permission. They do not approve field selectors, data categories for each read,
 or individual source values. The local agent enforces that purpose. Explicit
 field grants do not satisfy this specification.
 
-The first acceptance workload is ordinary inbox subjects and snippets. This does
-not establish arbitrary website, action, financial or medical-task support.
+The original acceptance workload is ordinary inbox subjects and snippets. The
+[Chrome classifier](BROWSER_CLASSIFIER.md) adds training and separate evaluation
+across twelve workflows. Each workflow must meet the same recall, false-release,
+freshness and latency requirements. Billing and appointment examples cover
+ordinary deadlines and logistics; sensitive records remain excluded.
 
 | ID | Required behavior | Evidence required |
 | --- | --- | --- |
@@ -15,7 +18,7 @@ not establish arbitrary website, action, financial or medical-task support.
 | P3 | Check every fact in the proposed source. A useful clause does not authorize unrelated neighboring facts. | Mixed-clause and same-topic unnecessary-fact cases |
 | P4 | Respect sender, folder, person and explicit temporal restrictions. Abstain if required context is absent. | One-variable counterfactuals with unfamiliar entities |
 | P5 | Website instructions and authority claims cannot modify the purpose. | Benign imperatives plus instruction-like source data |
-| P6 | Enforce ordinary-inbox sensitive-pattern exclusions and source size bounds. Never truncate a source before judging it. | Actual local filter/complete-source tests |
+| P6 | Enforce sensitive-pattern exclusions and source size bounds across workflows. Never truncate a source before judging it. | Actual local filter/complete-source tests |
 | P7 | Preserve exact source identity and verify freshness before publication; pause, expiry or revocation prevents release. | Actual Chrome proof and coordinator/ECDSA tests |
 | P8 | Make a complete warm access decision in less than one second, including capture, inference, proof and local transport. | Actual browser and MCP elapsed times; startup/phone approval reported separately |
 | P9 | Do not substitute benchmark labels, tune on acceptance cases, relax the fixed release threshold, or count blanket refusal as success. | Immutable checkpoint/data/source hashes; separate training, development and test reports |

@@ -9,7 +9,7 @@ class Memory {
   async delete(key) { this.items.delete(key); }
   async list({prefix}) { return new Map([...this.items].filter(([k]) => k.startsWith(prefix)).map(([k, v]) => [k, structuredClone(v)])); }
 }
-const spec = {goal: 'Email Ali to confirm doggie daycare on Friday.', origins: ['https://mail.example'], permissions: ['read', 'fill', 'click', 'navigate'], ttl_seconds: 300};
+const spec = {goal: 'Email Ali to confirm doggie daycare on Friday.', origins: ['https://mail.example'], permissions: ['read', 'fill', 'click', 'navigate'], ttl_seconds: 300, disclosure: 'local_planner', interaction: 'every_action'};
 const published = {origin: 'https://mail.example', text: 'Ali confirmed Friday is available.', controls: [{ref: 'a'.repeat(32), role: 'field', label: 'Message', approval: 'session'}, {ref: 'b'.repeat(32), role: 'button', label: 'Send email', approval: 'per_action'}]};
 async function fixture(taskSpec = spec) {
   let time = 1000000;
@@ -27,6 +27,31 @@ test('no browser view or commands before explicit signed session approval', asyn
   await assert.rejects(f.engine.publishView(f.id, published), /session/i);
   await assert.rejects(f.propose({type: 'fill', ref: 'a'.repeat(32), value: 'Hi'}), /approval/i);
   assert.equal(f.engine.public(await f.engine.get(f.id)).view, undefined);
+});
+test('omitted disclosure creates an automatic task and manual requests are rejected', async () => {
+  const {disclosure, interaction, ...input} = spec;
+  const f = await fixture(input), item = await f.engine.get(f.id);
+  assert.equal(item.task.disclosure, 'local_planner');
+  assert.equal(item.task.interaction, 'automatic');
+  assert.deepEqual(item.task.action_policy, {communications: false, payments: false, payment_limit_cents: 0});
+  assert.equal(item.challenge.scope.disclosure, 'local_planner');
+  const active = await f.activate();
+  assert.equal(active.browser_runtime.state, 'starting');
+  assert.match(active.next_action, /automatically opens/);
+  await assert.rejects(f.engine.create({...input, disclosure: 'manual'}), {code: 'INVALID_SCOPE'});
+});
+test('existing manual sessions end before further disclosure or execution', async () => {
+  for (const disclosure of ['manual', undefined]) {
+    const f = await fixture(); await f.activate(); await f.engine.publishView(f.id, published);
+    const item = await f.engine.get(f.id);
+    item.task.disclosure = disclosure;
+    await f.engine.save(item);
+    const result = f.engine.public(await f.engine.get(f.id));
+    assert.equal(result.status, 'revoked');
+    assert.equal(result.view, undefined);
+    await assert.rejects(f.engine.publishView(f.id, published), {code: 'SESSION_NOT_ACTIVE'});
+    assert.deepEqual(await f.engine.commands(), []);
+  }
 });
 test('modified scope and forged signature cannot approve a session', async () => {
   const f = await fixture(), challenge = (await f.engine.get(f.id)).challenge, receipt = await f.sign(challenge);
@@ -145,6 +170,54 @@ test('local consequential-action check requires an exact phone signature before 
   await f.engine.approveAction(f.id, await f.sign((await f.engine.get(f.id)).action_challenge));
   assert.equal((await f.engine.commands())[0].command.requires_approval, true);
 });
+test('optional communications and payments are owner-selected and bound to the initial signature', async () => {
+  const f = await fixture({...spec, interaction: 'automatic'});
+  const original = (await f.engine.get(f.id)).challenge;
+  await assert.rejects(f.engine.create({...spec, action_policy: {communications: true, payments: true, payment_limit_cents: 5000}}), {code: 'INVALID_SCOPE'});
+  const selected = await f.engine.chooseActionPolicy(f.id, {scope_digest: original.scope_digest, action_policy: {communications: true, payments: true, payment_limit_cents: 5000}});
+  assert.equal(selected.challenge.expires_at, original.expires_at);
+  assert.notEqual(selected.challenge.nonce, original.nonce);
+  await assert.rejects(f.engine.approveSession(f.id, await f.sign(original)), {code: 'STALE_APPROVAL'});
+  await f.activate(); await f.engine.publishView(f.id, published);
+  await assert.rejects(f.engine.chooseActionPolicy(f.id, {scope_digest: selected.challenge.scope_digest, action_policy: {communications: true, payments: true, payment_limit_cents: 10000}}), {code: 'STALE_APPROVAL'});
+  const proposed = await f.propose({type: 'click', ref: 'b'.repeat(32)});
+  assert.equal(proposed.status, 'checking_action'); assert.deepEqual(await f.engine.commands(), []);
+  await f.engine.checkAction(f.id, {command_id: proposed.last_command.id, decision: 'allow', effect: 'communication', payment_cents: 0});
+  const packet = (await f.engine.commands())[0];
+  assert.equal(packet.command.requires_approval, false);
+  assert.equal(packet.action_receipt, undefined);
+  assert.equal(packet.session_receipt.challenge.scope.action_policy.payment_limit_cents, 5000);
+});
+
+test('automatic sessions deny disabled communications, payments and uncertain checks without another approval', async () => {
+  for (const assessment of [{decision: 'confirm'}, {decision: 'allow'}, {decision: 'allow', effect: 'communication', payment_cents: 0}, {decision: 'allow', effect: 'payment', payment_cents: 100}]) {
+    const f = await fixture({...spec, interaction: 'automatic'});
+    await f.activate(); await f.engine.publishView(f.id, published);
+    const proposed = await f.propose({type: 'click', ref: 'b'.repeat(32)});
+    const result = await f.engine.checkAction(f.id, {command_id: proposed.last_command.id, ...assessment});
+    assert.equal(result.status, 'active'); assert.equal(result.last_command.status, 'failed');
+    assert.deepEqual(await f.engine.commands(), []);
+    assert.equal((await f.engine.get(f.id)).action_challenge, undefined);
+  }
+});
+
+test('payment limits cover the cumulative session debit and claimed payments are never refunded by uncertain outcomes', async () => {
+  const f = await fixture({...spec, interaction: 'automatic'});
+  await f.engine.chooseActionPolicy(f.id, {scope_digest: (await f.engine.get(f.id)).scope_digest, action_policy: {communications: false, payments: true, payment_limit_cents: 5000}});
+  await f.activate(); await f.engine.publishView(f.id, published);
+  for (const [index, cents, allowed] of [[0, 3000, true], [1, 2500, false], [2, 2000, true], [3, 1, false]]) {
+    const proposed = await f.propose({type: 'click', ref: 'b'.repeat(32)}, 'payment-step-' + index);
+    await f.engine.checkAction(f.id, {command_id: proposed.last_command.id, decision: 'allow', effect: 'payment', payment_cents: cents});
+    const commands = await f.engine.commands(); assert.equal(commands.length, allowed ? 1 : 0);
+    if (allowed) {
+      assert.equal(commands[0].command.payment_cents, cents);
+      await f.engine.result(f.id, {command_id: proposed.last_command.id, ok: false, code: 'BRIDGE_ERROR'});
+      await f.engine.publishView(f.id, published);
+    }
+  }
+  assert.equal((await f.engine.get(f.id)).payment_committed_cents, 5000);
+});
+
 test('denied and revoked local checks never dispatch or resurrect a task', async () => {
   const f = await fixture({...spec, disclosure: 'local_planner', interaction: 'local_gate'});
   await f.activate(); await f.engine.publishView(f.id, published);

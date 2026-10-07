@@ -47,6 +47,10 @@ outputs/
 *.pem
 *.key
 # Generated prototype captures and raw test logs stay local.
+/.impeccable/mocks/
+/.impeccable/questions/
+/.impeccable/review/
+/:memory:.ses
 /legacy/v0.1/docs/test-output.txt
 /legacy/v0.1/docs/prototype-preview.png
 # Unrelated local files and build outputs; npm run build recreates these.
@@ -55,6 +59,8 @@ outputs/
 /src/generated-assets.mjs
 /public/protocol.mjs
 /public/browser-pairing.mjs
+/public/checkout.mjs
+/extension/checkout.mjs
 /public/qr.mjs
 /extension/protocol.mjs
 /extension/browser-pairing.mjs

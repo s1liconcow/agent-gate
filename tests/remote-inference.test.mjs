@@ -10,6 +10,10 @@ import {Engine} from '../src/engine.mjs';
 
 const profile = {id: 'a'.repeat(32), provider: 'openai', ...inferenceDefaults.openai};
 const settings = {profile, api_key: 'synthetic-test-key'};
+test('remote presets use current moving mini aliases', () => {
+  assert.equal(inferenceDefaults.openai.model, 'gpt-5.4-mini');
+  assert.equal(inferenceDefaults.anthropic.model, 'claude-haiku-4-5');
+});
 const task = {goal: 'Summarize Ali’s daycare message.', origins: ['https://mail.example'], permissions: ['read', 'click'], ttl_seconds: 300, disclosure: 'local_planner', interaction: 'local_gate', inference: profile};
 const ref = n => n.toString(16).padStart(32, '0');
 const snapshot = {origin: task.origins[0], controls: [{ref: ref(4), label: 'Send payment', role: 'button', value: 'PRIVATE_EXISTING_VALUE'}], blocks: [
@@ -53,6 +57,22 @@ test('remote responses cannot invent sources, broaden verifier selection or bypa
   const payment = {...task,goal:'Send 200 USD to Ali for daycare.'}, view = {origin:task.origins[0],text:'',controls:[{ref:ref(4),role:'button',label:'Send payment',approval:'per_action'}]};
   const decision = await new ModelRuntime(planner).request('check_action',{task:payment,view,action:{type:'click',ref:ref(4)},staged:[],submit:true});
   assert.equal(decision.decision,'confirm'); planner.destroy();
+});
+test('automatic remote guardians receive signed optional actions and agree on the USD debit before dispatch', async () => {
+  const payment = {...task, permissions: ['read','click'], interaction:'automatic', goal:'Pay Ali $200.00 for daycare.', action_policy:{communications:false,payments:true,payment_limit_cents:20000}};
+  const view = {origin:task.origins[0],text:'Pay Ali $200.00 for daycare.',controls:[{ref:ref(4),role:'button',label:'Pay $200.00',approval:'per_action'}]};
+  const requests = [];
+  const planner = new LocalPlanner(remoteModelAPI(settings,{fetcher:async (url, options) => {
+    const body = JSON.parse(options.body), input = JSON.parse(body.messages[1].content); requests.push(input);
+    assert.equal(body.response_format.json_schema.schema.properties.payment_cents.type,'integer');
+    return response({within_purpose:true,decision:'allow',effect:'payment',payment_cents:20000});
+  }}));
+  try {
+    const result = await new ModelRuntime(planner).request('check_action',{task:payment,view,action:{type:'click',ref:ref(4)},staged:[],submit:true});
+    assert.deepEqual(result,{ok:true,decision:'allow',effect:'payment',payment_cents:20000});
+    assert.equal(requests.length,2);
+    for (const input of requests) { assert.deepEqual(input.action_policy,payment.action_policy); assert.equal(input.interaction,'automatic'); }
+  } finally { planner.destroy(); }
 });
 test('Anthropic uses its native schema transport and omits unsupported array constraints', async () => {
   let request;
@@ -106,14 +126,14 @@ test('legacy scopes remain local and mismatched provider settings cannot select 
 test('saved keys stay desktop-only and cannot be reused when the endpoint or model changes',async()=>{
   const store=new Memory(); globalThis.chrome={storage:{local:{get:async k=>({[k]:await store.get(k)}),set:async values=>{for(const [k,v] of Object.entries(values))await store.put(k,v);},remove:async k=>store.delete(k)}}};
   const registered=[];const register=async value=>registered.push(value);
-  const input={provider:'openai',...inferenceDefaults.openai,api_key:settings.api_key,consent:true};
-  await assert.rejects(saveInference({...input,consent:false},register));
-  await assert.rejects(saveInference({provider:'cloudflare',endpoint:'https://api.cloudflare.com/client/v4/accounts/'+'b'.repeat(32)+'/ai/v1/chat/completions',model:inferenceDefaults.cloudflare.model,format:'prompt_json',api_key:'synthetic-cloudflare-token',consent:true},register),{code:'INFERENCE_UNAVAILABLE'});
+  const input={provider:'openai',...inferenceDefaults.openai,api_key:settings.api_key};
+  await assert.rejects(saveInference({provider:'cloudflare',endpoint:'https://api.cloudflare.com/client/v4/accounts/'+'b'.repeat(32)+'/ai/v1/chat/completions',model:inferenceDefaults.cloudflare.model,format:'prompt_json',api_key:'synthetic-cloudflare-token'},register),{code:'INFERENCE_UNAVAILABLE'});
   assert.equal(await store.get('inference_settings'),undefined);
   const first=await saveInference(input,register);assert.equal(first.has_key,true);assert.ok(!JSON.stringify(first).includes(settings.api_key));assert.ok(!JSON.stringify(registered).includes(settings.api_key));
+  assert.equal(await store.get('inference_preference'),undefined);
   const same=await saveInference({...input,api_key:''},register);assert.deepEqual(same,first);
   await assert.rejects(saveInference({...input,model:'new-model',api_key:''},register),{code:'INFERENCE_AUTH_FAILED'});
-  await saveInference({provider:'local'},register);assert.equal(await store.get('inference_settings'),undefined);assert.deepEqual(registered.at(-1),{inference:null});
+  await saveInference({provider:'local'},register);assert.equal(await store.get('inference_settings'),undefined);assert.equal(await store.get('inference_preference'),'local');assert.deepEqual(registered.at(-1),{inference:null});
 });
 test('configured provider is phone-signed, immutable, owner-controlled and removed when browser access ends',async()=>{
   const db=new Memory();await db.put('browser:desktop',{status:'active',expires_at:Date.now()+60000});

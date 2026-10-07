@@ -30,6 +30,19 @@ test('the purpose gate retains only exact eligible sources above the fixed proba
  for(const source_kind of [undefined,null,'message_body','inbox_sender'])assert.deepEqual((await adjudicatePurposeRead(task,request,origin,{capture:()=>({...capture(),blocks:[{...capture().blocks[0],source_kind}]}),prove,classify:async()=>{throw new Error('Unsupported source role reached inference.');}})).items,[]);
 });
 
+test('one-time-code disclosure requires the purpose classifier and a current source',async()=>{
+ const text='Your one-time sign-in code is 123456.';
+ const codeTask={...task,goal:'Find the one-time sign-in code for my requested login.'};
+ const codeRequest={...request,need:'Read the one-time sign-in code.'};
+ const codeCapture=()=>({...capture(),blocks:[{...capture().blocks[0],text}]});
+ let classifications=0,proofs=0;
+ const options={capture:codeCapture,classify:async row=>{classifications++;assert.equal(row.text,text);assert.equal(row.need,codeRequest.need);return row.goal===codeTask.goal ? .99 : .01;},prove:async ids=>{proofs++;return prove(ids);}};
+ assert.equal((await adjudicatePurposeRead(codeTask,codeRequest,origin,options)).items[0].text,text);
+ assert.deepEqual((await adjudicatePurposeRead(task,codeRequest,origin,options)).items,[]);
+ assert.equal(classifications,2);assert.equal(proofs,1);
+ await assert.rejects(adjudicatePurposeRead(codeTask,codeRequest,origin,{...options,prove:async()=>({current:false})}));
+});
+
 test('capture, purpose inference and original-source proof share a deadline; stale and late results cannot release',async()=>{
  await assert.rejects(adjudicatePurposeRead(task,request,origin,{capture,classify:async()=>.999,prove:async()=>({current:false})}));
  await assert.rejects(adjudicatePurposeRead(task,request,origin,{capture,classify:()=>new Promise(resolve=>setTimeout(()=>resolve(.999),30)),prove,milliseconds:5}));

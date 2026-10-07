@@ -3,7 +3,20 @@ import {parseXPath} from './xpath.mjs';
 import {readGrants,grantForRead} from './read-grants.mjs';
 export {grantForRead};
 export const granularDisclosure=value=>['granular','bounded'].includes(value);
-export const purposeDisclosure=task=>task?.disclosure==='granular'&&task.inference?.provider==='purpose_encoder';
+export const purposeDisclosure=task=>task?.disclosure==='granular'&&['purpose_encoder','purpose_browser'].includes(task.inference?.provider);
+export const checksActionPurpose = task => task?.disclosure === 'local_planner' && ['automatic', 'local_gate'].includes(task.interaction);
+export const defaultActionPolicy = Object.freeze({communications: false, payments: false, payment_limit_cents: 0});
+export function actionPolicy(value) {
+  exact(value, ['communications', 'payments', 'payment_limit_cents']);
+  if (typeof value.communications !== 'boolean' || typeof value.payments !== 'boolean' || !Number.isSafeInteger(value.payment_limit_cents) || value.payment_limit_cents < 0 || value.payment_limit_cents > 100000000 || (value.payments ? value.payment_limit_cents === 0 : value.payment_limit_cents !== 0)) fail('INVALID_SCOPE', 'Choose optional communications and a positive USD session limit for payments.');
+  return {...value};
+}
+export function automaticActionAllowed(task, assessment) {
+  if (!['other', 'communication', 'payment'].includes(assessment.effect) || !Number.isSafeInteger(assessment.payment_cents) || assessment.payment_cents < 0) return false;
+  const policy = task.action_policy || defaultActionPolicy;
+  if (assessment.effect === 'payment') return policy.payments && assessment.payment_cents > 0 && assessment.payment_cents <= policy.payment_limit_cents;
+  return assessment.payment_cents === 0 && (assessment.effect !== 'communication' || policy.communications);
+}
 export class GateError extends Error {
   constructor(code, message, status = 400) { super(message); this.code = code; this.status = status; }
 }
@@ -27,23 +40,34 @@ export function origin(value) {
   if (u.username || u.password || u.pathname !== '/' || u.search || u.hash || (u.protocol !== 'https:' && !(u.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(u.hostname)))) fail('INVALID_ORIGIN', 'Use an HTTPS origin without a path, or a loopback demo origin.');
   return u.origin;
 }
+export function coordinator(value) {
+  let url; try { url = new URL(value); } catch { fail('INVALID_ORIGIN', 'Provide a valid coordinator URL.'); }
+  const base = origin(url.origin);
+  if (url.username || url.password || url.search || url.hash || (url.pathname !== '/' && !/^\/u\/[a-f0-9]{32}$/.test(url.pathname))) fail('INVALID_ORIGIN', 'Use the exact coordinator URL from your invitation.');
+  return base + (url.pathname === '/' ? '' : url.pathname);
+}
 export function scope(value) {
-  exact(value, ['goal', 'origins', 'permissions', 'ttl_seconds', ...['disclosure', 'interaction', 'start_url', 'inference','read_grants'].filter(key => Object.hasOwn(value || {}, key))]);
-  if (value.disclosure !== undefined && !['manual', 'local_planner', 'granular','bounded'].includes(value.disclosure)) fail('INVALID_SCOPE', 'Choose manual, local_planner, experimental granular or owner-granted bounded disclosure.');
-  if (value.interaction !== undefined && !['local_gate', 'every_action'].includes(value.interaction)) fail('INVALID_SCOPE', 'Choose local purpose checks or approval for every action.');
-  if (value.interaction === 'local_gate' && value.disclosure !== 'local_planner') fail('INVALID_SCOPE', 'Local action checks require local-planner disclosure.');
+  exact(value, ['goal', 'origins', 'permissions', 'ttl_seconds', ...['disclosure', 'interaction', 'start_url', 'inference','read_grants', 'action_policy'].filter(key => Object.hasOwn(value || {}, key))]);
+  const disclosure = value.disclosure === undefined ? 'local_planner' : value.disclosure;
+  if (!['local_planner', 'granular','bounded'].includes(disclosure)) fail('INVALID_SCOPE', 'Choose automatic local_planner, granular or bounded disclosure.');
+  if (value.interaction !== undefined && !['automatic', 'local_gate', 'every_action'].includes(value.interaction)) fail('INVALID_SCOPE', 'Choose automatic actions, local purpose checks with confirmation, or approval for every action.');
+  if (value.interaction === 'local_gate' && disclosure !== 'local_planner') fail('INVALID_SCOPE', 'Local action checks require local-planner disclosure.');
   if (!Array.isArray(value.origins) || value.origins.length < 1 || value.origins.length > 5) fail('INVALID_SCOPE', 'Approve one to five exact website origins.');
   if (!Array.isArray(value.permissions) || value.permissions.length < 1 || value.permissions.some(x => !['read', 'fill', 'click', 'navigate'].includes(x))) fail('INVALID_SCOPE', 'Permissions are read, fill, click and navigate.');
   if (!Number.isInteger(value.ttl_seconds) || value.ttl_seconds < 60 || value.ttl_seconds > 600) fail('INVALID_SCOPE', 'Session duration must be 60 to 600 seconds.');
-  const task = {goal: text(value.goal, 8), origins: [...new Set(value.origins.map(origin))], permissions: [...new Set(value.permissions)].sort(), ttl_seconds: value.ttl_seconds, ...(value.disclosure ? {disclosure: value.disclosure} : {}), ...(value.interaction ? {interaction: value.interaction} : {})};
+  const task = {goal: text(value.goal, 8), origins: [...new Set(value.origins.map(origin))], permissions: [...new Set(value.permissions)].sort(), ttl_seconds: value.ttl_seconds, disclosure, ...(value.interaction ? {interaction: value.interaction} : {})};
+  if (value.action_policy !== undefined) {
+    if (task.interaction !== 'automatic' || disclosure !== 'local_planner') fail('INVALID_SCOPE', 'Optional communications and payments require automatic whole-page tasks.');
+    task.action_policy = actionPolicy(value.action_policy);
+  }
   if (value.start_url !== undefined) task.start_url = scopedUrl(value.start_url, task);
   // Omit this field for legacy/local receipts so their canonical signatures stay valid.
   if (value.inference !== undefined) {
     if (!['local_planner', 'granular'].includes(task.disclosure)) fail('INVALID_SCOPE', 'Inference requires automatic disclosure.');
     task.inference = inferenceProfile(value.inference);
   }
-  if (task.disclosure === 'granular' && (!['openjev','purpose_encoder'].includes(task.inference?.provider) || !task.permissions.includes('read') || task.permissions.some(p => !['read', 'navigate'].includes(p)) || task.interaction !== 'every_action')) fail('INVALID_SCOPE', 'Granular reads require an owner-configured decision provider, read/navigate permissions and every_action approval.');
-  if (['openjev','purpose_encoder'].includes(task.inference?.provider) && task.disclosure !== 'granular') fail('INVALID_SCOPE', 'This classifier supports granular reads. Request disclosure=granular.');
+  if (task.disclosure === 'granular' && (!['openjev','purpose_encoder','purpose_browser'].includes(task.inference?.provider) || !task.permissions.includes('read') || task.permissions.some(p => !['read', 'navigate'].includes(p)) || !['automatic', 'every_action'].includes(task.interaction))) fail('INVALID_SCOPE', 'Granular reads require an owner-configured decision provider, read/navigate permissions and automatic or every_action interaction.');
+  if (['openjev','purpose_encoder','purpose_browser'].includes(task.inference?.provider) && task.disclosure !== 'granular') fail('INVALID_SCOPE', 'This classifier supports granular reads. Request disclosure=granular.');
   if(value.read_grants!==undefined&&task.disclosure!=='bounded')fail('INVALID_SCOPE','Read grants require bounded disclosure.');
   if(task.disclosure==='bounded') {
     if(task.inference||task.interaction!=='every_action'||!task.permissions.includes('read')||task.permissions.some(p=>!['read','navigate'].includes(p)))fail('INVALID_SCOPE','Bounded grants permit read/navigate with exact navigation approval and local enforcement.');
@@ -52,16 +76,21 @@ export function scope(value) {
   return task;
 }
 export const inferenceDefaults = {
-  openai: {endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4.1-mini', format: 'schema'},
-  anthropic: {endpoint: 'https://api.anthropic.com/v1/messages', model: 'claude-haiku-4-5-20251001', format: 'schema'},
+  openai: {endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-5.4-mini', format: 'schema'},
+  anthropic: {endpoint: 'https://api.anthropic.com/v1/messages', model: 'claude-haiku-4-5', format: 'schema'},
   cloudflare: {endpoint: '', model: '@cf/meta/llama-3.1-8b-instruct-fp8-fast', format: 'prompt_json'},
   openai_compatible: {endpoint: '', model: '', format: 'schema'},
   openjev: {endpoint: 'https://api.codiv.ai/v1/systemone', model: 'openjev-0.1', format: 'decision'},
-  purpose_encoder: {endpoint:'http://127.0.0.1:8794/v1/purpose',model:'',format:'classifier'}
+  purpose_encoder: {endpoint:'http://127.0.0.1:8794/v1/purpose',model:'agentgate-purpose-encoder-19874b6a4cb8bddb',format:'classifier'},
+  purpose_browser: {endpoint: 'browser://purpose', model: '', format: 'classifier'}
 };
 export function inferenceProfile(value) {
   exact(value, ['id', 'provider', 'endpoint', 'model', 'format']);
   if (!/^[a-f0-9]{32}$/.test(value.id) || !Object.hasOwn(inferenceDefaults, value.provider)) fail('INVALID_INFERENCE', 'Choose a supported inference provider.');
+  if (value.provider === 'purpose_browser') {
+    if (value.endpoint !== 'browser://purpose' || value.format !== 'classifier' || !/^agentgate-purpose-browser-[a-f0-9]{16}$/.test(value.model)) fail('INVALID_INFERENCE', 'Pin the trained Chrome classifier.');
+    return {id: value.id, provider: value.provider, endpoint: value.endpoint, model: value.model, format: value.format};
+  }
   if(value.provider==='purpose_encoder') {
     let local;try{local=new URL(value.endpoint);}catch{fail('INVALID_INFERENCE','Use the local purpose service.');}
     if(local.protocol!=='http:'||local.hostname!=='127.0.0.1'||local.username||local.password||local.search||local.hash||local.pathname!=='/v1/purpose'||value.format!=='classifier'||!/^[a-z0-9-]{1,100}$/.test(value.model)||!/^agentgate-purpose-encoder-[a-f0-9]{16}$/.test(value.model))fail('INVALID_INFERENCE','Pin the local purpose checkpoint at literal http://127.0.0.1:PORT/v1/purpose.');
@@ -93,7 +122,7 @@ export function domRequest(input) {
 }
 export function purposeDomRequest(request) {
   const steps=parseXPath(request.xpath);
-  if(request.limit!==1||!Number.isInteger(request.offset)||request.offset<0||request.offset>100||!['span','p','h1','h2','h3','h4','h5','h6','label','time'].includes(steps.at(-1).tag))fail('OUT_OF_SCOPE','Request one bounded text field for the purpose classifier.',403);
+  if(request.limit!==1||!Number.isInteger(request.offset)||request.offset<0||request.offset>100||!['span','p','h1','h2','h3','h4','h5','h6','label','time','li','dt','dd','td','th'].includes(steps.at(-1).tag))fail('OUT_OF_SCOPE','Request one bounded text field for the purpose classifier.',403);
 }
 export function view(value, task) {
   exact(value, ['origin', 'text', 'controls']);
@@ -120,7 +149,7 @@ export function action(value, task, approvedView) {
   if (value.type === 'fill' && (typeof value.value !== 'string' || value.value.length > 2000)) fail('INVALID_VALUE', 'Field values must be strings of at most 2,000 characters.');
   return {...value};
 }
-export const needsApproval = (action, approvedView) => action.type !== 'fill' || approvedView?.controls.find(c => c.ref === action.ref)?.approval !== 'session';
+export const needsApproval = (action, approvedView, task) => task?.interaction !== 'automatic' && (action.type !== 'fill' || approvedView?.controls.find(c => c.ref === action.ref)?.approval !== 'session');
 export const stagedFields = (approvedView, fills) => (approvedView?.controls || []).filter(c => Object.hasOwn(fills, c.ref)).map(c => ({ref: c.ref, label: c.label, value: fills[c.ref]}));
 export function b64url(bytes) { return btoa(String.fromCharCode(...new Uint8Array(bytes))).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, ''); }
 export function unbase64(value) {

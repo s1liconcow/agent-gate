@@ -1,5 +1,9 @@
 # Purpose-conditioned local classifier
 
+The [Chrome classifier](BROWSER_CLASSIFIER.md) adds an in-browser runtime and
+thirteen-workflow training corpus. The history below records the original desktop
+inbox experiments.
+
 The previous explicit-field-grant path does not meet the user's requirement.
 The required decision is whether the actual evidence is necessary under the
 signed high-level purpose. Topic similarity and source permission are insufficient.

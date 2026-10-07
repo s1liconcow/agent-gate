@@ -1,8 +1,8 @@
-import {canonical, b64url, exact, importPhoneKey, verifyReceipt, origin} from './protocol.mjs';
+import {canonical, b64url, exact, importPhoneKey, verifyReceipt, coordinator} from './protocol.mjs';
 export function pairingChallenge(challenge) {
   exact(challenge, ['version', 'stage', 'browser_id', 'nonce', 'name', 'extension_origin', 'coordinator', 'credential_hash', 'connection_ttl_seconds', 'replace_existing', 'expires_at']);
   if (challenge.connection_ttl_seconds !== 90 * 86400 || challenge.replace_existing !== true) throw new Error('Unexpected browser access policy.');
-  if (challenge.version !== 1 || challenge.stage !== 'browser_pairing' || !/^[a-f0-9]{32}$/.test(challenge.browser_id) || !/^[a-f0-9]{32}$/.test(challenge.nonce) || typeof challenge.credential_hash !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(challenge.credential_hash) || !/^chrome-extension:\/\/[a-p]{32}$/.test(challenge.extension_origin) || typeof challenge.name !== 'string' || !challenge.name.length || challenge.name.length > 80 || !Number.isSafeInteger(challenge.expires_at) || origin(challenge.coordinator) !== challenge.coordinator) throw new Error('Invalid browser pairing challenge.');
+  if (challenge.version !== 1 || challenge.stage !== 'browser_pairing' || !/^[a-f0-9]{32}$/.test(challenge.browser_id) || !/^[a-f0-9]{32}$/.test(challenge.nonce) || typeof challenge.credential_hash !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(challenge.credential_hash) || !/^chrome-extension:\/\/[a-p]{32}$/.test(challenge.extension_origin) || typeof challenge.name !== 'string' || !challenge.name.length || challenge.name.length > 80 || !Number.isSafeInteger(challenge.expires_at) || coordinator(challenge.coordinator) !== challenge.coordinator) throw new Error('Invalid browser pairing challenge.');
   return challenge;
 }
 function bytes(value) { return Uint8Array.from(atob(value.replaceAll('-', '+').replaceAll('_', '/')), c => c.charCodeAt(0)); }

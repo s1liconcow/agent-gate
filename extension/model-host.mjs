@@ -4,8 +4,8 @@ import {modelPhases} from './model-phases.mjs';
 import {LocalPlanner} from './planner.mjs';
 import {remoteModelAPI, inferenceError} from './remote-model.mjs';
 import {inferenceSettings, approvedInference} from './inference-settings.mjs';
+import {ensureLocalDocument} from './offscreen-host.mjs';
 const runtime = new ModelRuntime();
-let creating;
 export async function localModel(type, input = {}, {onStage = () => {}, beforeInference} = {}) {
   const settings = await inferenceSettings();
   if (type === 'availability' && settings) return {ok: true, availability: 'available'};
@@ -27,10 +27,7 @@ export async function localModel(type, input = {}, {onStage = () => {}, beforeIn
     };
     chrome.runtime.onMessage.addListener(progress);
     try {
-      if (!await abortable(() => chrome.runtime.getContexts({contextTypes: ['OFFSCREEN_DOCUMENT']}).then(items => items.length), signal)) {
-        creating ||= deadline(() => chrome.offscreen.createDocument({url: 'local-agent.html', reasons: ['DOM_SCRAPING'], justification: 'Filter DOM snapshots from phone-approved browser tasks and check their proposed actions with the document-only local AI API.'}), 15000).finally(() => { creating = null; });
-        await abortable(() => creating, signal);
-      }
+      await ensureLocalDocument(signal);
       const result = await abortable(() => chrome.runtime.sendMessage({target: 'local_agent', type, ...input, request_id: requestId}), signal);
       if (!result?.ok) { const error = new Error('The local agent withheld this operation.'); error.code = result?.code || 'MODEL_UNAVAILABLE'; throw error; }
       return result;

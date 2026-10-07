@@ -21,7 +21,11 @@ export class ModelRuntime {
           if (availability !== 'available') { const error = new Error('The local model is not ready.'); error.code = 'MODEL_UNAVAILABLE'; throw error; }
           if (!this.planner.base || !this.planner.checker || !this.planner.guardian || !this.planner.itemChecker || !this.planner.controlBase || !this.planner.controlChecker) { progress('model_startup'); await this.planner.enable(() => {}, signal); }
           if (type === 'plan') return {ok: true, ids: (await this.planner.plan(input.snapshot, input.task, input.need, signal)).ids};
-          if (type === 'check_action') { progress('action_check'); return {ok: true, decision: await this.planner.checkAction(input.task, input.view, input.action, input.staged, input.submit, signal)}; }
+          if (type === 'check_action') {
+            progress('action_check');
+            const result = await this.planner.checkAction(input.task, input.view, input.action, input.staged, input.submit, signal);
+            return {ok: true, ...(typeof result === 'string' ? {decision: result} : result)};
+          }
           throw new Error('Unsupported local agent request.');
         } finally { signal.removeEventListener('abort', reset); this.planner.onStage = () => {}; }
       };

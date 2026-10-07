@@ -1,5 +1,5 @@
 import {prepareSnapshot, selectedView, validateSelection, intersectReview, selectionPrompt, selectionSchema, verificationPrompt, verificationSchema, controlSelectionPrompt, controlVerificationPrompt, itemVerificationPrompt, itemVerificationSchema, validateItemReview} from './disclosure.mjs';
-import {checkedActionDecision, guardPrompt, guardSchema} from './action-guard.mjs';
+import {checkedActionAssessment, guardPrompt, guardSchema, automaticGuardSchema} from './action-guard.mjs';
 import {abortable, dispose} from './deadline.mjs';
 import {remoteCodes} from './remote-model.mjs';
 const options = {expectedInputs: [{type: 'text', languages: ['en']}], expectedOutputs: [{type: 'text', languages: ['en']}]};
@@ -7,7 +7,7 @@ export class LocalPlanner {
   constructor(api = globalThis.LanguageModel, diagnostics = false) { this.api = api; this.diagnostics = diagnostics; this.base = null; this.checker = null; this.guardian = null; this.itemChecker = null; this.controlBase = null; this.controlChecker = null; this.onStage = () => {}; }
   async availability() { return this.api ? this.api.availability(options) : 'unavailable'; }
   async enable(progress = () => {}, signal) {
-    if (await abortable(() => this.availability(), signal) === 'unavailable') throw new Error('Chrome on-device AI is unavailable on this browser or device. Nothing was shared. Use local manual review.');
+    if (await abortable(() => this.availability(), signal) === 'unavailable') throw new Error('Chrome on-device AI is unavailable on this browser or device. Choose another inference provider in extension setup.');
     const created = [];
     this.destroy();
     try {
@@ -20,25 +20,26 @@ export class LocalPlanner {
       }
       signal?.throwIfAborted();
       [this.base, this.checker, this.guardian, this.itemChecker, this.controlBase, this.controlChecker] = created;
-    } catch (error) { created.forEach(dispose); if (signal?.aborted) throw signal.reason; throw new Error('The on-device model could not start. Nothing was shared. Use local manual review.'); }
+    } catch (error) { created.forEach(dispose); if (signal?.aborted) throw signal.reason; throw new Error('The on-device model could not start. Check inference setup or choose another provider.'); }
   }
   async checkAction(task, view, proposed, staged, submit = false, signal) {
     if (!this.guardian) throw new Error('The local action guardian is not ready.');
     const instances = [];
     try {
-      const input = JSON.stringify({approved_task: task.goal, allowed_origins: task.origins, minimal_view: view, proposed_action: proposed, staged_fields: staged});
+      const input = JSON.stringify({approved_task: task.goal, allowed_origins: task.origins, allowed_permissions: task.permissions, interaction: task.interaction || 'every_action', action_policy: task.action_policy, minimal_view: view, proposed_action: proposed, staged_fields: staged, native_submit: submit});
       const decisions = [];
       for (let i = 0; i < 2; i++) {
         const instance = await abortable(() => this.guardian.clone({signal}), signal, dispose); instances.push(instance);
-        decisions.push(JSON.parse(await abortable(() => instance.prompt(input, {responseConstraint: guardSchema, signal}), signal)));
+        decisions.push(JSON.parse(await abortable(() => instance.prompt(input, {responseConstraint: task.interaction === 'automatic' ? automaticGuardSchema : guardSchema, signal}), signal)));
       }
-      return checkedActionDecision(task, view, proposed, decisions[0], decisions[1], submit);
+      const assessment = checkedActionAssessment(task, view, proposed, decisions[0], decisions[1], submit);
+      return task.interaction === 'automatic' ? assessment : assessment.decision;
     } finally { instances.forEach(dispose); }
   }
   async plan(snapshot, task, need = '', signal) {
     if (!this.base || !this.checker || !this.itemChecker || !this.controlBase || !this.controlChecker) throw new Error('Enable Chrome on-device AI from the desktop extension first.');
     const prepared = prepareSnapshot(snapshot, task);
-    if (!prepared.entries.length) throw new Error('No eligible page elements. Handle login/MFA or review this page locally.');
+    if (!prepared.entries.length) throw new Error('No eligible page elements. Complete website login or request a task on a supported page.');
     let selection, verification, stage = 'selection'; this.lastFailure = null;
     const instances = []; let approvedText = [];
     // Opaque browser refs stay at the deterministic boundary. Short local IDs

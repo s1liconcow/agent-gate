@@ -7,6 +7,11 @@ import {registerInference, configuredInference} from './inference.mjs';
 import {withOAuth, oauthRoute} from './oauth.mjs';
 import {assetResponse} from './generated-assets.mjs';
 import {digest, exact, fail, GateError, random} from '../shared/protocol.mjs';
+import {tenantPath, tenantWellKnown} from './tenant.mjs';
+import {Registry} from './registry.mjs';
+import {tenantOAuthRoute} from './tenant-oauth.mjs';
+
+export {Registry};
 
 const headers = {'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer'};
 const json = (value, status = 200) => new Response(JSON.stringify(value), {status, headers});
@@ -30,6 +35,13 @@ async function body(request) {
 }
 export class Gate extends DurableObject {
   constructor(ctx, env) { super(ctx, env); this.engine = new Engine(ctx.storage); this.connectors = new Connectors(ctx.storage); this.browsers = new Browsers(ctx.storage); this.tickets = new Map(); }
+  async initializeAccount(id, pairingHash) {
+    if (!/^[a-f0-9]{32}$/.test(id) || !/^[A-Za-z0-9_-]{43}$/.test(pairingHash)) throw new Error('Invalid account enrollment.');
+    await this.ctx.blockConcurrencyWhile(async () => {
+      if (await this.ctx.storage.get('account_id')) throw new Error('Account already initialized.');
+      await this.ctx.storage.put({account_id: id, pairing_hash: pairingHash});
+    });
+  }
   async locked(callback) {
     return this.ctx.blockConcurrencyWhile(async () => { try { return {result: await callback()}; } catch (error) { return {error: {code: error.code || 'FAILED_CLOSED', message: error.code ? error.message : 'The operation failed closed.', status: error.status || 500}}; } });
   }
@@ -47,7 +59,7 @@ export class Gate extends DurableObject {
   }
   async agentCall(path, data, principal = 'cli') {
     if (path === 'sessions' && data !== undefined) { const result = await this.engine.create(data, principal, await configuredInference(this.ctx.storage)); this.ctx.waitUntil(this.notify()); return result; }
-    const match = path.match(/^sessions\/([a-f0-9]{32})(?:\/(actions|close|revoke|disclosure|dom))?$/);
+    const match = path.match(/^sessions\/([a-f0-9]{32})(?:\/(actions|close|revoke|disclosure|dom|checkout))?$/);
     if (!match) fail('NOT_FOUND', 'Unknown assistant endpoint.', 404);
     const [, id, operation] = match, item = await this.engine.get(id);
     if ((item.principal || 'cli') !== principal) fail('NOT_FOUND', 'Unknown session for this assistant connection.', 404);
@@ -55,6 +67,7 @@ export class Gate extends DurableObject {
     if (operation === 'actions' && data !== undefined) { const result = await this.engine.propose(id, data); if (result.status === 'awaiting_action') this.ctx.waitUntil(this.notify()); return result; }
     if (operation === 'disclosure' && data !== undefined) return this.engine.requestDisclosure(id, data);
     if (operation === 'dom' && data !== undefined) return this.engine.requestDOM(id, data);
+    if (operation === 'checkout' && data !== undefined) return this.engine.requestCheckout(id, data);
     if (['revoke', 'close'].includes(operation) && data !== undefined) { exact(data, []); return this.engine.end(id, operation === 'close' ? 'closed' : 'revoked'); }
     fail('NOT_FOUND', 'Unknown assistant operation.', 404);
   }
@@ -67,17 +80,19 @@ export class Gate extends DurableObject {
     if (role === 'owner') {
       if (!credential || !matches(await digest(credential), await this.ctx.storage.get('owner_hash'))) fail('UNAUTHORIZED', 'Pair this phone before approving requests.', 403);
     } else if (role === 'bridge') {
-      if (!await this.ctx.storage.get('legacy_bridge_retired') && matches(credential, this.env.BRIDGE_TOKEN)) return 'legacy';
+      if (!await this.ctx.storage.get('account_id') && !await this.ctx.storage.get('legacy_bridge_retired') && matches(credential, this.env.BRIDGE_TOKEN)) return 'legacy';
       return this.browsers.authorize(credential, browserOrigin(request));
-    } else if (!matches(credential, this.env[role.toUpperCase() + '_TOKEN'])) fail('UNAUTHORIZED', 'Use the credential for this role.', 403);
+    } else if (await this.ctx.storage.get('account_id') || !matches(credential, this.env[role.toUpperCase() + '_TOKEN'])) fail('UNAUTHORIZED', 'Use the credential for this role.', 403);
   }
   async fetch(request) {
     try {
+      const account = request.headers.get('X-AgentGate-Account');
+      if (account && account !== await this.ctx.storage.get('account_id')) fail('NOT_FOUND', 'Unknown account.', 404);
       const path = new URL(request.url).pathname;
       if (path === '/api/bridge/socket') return await this.socket(request);
       // Handle expected policy failures inside the lock: an uncaught exception here resets a DO.
       const result = await this.ctx.blockConcurrencyWhile(async () => { try { return await this.route(request); } catch (error) { return errorResponse(error); } });
-      if (path.endsWith('/actions') || path.endsWith('/approve') || path.endsWith('/check') || path.endsWith('/revoke') || path.endsWith('/close') || request.method==='POST'&&/^\/api\/agent\/sessions\/[a-f0-9]{32}\/(?:dom|disclosure)$/.test(path)) await this.dispatch();
+      if (path.endsWith('/actions') || path.endsWith('/approve') || path.endsWith('/check') || path.endsWith('/revoke') || path.endsWith('/close') || path.endsWith('/checkout') || path.endsWith('/checkout-prepare') || path.endsWith('/checkout-result') || request.method==='POST'&&/^\/api\/agent\/sessions\/[a-f0-9]{32}\/(?:dom|disclosure)$/.test(path)) await this.dispatch();
       return result;
     } catch (error) { return errorResponse(error); }
   }
@@ -87,7 +102,10 @@ export class Gate extends DurableObject {
     if (path === '/api/pair' && method === 'POST') {
       if (request.headers.get('Origin') !== url.origin) fail('UNAUTHORIZED', 'Pair through the approval app.', 403);
       const input = await body(request); exact(input, ['pairing_token', 'public_key']);
-      if (!matches(input.pairing_token, this.env.PAIRING_TOKEN)) fail('UNAUTHORIZED', 'The pairing code is invalid.', 403);
+      const account = await this.ctx.storage.get('account_id');
+      const expectedPairing = account ? await this.ctx.storage.get('pairing_hash') : this.env.PAIRING_TOKEN;
+      const suppliedPairing = account && typeof input.pairing_token === 'string' ? await digest(input.pairing_token) : input.pairing_token;
+      if (!matches(suppliedPairing, expectedPairing)) fail('UNAUTHORIZED', 'The pairing code is invalid.', 403);
       await this.engine.register(input.public_key);
       const token = random() + random(); await this.ctx.storage.put('owner_hash', await digest(token));
       await this.ctx.storage.setAlarm(Date.now() + 30000);
@@ -96,7 +114,10 @@ export class Gate extends DurableObject {
     if (path.startsWith('/api/browser/pairings')) {
       const extensionOrigin = browserOrigin(request);
       if (!/^chrome-extension:\/\/[a-p]{32}$/.test(extensionOrigin || '')) fail('UNAUTHORIZED', 'Pair from the Chrome extension.', 403);
-      if (path === '/api/browser/pairings' && method === 'POST') return json(await this.browsers.create(await body(request), extensionOrigin, url.origin), 201);
+      if (path === '/api/browser/pairings' && method === 'POST') {
+        const account = await this.ctx.storage.get('account_id');
+        return json(await this.browsers.create(await body(request), extensionOrigin, account ? url.origin + '/u/' + account : url.origin), 201);
+      }
       const pairing = path.match(/^\/api\/browser\/pairings\/([a-f0-9]{32})(?:\/(claim))?$/);
       if (!pairing) fail('NOT_FOUND', 'Unknown pairing endpoint.', 404);
       const credential = request.headers.get('Authorization')?.replace(/^Bearer /, '');
@@ -138,7 +159,7 @@ export class Gate extends DurableObject {
       }
       if (path === '/api/owner/sessions' && method === 'GET') {
         const items = await this.engine.list();
-        return json({sessions: items.map(item => ({...this.engine.public(item), scope: item.task, challenge: item.status === 'requested' ? item.challenge : item.status === 'awaiting_action' ? item.action_challenge : null}))});
+        return json({sessions: items.map(item => ({...this.engine.public(item), scope: item.task, challenge: item.status === 'requested' ? item.challenge : item.status === 'awaiting_action' ? item.action_challenge : item.status === 'awaiting_checkout' ? item.checkout.challenge : null}))});
       }
       if (path === '/api/owner/push-key' && method === 'GET') return json({public_key: this.env.VAPID_PUBLIC_KEY || null});
       if (path === '/api/owner/push' && method === 'POST') {
@@ -147,11 +168,12 @@ export class Gate extends DurableObject {
         if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password || endpoint.port || !['fcm.googleapis.com', 'updates.push.services.mozilla.com', 'web.push.apple.com'].includes(endpoint.hostname) || input.endpoint.length > 2000 || !/^[A-Za-z0-9_-]{80,100}$/.test(input.keys.p256dh) || !/^[A-Za-z0-9_-]{20,30}$/.test(input.keys.auth)) fail('INVALID_PUSH', 'Unsupported push subscription.');
         await this.ctx.storage.put('push', input); return json({subscribed: true});
       }
-      const route = path.match(/^\/api\/owner\/sessions\/([a-f0-9]{32})\/(approve|revoke)$/);
+      const route = path.match(/^\/api\/owner\/sessions\/([a-f0-9]{32})\/(approve|revoke|policy)$/);
       if (route && method === 'POST') {
+        if (route[2] === 'policy') return json(await this.engine.chooseActionPolicy(route[1], await body(request)));
         if (route[2] === 'revoke') { exact(await body(request), []); return json(await this.engine.end(route[1])); }
         const item = await this.engine.get(route[1]), receipt = await body(request);
-        return json(item.status === 'requested' ? await this.engine.approveSession(item.id, receipt) : await this.engine.approveAction(item.id, receipt));
+        return json(item.status === 'requested' ? await this.engine.approveSession(item.id, receipt) : item.status === 'awaiting_checkout' ? await this.engine.approveCheckout(item.id, receipt) : await this.engine.approveAction(item.id, receipt));
       }
     }
     if (role === 'bridge') {
@@ -162,13 +184,15 @@ export class Gate extends DurableObject {
         if (this.tickets.size >= 16) fail('TOO_MANY_CONNECTIONS', 'Too many bridge connection requests.', 429);
         this.tickets.set(ticket, {expires_at: Date.now() + 30000, browser_id: browserId, extension_origin: browserOrigin(request)}); return json({ticket});
       }
-      if (path === '/api/bridge/sessions' && method === 'GET') return json({sessions: (await this.engine.list()).filter(i => ['active', 'checking_action', 'awaiting_action', 'executing'].includes(i.status)).map(i => ({...this.engine.public(i), scope: i.task, session_receipt: i.session_receipt}))});
-      const route = path.match(/^\/api\/bridge\/sessions\/([a-f0-9]{32})\/(view|check|runtime|dom)$/);
+      if (path === '/api/bridge/sessions' && method === 'GET') return json({sessions: (await this.engine.list()).filter(i => ['active', 'checking_action', 'awaiting_action', 'executing', 'checkout_preparing', 'awaiting_checkout', 'checkout_executing'].includes(i.status)).map(i => ({...this.engine.public(i), scope: i.task, session_receipt: i.session_receipt}))});
+      const route = path.match(/^\/api\/bridge\/sessions\/([a-f0-9]{32})\/(view|check|runtime|dom|checkout-prepare|checkout-result)$/);
       if (route && method === 'POST') {
         const input = await body(request);
         if (route[2] === 'view') return json(await this.engine.publishView(route[1], input));
         if (route[2] === 'dom') return json(await this.engine.publishDOM(route[1], input));
         if (route[2] === 'runtime') return json(await this.engine.runtime(route[1], input));
+        if (route[2] === 'checkout-result') return json(await this.engine.checkoutResult(route[1], input));
+        if (route[2] === 'checkout-prepare') { const result = await this.engine.prepareCheckout(route[1], input); this.ctx.waitUntil(this.notify()); return json(result); }
         const result = await this.engine.checkAction(route[1], input);
         if (result.status === 'awaiting_action') this.ctx.waitUntil(this.notify());
         return json(result);
@@ -182,7 +206,7 @@ export class Gate extends DurableObject {
     const protocol = request.headers.get('Sec-WebSocket-Protocol'), ticket = protocol?.replace(/^agentgate-/, '');
     const item = this.tickets.get(ticket); this.tickets.delete(ticket);
     if (!item || item.expires_at <= Date.now() || request.headers.get('Upgrade') !== 'websocket' || requestOrigin !== item.extension_origin) fail('UNAUTHORIZED', 'Request a fresh single-use bridge ticket.', 403);
-    if (item.browser_id === 'legacy') { if (await this.ctx.storage.get('legacy_bridge_retired')) fail('UNAUTHORIZED', 'Connect the browser through QR pairing.', 403); }
+    if (item.browser_id === 'legacy') { if (await this.ctx.storage.get('account_id') || await this.ctx.storage.get('legacy_bridge_retired')) fail('UNAUTHORIZED', 'Connect the browser through QR pairing.', 403); }
     else if ((await this.browsers.get(item.browser_id)).status !== 'active') fail('UNAUTHORIZED', 'This browser connection has ended.', 403);
     for (const old of this.ctx.getWebSockets()) old.close(1000, 'Bridge replaced');
     const [client, server] = Object.values(new WebSocketPair()); this.ctx.acceptWebSocket(server, ['browser:' + item.browser_id]);
@@ -204,20 +228,21 @@ export class Gate extends DurableObject {
     const sockets = [];
     for (const ws of this.ctx.getWebSockets()) if (ws.readyState === 1) { if (await this.socketAllowed(ws)) sockets.push(ws); else ws.close(4001, 'Browser connection ended'); }
     if (!sockets.length) return;
-    const commands = await this.engine.commands(), checks = await this.engine.checks();
+    const commands = await this.engine.commands(), checks = await this.engine.checks(), checkouts = await this.engine.checkouts();
     const sessions = (await this.engine.list()).map(i => ({id: i.id, status: i.status}));
-    for (const ws of sockets) { try { ws.send(JSON.stringify({sessions, commands, checks})); } catch { /* closed socket */ } }
+    for (const ws of sockets) { try { ws.send(JSON.stringify({sessions, commands, checks, checkouts})); } catch { /* closed socket */ } }
   }
   async socketAllowed(ws) {
     const tag = this.ctx.getTags(ws).find(t => t.startsWith('browser:'));
-    if (!tag || tag === 'browser:legacy') return !await this.ctx.storage.get('legacy_bridge_retired');
+    if (!tag || tag === 'browser:legacy') return !await this.ctx.storage.get('account_id') && !await this.ctx.storage.get('legacy_bridge_retired');
     try { return (await this.browsers.get(tag.slice(8))).status === 'active'; } catch { return false; }
   }
   async notify() {
     const sub = await this.ctx.storage.get('push');
     if (!sub || !this.env.VAPID_PRIVATE_KEY) return;
     try {
-      const payload = await buildPushPayload({data: JSON.stringify({title: 'AgentGate approval requested', body: 'Open AgentGate to review a browser task.'}), options: {ttl: 60}}, sub,
+      const account = await this.ctx.storage.get('account_id');
+      const payload = await buildPushPayload({data: JSON.stringify({url: account ? '/u/' + account + '/' : '/'}), options: {ttl: 60}}, sub,
         {subject: this.env.VAPID_SUBJECT || 'https://example.invalid/agentgate', publicKey: this.env.VAPID_PUBLIC_KEY, privateKey: this.env.VAPID_PRIVATE_KEY});
       const response = await fetch(sub.endpoint, {...payload, redirect: 'error'});
       if ([404, 410].includes(response.status)) await this.ctx.storage.delete('push');
@@ -227,15 +252,62 @@ export class Gate extends DurableObject {
 }
 
 const app = {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    if (url.pathname === '/api/signup' && request.method === 'POST') {
+      if (request.headers.get('Origin') !== url.origin) return json({error: 'Enroll from the beta invitation page.'}, 403);
+      let input;
+      try { input = await body(request); exact(input, ['invite']); }
+      catch { return json({error: 'Invalid invitation request.'}, 400); }
+      const answer = await env.REGISTRY.getByName('beta-registry-v1').enroll(input.invite);
+      if (answer.error) return json(answer, answer.status);
+      return json({...answer, account_url: url.origin + '/u/' + answer.account_id}, 201);
+    }
+    const tenant = tenantPath(url.pathname);
+    const known = tenant || tenantWellKnown(url.pathname);
+    if (known && !await env.REGISTRY.getByName('beta-registry-v1').hasAccount(known.id)) return new Response('Not found', {status: 404});
+    if (tenant?.path === '/manifest.webmanifest' && request.method === 'GET') {
+      const base = '/u/' + tenant.id + '/';
+      return new Response(JSON.stringify({name: 'AgentGate approvals', short_name: 'AgentGate', id: base, start_url: base, scope: base, display: 'standalone', background_color: '#0d1117', theme_color: '#0d1117', icons: [{src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any'}, {src: '/icon-192.png', sizes: '192x192', type: 'image/png'}, {src: '/icon-512.png', sizes: '512x512', type: 'image/png'}]}), {headers: {'Content-Type': 'application/manifest+json', 'Cache-Control': 'no-cache'}});
+    }
+    const tenantOAuth = await tenantOAuthRoute(request, env, ctx); if (tenantOAuth) return tenantOAuth;
+    if (tenant?.path.startsWith('/api/')) {
+      const headers = new Headers(request.headers); headers.set('X-AgentGate-Account', tenant.id);
+      url.pathname = tenant.path;
+      try {
+        if (request.method === 'POST') {
+          const input = await body(request);
+          headers.delete('Content-Length');
+          return env.GATE.getByName('account:' + tenant.id).fetch(new Request(url, {method: 'POST', headers, body: JSON.stringify(input)}));
+        }
+        return env.GATE.getByName('account:' + tenant.id).fetch(new Request(new Request(url, request), {headers}));
+      } catch (error) { return errorResponse(error); }
+    }
     const oauth = await oauthRoute(request, env); if (oauth) return oauth;
     if (url.pathname.startsWith('/api/')) return env.GATE.getByName('single-owner-v1').fetch(request);
-    const response = env.ASSETS ? await env.ASSETS.fetch(request) : assetResponse(request);
+    let assetRequest = request;
+    if (tenant) {
+      if (!['/', '/index.html', '/try.html', '/connect.html'].includes(tenant.path)) return new Response('Not found', {status: 404});
+      url.pathname = tenant.path === '/' ? '/index.html' : tenant.path;
+      assetRequest = new Request(url, request);
+    } else if (url.pathname === '/') {
+      url.pathname = '/index.html';
+      assetRequest = new Request(url, request);
+    }
+    const response = env.ASSETS ? await env.ASSETS.fetch(assetRequest) : assetResponse(assetRequest);
     const h = new Headers(response.headers);
     h.set('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
     h.set('Referrer-Policy', 'no-referrer'); h.set('X-Content-Type-Options', 'nosniff'); h.set('Cache-Control', 'no-cache');
+    if (tenant?.path === '/' && response.ok) {
+      h.delete('Content-Length');
+      const html = (await response.text()).replace('href="/manifest.webmanifest"', `href="/u/${tenant.id}/manifest.webmanifest"`).replace('href="/" aria-label="AgentGate home"', `href="/u/${tenant.id}/" aria-label="AgentGate home"`);
+      return new Response(html, {status: response.status, headers: h});
+    }
     return new Response(response.body, {status: response.status, headers: h});
   }
 };
-export default withOAuth(app);
+const legacy = withOAuth(app);
+export default {fetch(request, env, ctx) {
+  const path = new URL(request.url).pathname;
+  return tenantPath(path) || path.startsWith('/.well-known/oauth-authorization-server/u/') || path.startsWith('/.well-known/oauth-protected-resource/u/') ? app.fetch(request, env, ctx) : legacy.fetch(request, env, ctx);
+}};

@@ -10,6 +10,7 @@ for (const destination of ['public/xpath.mjs', 'extension/xpath.mjs']) await cop
 for (const destination of ['public/read-grants.mjs', 'extension/read-grants.mjs']) await copyFile(new URL('shared/read-grants.mjs', root), new URL(destination, root));
 await build({entryPoints: [fileURLToPath(new URL('shared/xpath.mjs', root))], bundle: true, format: 'iife', globalName: 'AgentGateXPath', platform: 'browser', outfile: fileURLToPath(new URL('extension/xpath.js', root))});
 for (const destination of ['public/browser-pairing.mjs', 'extension/browser-pairing.mjs']) await copyFile(new URL('shared/browser-pairing.mjs', root), new URL(destination, root));
+for (const destination of ['public/checkout.mjs', 'extension/checkout.mjs']) await copyFile(new URL('shared/checkout.mjs', root), new URL(destination, root));
 await build({stdin: {contents: "export {default} from 'qrcode';", resolveDir: fileURLToPath(root)}, bundle: true, format: 'esm', platform: 'browser', minify: true, outfile: fileURLToPath(new URL('extension/qr.mjs', root))});
 await copyFile(new URL('extension/qr.mjs', root), new URL('public/qr.mjs', root));
 await copyFile(new URL('shared/policy.mjs', root), new URL('extension/policy.mjs', root));

@@ -1,0 +1,90 @@
+// Run against a local Wrangler server after npm run setup: node tests/tenant-live.mjs
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {randomBytes, createHash, webcrypto} from 'node:crypto';
+import {canonical, digest} from '../shared/protocol.mjs';
+import {sealPairing, openPairing} from '../shared/browser-pairing.mjs';
+
+const site = process.env.AGENTGATE_TEST_URL || 'http://127.0.0.1:8790';
+const vars = Object.fromEntries((await readFile(new URL('../.dev.vars', import.meta.url), 'utf8')).trim().split('\n').map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
+const post = (url, value, headers = {}) => fetch(url, {method: 'POST', headers: {Origin: site, 'Content-Type': 'application/json', ...headers}, body: JSON.stringify(value), redirect: 'manual'});
+async function enroll() {
+  const response = await post(site + '/api/signup', {invite: vars.BETA_INVITE_TOKEN});
+  assert.equal(response.status, 201);
+  return response.json();
+}
+async function pair(account) {
+  const keys = await webcrypto.subtle.generateKey({name: 'ECDSA', namedCurve: 'P-256'}, false, ['sign', 'verify']);
+  const {kty, crv, x, y} = await webcrypto.subtle.exportKey('jwk', keys.publicKey);
+  const response = await post(account.account_url + '/api/pair', {pairing_token: account.pairing_token, public_key: {kty, crv, x, y}});
+  assert.equal(response.status, 200);
+  return {keys, publicKey: {kty, crv, x, y}, token: (await response.json()).owner_token};
+}
+const a = await enroll(), b = await enroll();
+assert.notEqual(a.account_id, b.account_id);
+const unknown = 'f'.repeat(32);
+assert.equal((await fetch(site + '/u/' + unknown + '/try.html')).status, 404);
+assert.equal((await fetch(site + '/.well-known/oauth-authorization-server/u/' + unknown)).status, 404);
+const phone = await pair(a);
+assert.equal((await (await fetch(a.account_url + '/api/health')).json()).paired, true);
+assert.equal((await (await fetch(b.account_url + '/api/health')).json()).paired, false);
+assert.equal((await fetch(b.account_url + '/api/owner/sessions', {headers: {Authorization: 'Bearer ' + phone.token}})).status, 403);
+assert.equal((await post(b.account_url + '/api/pair', {pairing_token: a.pairing_token, public_key: {kty: 'EC'}})).status, 403);
+assert.equal((await fetch(a.account_url + '/api/agent/sessions', {headers: {Authorization: 'Bearer ' + vars.AGENT_TOKEN}})).status, 403);
+assert.equal((await post(a.account_url + '/api/bridge/ticket', {}, {Authorization: 'Bearer ' + vars.BRIDGE_TOKEN, 'X-AgentGate-Extension': 'chrome-extension://' + 'a'.repeat(32)})).status, 403);
+
+const extensionOrigin = 'chrome-extension://' + 'a'.repeat(32), credential = randomBytes(32).toString('hex'), pairingSecret = randomBytes(32).toString('hex');
+const browserHeaders = {Origin: extensionOrigin, Authorization: 'Bearer ' + credential, 'X-AgentGate-Extension': extensionOrigin};
+const browserRequest = await post(a.account_url + '/api/browser/pairings', {name: 'Beta test Chrome', credential_hash: await digest(credential)}, browserHeaders);
+assert.equal(browserRequest.status, 201);
+const browser = await browserRequest.json();
+assert.equal(browser.challenge.coordinator, a.account_url);
+const pairingSignature = Buffer.from(await webcrypto.subtle.sign({name: 'ECDSA', hash: 'SHA-256'}, phone.keys.privateKey, new TextEncoder().encode(canonical(browser.challenge)))).toString('base64url');
+const receipt = {challenge: browser.challenge, signature: pairingSignature};
+const envelope = await sealPairing(pairingSecret, browser.challenge, phone.publicKey, receipt);
+const browserApproval = await post(a.account_url + '/api/owner/browsers/' + browser.id + '/approve', {receipt, envelope}, {Authorization: 'Bearer ' + phone.token});
+assert.equal(browserApproval.status, 200);
+const pendingBrowser = await fetch(a.account_url + '/api/browser/pairings/' + browser.id, {headers: browserHeaders});
+assert.equal(pendingBrowser.status, 200);
+assert.deepEqual(await openPairing(pairingSecret, browser.challenge, (await pendingBrowser.json()).envelope), phone.publicKey);
+assert.equal((await post(a.account_url + '/api/browser/pairings/' + browser.id + '/claim', {}, browserHeaders)).status, 200);
+assert.equal((await post(a.account_url + '/api/bridge/ticket', {}, browserHeaders)).status, 200);
+assert.equal((await post(b.account_url + '/api/bridge/ticket', {}, browserHeaders)).status, 403);
+
+const issuer = a.account_url, resource = issuer + '/mcp';
+const meta = await fetch(site + '/.well-known/oauth-authorization-server/u/' + a.account_id);
+assert.equal(meta.status, 200);
+assert.equal((await meta.json()).issuer, issuer);
+const protectedMeta = await fetch(site + '/.well-known/oauth-protected-resource/u/' + a.account_id + '/mcp');
+assert.equal(protectedMeta.status, 200);
+assert.equal((await protectedMeta.json()).resource, resource);
+const registered = await fetch(issuer + '/oauth/register', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({client_name: 'Tenant isolation test', redirect_uris: ['http://127.0.0.1:9999/callback'], grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], token_endpoint_auth_method: 'none'})});
+assert.equal(registered.status, 201);
+const client = await registered.json();
+const verifier = randomBytes(32).toString('base64url'), challenge = createHash('sha256').update(verifier).digest('base64url');
+const query = new URLSearchParams({response_type: 'code', client_id: client.client_id, redirect_uri: 'http://127.0.0.1:9999/callback', scope: 'browser:delegate offline_access', state: randomBytes(16).toString('hex'), code_challenge: challenge, code_challenge_method: 'S256', resource});
+const authorize = await fetch(issuer + '/authorize?' + query, {redirect: 'manual'});
+assert.equal(authorize.status, 302);
+const consentCookie = authorize.headers.get('set-cookie')?.split(';')[0];
+assert.ok(consentCookie);
+const id = new URL(authorize.headers.get('location'), issuer).hash.slice(9);
+assert.match(id, /^[a-f0-9]{32}$/);
+const pending = await fetch(issuer + '/api/owner/connectors', {headers: {Authorization: 'Bearer ' + phone.token}});
+assert.equal(pending.status, 200);
+const connector = (await pending.json()).connectors.find(item => item.id === id);
+assert.ok(connector?.challenge);
+const bytes = new TextEncoder().encode(canonical(connector.challenge));
+const signature = Buffer.from(await webcrypto.subtle.sign({name: 'ECDSA', hash: 'SHA-256'}, phone.keys.privateKey, bytes)).toString('base64url');
+const approved = await post(issuer + '/api/owner/connectors/' + id + '/approve', {challenge: connector.challenge, signature}, {Authorization: 'Bearer ' + phone.token});
+assert.equal(approved.status, 200);
+const completed = await post(issuer + '/oauth/complete/' + id, {}, {Cookie: consentCookie});
+assert.equal(completed.status, 200);
+const callback = new URL((await completed.json()).redirect);
+assert.equal(callback.searchParams.get('state'), query.get('state'));
+const token = await fetch(issuer + '/oauth/token', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: new URLSearchParams({grant_type: 'authorization_code', client_id: client.client_id, code: callback.searchParams.get('code'), redirect_uri: 'http://127.0.0.1:9999/callback', resource, code_verifier: verifier})});
+assert.equal(token.status, 200);
+const access = (await token.json()).access_token;
+const rpc = endpoint => fetch(endpoint, {method: 'POST', headers: {'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', Authorization: 'Bearer ' + access}, body: JSON.stringify({jsonrpc: '2.0', id: 1, method: 'tools/list'})});
+assert.equal((await rpc(resource)).status, 200);
+assert.notEqual((await rpc(b.account_url + '/mcp')).status, 200);
+console.log('PASS: two users enrolled; phone, browser API, OAuth issuer, MCP audience and assistant token stayed in their accounts.');

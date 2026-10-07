@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AgentGate · session audit</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="audit.mjs"></script>
+</head>
+<body>
+  <header><a class="brand" href="review.html"><img src="icon.svg" width="34" height="34" alt="">AgentGate</a><a href="review.html">Back to setup</a></header>
+  <main>
+    <div class="intro"><h1>Session audit</h1><p>Task-tab recordings, exact shared views and browser actions stay on this desktop for 30 days after a session ends. Recordings include the page as displayed, without audio.</p></div>
+    <div class="review-layout"><aside><h2>Sessions</h2><div id="sessions" class="audit-sessions"></div></aside><section id="detail" aria-live="polite"><p>Select a session to inspect its audit.</p></section></div>
+  </main>
+</body>
+</html>

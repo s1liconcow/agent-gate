@@ -31,7 +31,9 @@ export function normalizeOrigin(raw) {
   return u.origin;
 }
 
-export function sanitizeText(raw) {
+export const oneTimeCodeLabel = /\b(?:otp|(?:one[-.\s]time|single[-\s]use|temporary)\s+(?:(?:door|gate|entry|access|security|verification|authentication)\s+)?(?:code|password|passcode|pin)|(?:security|verification|authentication|mfa|2fa|two[-\s]factor|sign[-\s]?in|log[-\s]?in)(?:\s+verification)?\s+code)\b/gi;
+
+export function sanitizeText(raw, {allowOneTimeCodes = false} = {}) {
   if (typeof raw !== 'string' || raw.length < 1 || raw.length > 12000) throw new Error('Select 1 to 12,000 characters.');
   let text = raw.normalize('NFKC').replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F]/g, '');
   const patterns = [
@@ -48,6 +50,17 @@ export function sanitizeText(raw) {
     [/\b(?:account|acct|routing|balance)\b\s*(?:number|no\.?|ending|in|is|available|current|#|:|=)?\s*[#:]?\s*\d[\d,*xX.-]*/gi, '[REDACTED ACCOUNT]'],
     [/\b[A-Za-z0-9+/=_-]{32,}\b/g, '[REDACTED OPAQUE VALUE]']
   ];
-  for (const [pattern, replacement] of patterns) text = text.replace(pattern, replacement);
-  return text;
+  const redact = value => {
+    for (const [pattern, replacement] of patterns) value = value.replace(pattern, replacement);
+    return value;
+  };
+  if (!allowOneTimeCodes) return redact(text);
+  // Keep labeled codes intact for the purpose gate; other values still redact.
+  const codes = new RegExp(oneTimeCodeLabel.source + '\\s*(?:is\\s*)?[:=]?\\s*(?=[A-Z0-9-]*\\d)[A-Z0-9]{3,12}(?:-[A-Z0-9]{3,12})?\\b(?![@:/=]|\\.[A-Z0-9_])', 'gi');
+  let result = '', offset = 0;
+  for (const match of text.matchAll(codes)) {
+    result += redact(text.slice(offset, match.index)) + match[0];
+    offset = match.index + match[0].length;
+  }
+  return result + redact(text.slice(offset));
 }

@@ -1,6 +1,6 @@
 // Runs in Chrome's isolated extension world. The web page cannot access the reference map.
 (() => {
-  const version = '0.7.0-purpose-3-draft-1';
+  const version = '0.7.0-purpose-4-draft-1-checkout-1';
   if (globalThis.__agentgateReader?.version === version) return;
   globalThis.__agentgateReader?.dispose?.();
   let references = new Map(), capturedAt = 0, captureId;
@@ -12,7 +12,8 @@
   }).filter(Boolean).join(' ');
   const label = node => (node.labels?.[0] && renderedText(node.labels[0]) || node.getAttribute('aria-label') || labelledBy(node) || (node.isContentEditable ? '' : renderedText(node)) || node.getAttribute('placeholder') || node.getAttribute('name') || '').trim().slice(0, 200);
   const visible = node => node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden' && getComputedStyle(node).display !== 'none';
-  const allowedField = node => (['INPUT', 'TEXTAREA'].includes(node.tagName) || node.isContentEditable && node.getAttribute('role') === 'textbox') && !['password', 'hidden', 'file', 'submit', 'button', 'checkbox', 'radio'].includes(node.type) && !/(?:password|one-time-code|username|cc-|webauthn)/i.test(node.autocomplete || '') && !/(?:password|passcode|\botp\b|security code|\bpin\b)/i.test(label(node));
+  const pendingCheckout = node => node.tagName === 'BUTTON' && /^(?:place (?:your )?order|submit order|buy now|pay(?: now|\s+\$)|complete (?:purchase|order)|confirm (?:purchase|order))/i.test(label(node));
+  const allowedField = node => (['INPUT', 'TEXTAREA'].includes(node.tagName) || node.isContentEditable && node.getAttribute('role') === 'textbox') && !['password', 'hidden', 'file', 'submit', 'button', 'checkbox', 'radio'].includes(node.type) && !/(?:password|one-time-code|username|cc-|webauthn)/i.test(node.autocomplete || '') && !/(?:password|passcode|\botp\b|security code|\bpin\b|\b(?:cvv|cvc|card number|credit card|cardholder|expiration|expiry)\b)/i.test(label(node));
   const fingerprint = node => JSON.stringify([node.tagName, node.type, node.id, node.name, node.getAttribute('href'), node.getAttribute('target'), node.getAttribute('role'), node.isContentEditable, node.readOnly, node.autocomplete, label(node)]);
   const context = (node, complete = false) => {
     // Purpose reads cannot authorize a prefix of an oversized heading. Other
@@ -31,12 +32,13 @@
   };
   // Read rendered text in semantic groups. Nested spans, links and decorative controls
   // must not make an entire message disappear. Existing editable values stay private.
-  const privateNode = 'input,textarea,[contenteditable]:not([contenteditable="false"]),script,style,noscript,button,[role="button"],[role="checkbox"],[role="switch"],[data-agentgate-ui]';
+  const privateNode = 'input,select,textarea,[contenteditable]:not([contenteditable="false"]),script,style,noscript,button,[role="button"],[role="checkbox"],[role="switch"],[data-agentgate-ui]';
   const mailPreviewKind = node => {
     if(node.tagName!=='SPAN'||!node.closest('tr[role="row"]'))return null;
     const subject=node.classList.contains('bog'),snippet=node.classList.contains('y2');
     return subject!==snippet?(subject?'inbox_subject':'inbox_snippet'):null;
   };
+  const purposeKind = node => mailPreviewKind(node) || (node.matches('span,p,h1,h2,h3,h4,h5,h6,label,time,li,dt,dd,td,th') && !node.closest('button,[role="button"],a[href]') ? 'semantic_text' : null);
   const mailSender = node => {
     const row=node.closest('tr[role="row"]');if(!row)return null;
     // The preview's text/descendants cannot supply their own author. Accept only
@@ -52,7 +54,7 @@
     const pieces = []; let length = 0, node, previousFlow;
     while ((node = walker.nextNode())) {
       const parent = node.parentElement, excluded = parent?.closest(privateNode);
-      if (!parent || !visible(parent) || excluded && (excluded !== root || root.matches('input,textarea,[contenteditable]:not([contenteditable="false"]),script,style,noscript'))) continue;
+      if (!parent || !visible(parent) || excluded && (excluded !== root || root.matches('input,select,textarea,[contenteditable]:not([contenteditable="false"]),script,style,noscript'))) continue;
       const text = node.textContent.replace(/\s+/g, ' '); if (!text.trim()) { if (pieces.length) pieces.push(' '); continue; }
       let flow = parent;
       while (flow !== root && ['inline', 'inline-block', 'contents'].includes(getComputedStyle(flow).display)) flow = flow.parentElement;
@@ -75,7 +77,7 @@
         const ids = message.ids;
         const current = Array.isArray(ids) && ids.length > 0 && ids.length <= 32 && new Set(ids).size === ids.length && ids.every(id => {
           const ref = references.get(id), node = ref?.node;
-          return node?.isConnected && visible(node) && !node.disabled && (ref.role!=='dom_text'||AgentGateXPath.selectElements(document,ref.selector)[ref.match_offset]===node) && ref.fingerprint === (ref.role === 'dom_text' ? JSON.stringify([renderedText(node), context(node,true), AgentGateXPath.elementPath(node), location.href,mailSender(node),mailPreviewKind(node)]) : ref.role === 'text' ? JSON.stringify([renderedText(node), context(node)]) : JSON.stringify([fingerprint(node), context(node)]));
+          return node?.isConnected && visible(node) && (!node.disabled || ref.role === 'button' && pendingCheckout(node)) && (ref.role!=='dom_text'||AgentGateXPath.selectElements(document,ref.selector)[ref.match_offset]===node) && ref.fingerprint === (ref.role === 'dom_text' ? JSON.stringify([renderedText(node), context(node,true), AgentGateXPath.elementPath(node), location.href,mailSender(node),purposeKind(node)]) : ref.role === 'text' ? JSON.stringify([renderedText(node), context(node)]) : JSON.stringify([fingerprint(node), context(node)]));
         });
         respond({revision, version, capture_id: captureId, current}); return false;
       }
@@ -89,13 +91,13 @@
           const text = renderedText(node), path = AgentGateXPath.elementPath(node), nearby = context(node,true);
           if (!text || !path) continue;
           const ref = crypto.randomUUID().replaceAll('-', '');
-          const sender=mailSender(node),source_kind=mailPreviewKind(node);
+          const sender=mailSender(node),source_kind=purposeKind(node);
           references.set(ref, {node, role: 'dom_text',selector:message.xpath,match_offset:message.offset+nodes.indexOf(node), fingerprint: JSON.stringify([text, nearby, path, location.href,sender,source_kind])});
           blocks.push({ref, text, context: nearby,source_kind,...(sender?{sender}: {})}); paths[ref] = path;
         }
         respond({origin: location.origin, controls: [], blocks, paths, revision, version, capture_id: captureId}); return false;
       }
-      if (message.type === 'collect' || message.type === 'snapshot') {
+      if (message.type === 'snapshot') {
         references = new Map(); capturedAt = performance.now(); captureId = crypto.randomUUID();
         const controls = [];
         const gmail = location.hostname === 'mail.google.com';
@@ -112,40 +114,32 @@
           if (node.closest('[role="row"],tr' + (gmail ? ',.zA' : ''))) return 4;
           return 3;
         };
-        const candidates = [...document.querySelectorAll(selector)].filter(node => visible(node) && !node.disabled && !node.readOnly).sort((a, b) => priority(a) - priority(b));
+        const candidates = [...document.querySelectorAll(selector)].filter(node => visible(node) && (!node.disabled || pendingCheckout(node)) && !node.readOnly).sort((a, b) => priority(a) - priority(b));
         for (const node of candidates) {
           if (controls.length >= 72) break;
-          if (!visible(node) || node.disabled || node.readOnly || (!allowedField(node) && !['BUTTON', 'A'].includes(node.tagName) && !['button', 'link', 'row'].includes(node.getAttribute('role')) && !(gmail && node.matches('tr.zA')))) continue;
+          if (!visible(node) || node.disabled && !pendingCheckout(node) || node.readOnly || (!allowedField(node) && !['BUTTON', 'A'].includes(node.tagName) && !['button', 'link', 'row'].includes(node.getAttribute('role')) && !(gmail && node.matches('tr.zA')))) continue;
           const name = label(node); if (!name || /(?:password|passcode|\botp\b|sign in|log in)/i.test(name)) continue;
           const ref = crypto.randomUUID().replaceAll('-', ''), role = allowedField(node) ? 'field' : node.tagName === 'A' ? 'link' : 'button';
-          references.set(ref, {node, fingerprint: JSON.stringify([fingerprint(node), context(node)]), role}); controls.push({ref, role, label: name, ...(message.type === 'snapshot' ? {context: context(node), submit: Boolean(node.form && node.type === 'submit')} : {})});
+          references.set(ref, {node, fingerprint: JSON.stringify([fingerprint(node), context(node)]), role}); controls.push({ref, role, label: name, context: context(node), submit: Boolean(node.form && node.type === 'submit')});
         }
-        const selection = window.getSelection(); let selectedText = '';
-        if (selection?.rangeCount === 1 && !selection.isCollapsed) {
-          const range = selection.getRangeAt(0);
-          const editable = [range.startContainer, range.endContainer].some(n => (n.nodeType === 1 ? n : n.parentElement)?.closest('input,textarea,[contenteditable]:not([contenteditable="false"])'));
-          if (!editable && range.getClientRects().length) selectedText = selection.toString().slice(0, 12000);
+        const blocks = [], covered = [], texts = new Set(); let total = 0;
+        const blockSelector = 'h1,h2,h3,p,li,dt,dd,td,th,[role="status"],[role="heading"],[role="listitem"],div,span';
+        const semantic = 'tr,[role="row"],[role="listitem"],article' + (gmail ? ',.zA,.a3s' : '');
+        const nodes = [...new Set([...(main?.querySelectorAll(semantic) || []), ...(main?.querySelectorAll(blockSelector) || []), ...document.querySelectorAll(semantic), ...document.querySelectorAll(blockSelector)])];
+        for (const node of nodes) {
+          if (blocks.length >= 96 || total >= 30000) break;
+          if (!visible(node) || covered.some(parent => parent.contains(node)) || node.closest('input,textarea,[contenteditable]:not([contenteditable="false"]),script,style,noscript,[data-agentgate-ui]')) continue;
+          const grouped = node.matches(semantic);
+          if (!grouped && (node.closest('button,[role="button"],[role="checkbox"],[role="switch"]') || ['DIV', 'SPAN'].includes(node.tagName) && node.children.length)) continue;
+          // Table header/select rows carry no message content.
+          if (grouped && node.querySelector('th,[role="columnheader"]')) continue;
+          const text = renderedText(node); if (!text || texts.has(text)) continue;
+          total += text.length; texts.add(text); covered.push(node);
+          const ref = crypto.randomUUID().replaceAll('-', ''), nearby = context(node);
+          references.set(ref, {node, role: 'text', fingerprint: JSON.stringify([text, nearby])});
+          blocks.push({ref, text, context: nearby});
         }
-        if (message.type === 'snapshot') {
-          const blocks = [], covered = [], texts = new Set(); let total = 0;
-          const blockSelector = 'h1,h2,h3,p,li,dt,dd,td,th,[role="status"],[role="heading"],[role="listitem"],div,span';
-          const semantic = 'tr,[role="row"],[role="listitem"],article' + (gmail ? ',.zA,.a3s' : '');
-          const nodes = [...new Set([...(main?.querySelectorAll(semantic) || []), ...(main?.querySelectorAll(blockSelector) || []), ...document.querySelectorAll(semantic), ...document.querySelectorAll(blockSelector)])];
-          for (const node of nodes) {
-            if (blocks.length >= 96 || total >= 30000) break;
-            if (!visible(node) || covered.some(parent => parent.contains(node)) || node.closest('input,textarea,[contenteditable]:not([contenteditable="false"]),script,style,noscript,[data-agentgate-ui]')) continue;
-            const grouped = node.matches(semantic);
-            if (!grouped && (node.closest('button,[role="button"],[role="checkbox"],[role="switch"]') || ['DIV', 'SPAN'].includes(node.tagName) && node.children.length)) continue;
-            // Table header/select rows carry no message content.
-            if (grouped && node.querySelector('th,[role="columnheader"]')) continue;
-            const text = renderedText(node); if (!text || texts.has(text)) continue;
-            total += text.length; texts.add(text); covered.push(node);
-            const ref = crypto.randomUUID().replaceAll('-', ''), nearby = context(node);
-            references.set(ref, {node, role: 'text', fingerprint: JSON.stringify([text, nearby])});
-            blocks.push({ref, text, context: nearby});
-          }
-          respond({origin: location.origin, controls, blocks, revision, version, capture_id: captureId, loading: Boolean(main && [main, ...main.querySelectorAll('[aria-busy="true"]')].some(n => n.matches('[aria-busy="true"]') && visible(n))), login_required: [...document.querySelectorAll('input[type="password"]')].some(visible)});
-        } else respond({origin: location.origin, text: selectedText, controls});
+        respond({origin: location.origin, controls, blocks, revision, version, capture_id: captureId, loading: Boolean(main && [main, ...main.querySelectorAll('[aria-busy="true"]')].some(n => n.matches('[aria-busy="true"]') && visible(n))), login_required: [...document.querySelectorAll('input[type="password"]')].some(visible)});
         return false;
       }
       if (message.type === 'execute') {
@@ -172,5 +166,5 @@
     return false;
   };
   chrome.runtime.onMessage.addListener(listener);
-  globalThis.__agentgateReader = {version, dispose() { observer.disconnect(); chrome.runtime.onMessage.removeListener(listener); references.clear(); }};
+  globalThis.__agentgateReader = {version, reference: ref => references.get(ref), label, visible, fingerprint, context, renderedText, dispose() { observer.disconnect(); chrome.runtime.onMessage.removeListener(listener); references.clear(); }};
 })();

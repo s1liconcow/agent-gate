@@ -31,7 +31,7 @@ export async function boundedJson(response, signal) {
 // clone is a fresh stateless request, preserving the same source-ID checks as Nano.
 export function remoteModelAPI(settings, {fetcher = globalThis.fetch, authorize = async () => {}, milliseconds = 30000} = {}) {
   const profile = inferenceProfile(settings.profile), apiKey = settings.api_key;
-  if (['openjev','purpose_encoder'].includes(profile.provider)) throw inferenceError();
+  if (['openjev','purpose_encoder','purpose_browser'].includes(profile.provider)) throw inferenceError();
   // Live synthetic evaluation found false approvals for unrelated browser actions.
   // Keep saved profiles recognizable so owners can switch away, but fail closed.
   if (profile.provider === 'cloudflare') throw inferenceError();

@@ -27,11 +27,13 @@ def main():
     p.add_argument('--output',required=True);p.add_argument('--epochs',type=int,default=3)
     p.add_argument('--batch-size',type=int,default=16);p.add_argument('--lr',type=float,default=2e-5)
     p.add_argument('--max-tokens',type=int,default=256);p.add_argument('--seed',type=int,default=42)
+    p.add_argument('--last-layers',type=int,help='Adapt only the last N encoder layers, pooler and classifier.')
     args=p.parse_args();out=Path(args.output)
     if out.exists(): raise ValueError('Use a new output directory to preserve previous evidence.')
     out.mkdir(parents=True);torch.manual_seed(args.seed);random.seed(args.seed)
     (out/'source').mkdir()
-    for name in ['train_purpose.py','purpose_data.py','purpose_data_v3.py','purpose_data_v4.py']:
+    source_names=['train_purpose.py','purpose_data.py','purpose_data_v3.py','purpose_data_v4.py','purpose_data_multidomain.py','purpose_data_multidomain_v2.py','purpose_data_multidomain_v3.py','purpose_data_multidomain_v4.py','purpose_data_multidomain_v5.py']
+    for name in source_names:
         shutil.copyfile(Path(__file__).with_name(name),out/'source'/name)
     if not torch.backends.mps.is_available(): raise RuntimeError('Apple MPS GPU is required.')
     torch.set_num_threads(4);device=torch.device('mps')
@@ -55,6 +57,11 @@ def main():
     model.config.id2label={0:'deny',1:'allow'};model.config.label2id={'deny':0,'allow':1}
     # Preserve lexical embeddings while adapting the joint interaction layers.
     for param in model.deberta.embeddings.word_embeddings.parameters():param.requires_grad=False
+    if args.last_layers is not None:
+        if not 1<=args.last_layers<=len(model.deberta.encoder.layer):raise ValueError('Invalid trainable layer count.')
+        for param in model.parameters():param.requires_grad=False
+        for module in [*model.deberta.encoder.layer[-args.last_layers:],model.pooler,model.classifier]:
+            for param in module.parameters():param.requires_grad=True
     model.to(device)
     train,dev=rows(Path(args.data)/'train.jsonl'),rows(Path(args.data)/'dev.jsonl')
     manifest=json.loads((Path(args.data)/'manifest.json').read_text())
@@ -76,7 +83,7 @@ def main():
     scheduler=torch.optim.lr_scheduler.LambdaLR(opt,lambda step:min(1.,(step+1)/max(1,total*.05))*max(0.,(total-step)/total))
     identity={'arguments':vars(args),'base':json.loads((Path(args.base)/'source.json').read_text()),
               'train_sha256':digest(Path(args.data)/'train.jsonl'),'dev_sha256':digest(Path(args.data)/'dev.jsonl'),
-              'source_sha256':{name:digest(Path(__file__).with_name(name)) for name in ['train_purpose.py','purpose_data.py','purpose_data_v3.py','purpose_data_v4.py']},
+              'source_sha256':{name:digest(Path(__file__).with_name(name)) for name in source_names},
               'corpus_manifest':manifest,
               'initial_checkpoint':initial,
               'objective':'purpose-conditioned binary disclosure; NLI initialization; no text generation',
@@ -125,6 +132,9 @@ def main():
               'max_tokens':args.max_tokens,'base':identity['base'],'trained':True,
               'model_sha256':digest(out/'model/model.safetensors'),
               'elapsed_seconds':time.perf_counter()-started,'development_loss':best}
+    if manifest.get('architecture') in ['browser-joint-v1','browser-joint-v2']:
+        metadata.update(architecture=manifest['architecture'],normalization=manifest['normalization'],domains=manifest['domains'])
+        if manifest.get('financial_source_policy'):metadata['financial_source_policy']=manifest['financial_source_policy']
     (out/'model/purpose.json').write_text(json.dumps(metadata,indent=2)+'\n')
     print(json.dumps(metadata),flush=True)
 
