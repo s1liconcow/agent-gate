@@ -4,6 +4,7 @@ AgentGate is a browser gateway for purpose-bound assistant access, with local
 disclosure checks and phone-signed approvals.
 
 - [Setup and operation](docs/SETUP.md)
+- [Public landing page](https://agentgate-7qd.pages.dev)
 - [Purpose-based access adjudication](docs/ACCESS_ADJUDICATION.md)
 - [Local classifier research and reproduction](local-decision/PURPOSE_RESEARCH.md)
 - [Product goals](docs/PRODUCT.md) and [design](docs/DESIGN.md)
@@ -20,6 +21,10 @@ npm test
 
 `npm run dev` starts the local coordinator and synthetic demos. Developers load
 the root `extension/` folder in Chrome after building.
+
+Cloudflare Pages builds the public landing page from `main` with
+`npm run build:pages` and publishes `dist/pages`. The phone approval app runs on
+the separate `agentgate-control` Worker.
 
 After updating to this layout, load `extension/` again in Chrome and update
 local MCP launchers to use `scripts/connect.mjs`. Chrome may assign a new
