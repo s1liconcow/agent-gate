@@ -21,7 +21,7 @@ export async function createPurposeRuntime() {
   const bytes = {};
   for (const name of files) {
     const item = manifest.files[name];
-    if (!Number.isInteger(item.bytes) || item.bytes < 1 || item.bytes > 650_000_000 || !/^[a-f0-9]{64}$/.test(item.sha256)) throw new Error('Invalid checkpoint file.');
+    if (!Number.isInteger(item.bytes) || item.bytes < 1 || item.bytes > 800_000_000 || !/^[a-f0-9]{64}$/.test(item.sha256)) throw new Error('Invalid checkpoint file.');
     const file = await fetch(base + name);
     if (!file.ok) throw new Error('Missing browser checkpoint file.');
     const data = await file.arrayBuffer();

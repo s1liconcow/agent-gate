@@ -11,6 +11,15 @@ const manifest = JSON.parse(await readFile(resolve(model, 'manifest.json'), 'utf
 if (!/^agentgate-purpose-browser-[a-f0-9]{16}$/.test(manifest.model) || manifest.trained !== true || manifest.threshold !== .98) throw new Error('Export a trained Chrome checkpoint first.');
 const fidelity=JSON.parse(await readFile(resolve(model,'fidelity.json'),'utf8'));
 if(fidelity.passed!==true||fidelity.model!==manifest.model||fidelity.manifest_sha256!==createHash('sha256').update(await readFile(resolve(model,'manifest.json'))).digest('hex'))throw new Error('Verify export fidelity on development data before packaging.');
+const development=fidelity.exported,negatives=fidelity.cases-development.necessary;
+if(![fidelity.cases,development.necessary,development.released_necessary,development.false_releases].every(v=>Number.isInteger(v)&&v>=0)||!(development.necessary>0)||!(negatives>0)||development.released_necessary>development.necessary||development.false_releases>negatives||development.released_necessary<development.necessary*.95||development.false_releases>negatives*.01)throw new Error('Development utility failed: require at least 95% necessary recall and at most 1% unrelated releases before packaging.');
+if(manifest.checkpoint_selection==='calibrated-utility'){
+ if(fidelity.utility?.passed!==true)throw new Error('Calibrated development utility must pass before packaging.');
+ for(const domain of manifest.domains){
+  const values=fidelity.by_domain?.[domain]?.exported;
+  if(!values||![values.necessary,values.released_necessary,values.false_releases].every(v=>Number.isInteger(v)&&v>=0)||!(values.necessary>0)||values.released_necessary>values.necessary||values.released_necessary<values.necessary*.90)throw new Error('Workflow development utility failed: require at least 90% necessary recall in every declared workflow.');
+ }
+}
 for (const name of ['model.onnx', 'tokenizer.json', 'tokenizer_config.json']) {
   const content = await readFile(resolve(model, name));
   if (content.length !== manifest.files[name]?.bytes || createHash('sha256').update(content).digest('hex') !== manifest.files[name]?.sha256) throw new Error('Checkpoint bundle changed.');

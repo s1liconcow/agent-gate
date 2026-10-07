@@ -11,6 +11,11 @@ const [extensionInput, reportInput, reserveInput = 'tests/fixtures/purpose-multi
 if (!extensionInput || !reportInput) throw new Error('Usage: npm run test:purpose-browser -- EXTENSION_DIRECTORY REPORT_JSON [RESERVE_MODULE]');
 const reservePath = resolve(reserveInput), {purposeMultidomainReserve} = await import(pathToFileURL(reservePath));
 if (!Array.isArray(purposeMultidomainReserve) || !purposeMultidomainReserve.length) throw new Error('A frozen reserve is required.');
+const calendarCase = purposeMultidomainReserve.find(r => r.id === 'calendar/necessary' && r.label === 1);
+const calendarOther = purposeMultidomainReserve.find(r => ['calendar/unrelated','calendar/necessary/unrelated','calendar/necessary/other-record'].includes(r.id) && r.label === 0);
+const bankCase = purposeMultidomainReserve.find(r => r.id === 'banking/necessary' && r.label === 1);
+const bankOther = purposeMultidomainReserve.find(r => ['banking/unrelated','banking/necessary/unrelated','banking/necessary/other-record'].includes(r.id) && r.label === 0);
+if (!calendarCase || !calendarOther || bankCase && !bankOther) throw new Error('Native DOM probes require necessary and unrelated reserve cases.');
 const extension = resolve(extensionInput), reportPath = resolve(reportInput);
 const temporary = await mkdtemp(resolve(tmpdir(), 'agentgate-purpose-browser-'));
 let context, server;
@@ -44,9 +49,7 @@ globalThis.adjudicatePurposeRead=adjudicatePurposeRead;globalThis.diagnosePurpos
   }
   // Exercise the actual isolated-world DOM capture and live-source proof on a
   // non-mail page, including a mutation between classification and publication.
-  const calendarCase = purposeMultidomainReserve.find(r => r.id === 'calendar/necessary'), calendarOther = purposeMultidomainReserve.find(r => ['calendar/unrelated','calendar/necessary/unrelated'].includes(r.id));
   const escape = text => text.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
-  const bankCase = purposeMultidomainReserve.find(r => r.id === 'banking/necessary'), bankOther = purposeMultidomainReserve.find(r => ['banking/unrelated','banking/necessary/unrelated'].includes(r.id));
   server = createServer((request, response) => {
     response.setHeader('Content-Type', 'text/html; charset=utf-8');
     const bank = request.url === '/bank', necessary = bank ? bankCase : calendarCase, other = bank ? bankOther : calendarOther;

@@ -1,6 +1,6 @@
 // Runs in Chrome's isolated extension world. The web page cannot access the reference map.
 (() => {
-  const version = '0.7.0-purpose-4-draft-1-checkout-1';
+  const version = '0.7.0-purpose-5-draft-1-checkout-1';
   if (globalThis.__agentgateReader?.version === version) return;
   globalThis.__agentgateReader?.dispose?.();
   let references = new Map(), capturedAt = 0, captureId;
@@ -20,6 +20,45 @@
     // planner snapshots retain their existing bounded display excerpt.
     const bounded = text => complete && text.length > 180 ? '' : text.slice(0, 180);
     const container = node.closest('article,section,fieldset,tr,[role="region"],[role="dialog"],[role="alertdialog"]');
+    if (complete) {
+      const headings = [], attributes = [];
+      let level = 7, incomplete = false, regionUsed = false;
+      const region = container?.getAttribute('aria-label') || container && labelledBy(container);
+      const observed = element => {
+        const text = renderedText(element);
+        if (!text || text.length > 180) incomplete = true;
+        return text;
+      };
+      if (node.matches('dd') && node.previousElementSibling?.matches('dt') && visible(node.previousElementSibling)) attributes.push(observed(node.previousElementSibling));
+      if (node.matches('td')) {
+        const row = node.closest('tr'), table = node.closest('table');
+        const rowLabel = row?.querySelector(':scope > th');
+        if (rowLabel && visible(rowLabel)) attributes.push(observed(rowLabel));
+        const headerRows = table?.querySelectorAll(':scope > thead > tr');
+        if (headerRows?.length === 1 && [...row.children].every(cell => cell.colSpan === 1) && [...headerRows[0].children].every(cell => cell.tagName === 'TH' && cell.colSpan === 1)) {
+          const column = [...row.children].indexOf(node), header = headerRows[0].children[column];
+          if (header && headerRows[0].children.length === row.children.length && visible(header)) attributes.push(observed(header));
+        }
+      }
+      // Keep the active heading hierarchy. A preceding peer record cannot
+      // become the parent of the selected record or supply its identity.
+      for (let child = node, parent = node.parentElement; parent && parent !== document.body; child = parent, parent = parent.parentElement) {
+        if (child === container && region) {headings.unshift(region); level = Math.min(level, 2); regionUsed = true;}
+        for (let previous = child.previousElementSibling; previous; previous = previous.previousElementSibling) {
+          if (!previous.matches('h1,h2,h3,h4,h5,h6,legend,[role="heading"]') || !visible(previous)) continue;
+          const rank = /^H[1-6]$/.test(previous.tagName) ? Number(previous.tagName[1]) : Number(previous.getAttribute('aria-level')) || 2;
+          if (rank >= 1 && rank <= 6 && rank < level) {headings.unshift(observed(previous)); level = rank;}
+        }
+        if (parent.matches('main,[role="main"]')) break;
+      }
+      if (region && !regionUsed && !headings.includes(region)) headings.unshift(region);
+      if (!headings.length && !attributes.length) {
+        const fallback = container?.querySelector('h1,h2,h3,h4,h5,h6,legend,th');
+        if (fallback && visible(fallback)) headings.push(observed(fallback));
+      }
+      const text = [...new Set([...headings, ...attributes].filter(Boolean))].join(' / ');
+      return incomplete || text.length > 180 ? '' : text;
+    }
     // Carry nearby section headings into descendants, including ordinary div-based
     // account panels. Redacting a number does not make a forbidden balance releasable.
     for (let child = node, parent = node.parentElement; parent && parent !== document.body; child = parent, parent = parent.parentElement) {

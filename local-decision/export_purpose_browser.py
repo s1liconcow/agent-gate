@@ -50,10 +50,15 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--model', required=True)
     p.add_argument('--output', required=True)
-    p.add_argument('--precision', choices=['fp16-storage', 'matmul-int8'], default='fp16-storage')
+    p.add_argument('--precision', choices=['fp16-storage', 'fp32', 'matmul-int8'], default='fp16-storage')
     args = p.parse_args()
     source, root = Path(args.model), Path(args.output)
     metadata = json.loads((source / 'purpose.json').read_text())
+    training_path = source.parent / 'training.json'
+    if training_path.exists() and json.loads(training_path.read_text()).get('corpus_manifest', {}).get('smoke_only'):
+        raise ValueError('Smoke checkpoints cannot be exported for deployment.')
+    if metadata.get('checkpoint_selection') == 'calibrated-utility' and metadata.get('development_utility', {}).get('passed') is not True:
+        raise ValueError('Calibrated development utility must pass before export.')
     if metadata.get('architecture') not in ['browser-joint-v1', 'browser-joint-v2'] or metadata.get('trained') is not True or metadata.get('threshold') != .98 or sha(source / 'model.safetensors') != metadata.get('model_sha256'):
         raise ValueError('An immutable trained multidomain checkpoint is required.')
     root.mkdir(parents=True, exist_ok=False)
@@ -66,7 +71,9 @@ def main():
         input_names=['input_ids', 'attention_mask'], output_names=['logits'],
         dynamic_axes={'input_ids': {0: 'batch', 1: 'sequence'}, 'attention_mask': {0: 'batch', 1: 'sequence'}, 'logits': {0: 'batch'}},
         opset_version=17, dynamo=False)
-    if args.precision == 'fp16-storage':
+    if args.precision == 'fp32':
+        shutil.copyfile(fp32, root / 'model.onnx')
+    elif args.precision == 'fp16-storage':
         half_storage(fp32, root / 'model.onnx')
     else:
         quantize_dynamic(str(fp32), str(root / 'model.onnx'), weight_type=QuantType.QInt8,
@@ -79,7 +86,10 @@ def main():
         if metadata.get('financial_source_policy') != 'purpose-bound-bank-fields-v1':raise ValueError('Unexpected financial source policy.')
         identity['financial_source_policy'] = metadata['financial_source_policy']
     encoded = json.dumps(identity, separators=(',', ':'), ensure_ascii=False).encode()
-    manifest = {**identity, 'model': 'agentgate-purpose-browser-' + hashlib.sha256(encoded).hexdigest()[:16], 'trained': True, 'domains': metadata['domains'], 'source_model_sha256': metadata['model_sha256'], 'quantization': 'fp16-storage-fp32-compute' if args.precision == 'fp16-storage' else 'dynamic-int8-per-channel-matmul', 'exporter_sha256': sha(__file__)}
+    precision_name = {'fp16-storage': 'fp16-storage-fp32-compute', 'fp32': 'fp32', 'matmul-int8': 'dynamic-int8-per-channel-matmul'}[args.precision]
+    manifest = {**identity, 'model': 'agentgate-purpose-browser-' + hashlib.sha256(encoded).hexdigest()[:16], 'trained': True, 'domains': metadata['domains'], 'source_model_sha256': metadata['model_sha256'], 'quantization': precision_name, 'exporter_sha256': sha(__file__)}
+    if metadata.get('checkpoint_selection'):
+        manifest['checkpoint_selection'] = metadata['checkpoint_selection']
     (root / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(json.dumps(manifest), flush=True)
 

@@ -1,0 +1,599 @@
+{
+  "experiment": "purpose-multidomain-v12",
+  "quality_target_met": false,
+  "synthetic": true,
+  "model": "agentgate-purpose-browser-5300ab846923e879",
+  "source_model_sha256": "a93aefe24aa7df3a4a161c449791b3d140fe28afaa7861d022a5a556f9d86c79",
+  "model_bytes": 738676631,
+  "threshold": 0.98,
+  "temperature": 1.529491901397705,
+  "domains": [
+    "mail",
+    "calendar",
+    "documents",
+    "projects",
+    "support",
+    "shopping",
+    "travel",
+    "billing",
+    "health",
+    "education",
+    "crm",
+    "developer",
+    "banking"
+  ],
+  "training": {
+    "rows": 69580,
+    "necessary": 24588,
+    "sha256": "4aea12f372fba6c8b392ef527c109660726d0926a3eff650d049c3dadb2a2b1d"
+  },
+  "development": {
+    "summary": {
+      "cases": 16961,
+      "necessary": 6069,
+      "released_necessary": 5806,
+      "false_releases": 5
+    },
+    "utility": {
+      "passed": true,
+      "necessary_recall": 0.956665018948756,
+      "false_release_rate": 0.0004590525156077855,
+      "minimum_workflow_recall": 0.9319371727748691,
+      "by_domain_recall": {
+        "mail": 0.9577777777777777,
+        "calendar": 0.9691119691119691,
+        "documents": 0.9724310776942355,
+        "projects": 0.9733333333333334,
+        "support": 0.9558139534883721,
+        "shopping": 0.9404096834264432,
+        "travel": 0.9319371727748691,
+        "billing": 0.9625550660792952,
+        "health": 0.9359267734553776,
+        "education": 0.9506726457399103,
+        "crm": 0.9651416122004357,
+        "developer": 0.9353233830845771,
+        "banking": 0.9883268482490273
+      },
+      "required_necessary_recall": 0.95,
+      "maximum_false_release_rate": 0.01,
+      "required_minimum_workflow_recall": 0.9
+    },
+    "sha256": "0bfd3d13f99b5e23d938d5a5f3cff81db33477079ac89474a64375d3c6774fc6"
+  },
+  "export": {
+    "passed": true,
+    "cases": 16961,
+    "verification_method": "identical-fp32-graph-full-development-inference",
+    "graph_sha256": {
+      "fp32": "2ce94a4ba7fe9c9964dbde2d2cbb7e441fa6b61c6f5cce428c4b87c689789ef9",
+      "exported": "2ce94a4ba7fe9c9964dbde2d2cbb7e441fa6b61c6f5cce428c4b87c689789ef9"
+    },
+    "max_probability_drift": 0.0,
+    "decision_disagreements": 0
+  },
+  "chrome": {
+    "runtime": "Chrome extension, trained ONNX, WebAssembly CPU",
+    "browser_version": "153.0.8010.12",
+    "summary": {
+      "cases": 520,
+      "necessary": 156,
+      "released_necessary": 122,
+      "false_releases": 2,
+      "max_ms": 289
+    },
+    "by_domain": {
+      "mail": {
+        "cases": 40,
+        "necessary": 12,
+        "released_necessary": 10,
+        "false_releases": 0,
+        "max_ms": 289
+      },
+      "calendar": {
+        "cases": 40,
+        "necessary": 12,
+        "released_necessary": 7,
+        "false_releases": 0,
+        "max_ms": 270.89999997615814
+      },
+      "documents": {
+        "cases": 40,
+        "necessary": 12,
+        "released_necessary": 9,
+        "false_releases": 0,
+        "max_ms": 277.6999999284744
+      },
+      "projects": {
+        "cases": 40,
+        "necessary": 12,
+        "released_necessary": 7,
+        "false_releases": 0,
+        "max_ms": 280.5
+      },
+      "support": {
+        "cases": 40,
+        "necessary": 12,
+        "released_necessary": 9,
+        "false_releases": 0,
+        "max_ms": 280.5
+      },
+      "shopping": {
+        "cases": 40,
+        "necessary": 12,
+        "released_necessary": 12,
+        "false_releases": 0,
+        "max_ms": 256.2999999523163
+      },
+      "travel": {
+        "cases": 40,
+        "necessary": 12,
+        "released_necessary": 6,
+        "false_releases": 0,
+        "max_ms": 270.5
+      },
+      "billing": {
+        "cases": 40,
+        "necessary": 12,
+        "released_necessary": 9,
+        "false_releases": 0,
+        "max_ms": 270.2000000476837
+      },
+      "health": {
+        "cases": 40,
+        "necessary": 12,
+        "released_necessary": 12,
+        "false_releases": 1,
+        "max_ms": 284
+      },
+      "education": {
+        "cases": 40,
+        "necessary": 12,
+        "released_necessary": 11,
+        "false_releases": 0,
+        "max_ms": 280.2999999523163
+      },
+      "crm": {
+        "cases": 40,
+        "necessary": 12,
+        "released_necessary": 9,
+        "false_releases": 1,
+        "max_ms": 264.5
+      },
+      "developer": {
+        "cases": 40,
+        "necessary": 12,
+        "released_necessary": 12,
+        "false_releases": 0,
+        "max_ms": 279
+      },
+      "banking": {
+        "cases": 40,
+        "necessary": 12,
+        "released_necessary": 9,
+        "false_releases": 0,
+        "max_ms": 271.7000000476837
+      }
+    },
+    "cold_start_ms": 1552.7000000476837,
+    "runtime_unchanged": true,
+    "remote_request_count": 0,
+    "javascript_error_count": 0,
+    "native_dom": {
+      "necessary_fields": 1,
+      "complete_text_preserved": true,
+      "unrelated_fields": 0,
+      "credential_fields": 0,
+      "mixed_fields": 0,
+      "authentication_code_fields": 0,
+      "stale_withheld": true,
+      "necessary_ms": 226.39999997615814
+    },
+    "native_banking_dom": {
+      "necessary_fields": 1,
+      "complete_text_preserved": true,
+      "unrelated_fields": 0,
+      "credential_fields": 0,
+      "mixed_fields": 0,
+      "authentication_code_fields": 0,
+      "stale_withheld": true,
+      "necessary_ms": 226.20000004768372
+    }
+  },
+  "matched_reference": {
+    "model": "gpt-6-luna",
+    "batch_size": 1,
+    "summary": {
+      "local": {
+        "cases": 520,
+        "necessary": 156,
+        "released_necessary": 122,
+        "false_releases": 2,
+        "necessary_recall": 0.782051282051282,
+        "false_release_rate": 0.005494505494505495
+      },
+      "reference": {
+        "cases": 520,
+        "necessary": 156,
+        "released_necessary": 153,
+        "false_releases": 62,
+        "necessary_recall": 0.9807692307692307,
+        "false_release_rate": 0.17032967032967034
+      },
+      "paired": {
+        "necessary_local_only": 2,
+        "necessary_reference_only": 33,
+        "false_release_local_only": 1,
+        "false_release_reference_only": 61
+      },
+      "necessary_recall_difference": -0.19871794871794868,
+      "false_release_rate_difference": -0.16483516483516483
+    },
+    "by_domain": {
+      "banking": {
+        "local": {
+          "cases": 40,
+          "necessary": 12,
+          "released_necessary": 9,
+          "false_releases": 0,
+          "necessary_recall": 0.75,
+          "false_release_rate": 0.0
+        },
+        "reference": {
+          "cases": 40,
+          "necessary": 12,
+          "released_necessary": 12,
+          "false_releases": 1,
+          "necessary_recall": 1.0,
+          "false_release_rate": 0.03571428571428571
+        },
+        "paired": {
+          "necessary_local_only": 0,
+          "necessary_reference_only": 3,
+          "false_release_local_only": 0,
+          "false_release_reference_only": 1
+        },
+        "necessary_recall_difference": -0.25,
+        "false_release_rate_difference": -0.03571428571428571
+      },
+      "billing": {
+        "local": {
+          "cases": 40,
+          "necessary": 12,
+          "released_necessary": 9,
+          "false_releases": 0,
+          "necessary_recall": 0.75,
+          "false_release_rate": 0.0
+        },
+        "reference": {
+          "cases": 40,
+          "necessary": 12,
+          "released_necessary": 12,
+          "false_releases": 6,
+          "necessary_recall": 1.0,
+          "false_release_rate": 0.21428571428571427
+        },
+        "paired": {
+          "necessary_local_only": 0,
+          "necessary_reference_only": 3,
+          "false_release_local_only": 0,
+          "false_release_reference_only": 6
+        },
+        "necessary_recall_difference": -0.25,
+        "false_release_rate_difference": -0.21428571428571427
+      },
+      "calendar": {
+        "local": {
+          "cases": 40,
+          "necessary": 12,
+          "released_necessary": 7,
+          "false_releases": 0,
+          "necessary_recall": 0.5833333333333334,
+          "false_release_rate": 0.0
+        },
+        "reference": {
+          "cases": 40,
+          "necessary": 12,
+          "released_necessary": 11,
+          "false_releases": 6,
+          "necessary_recall": 0.9166666666666666,
+          "false_release_rate": 0.21428571428571427
+        },
+        "paired": {
+          "necessary_local_only": 0,
+          "necessary_reference_only": 4,
+          "false_release_local_only": 0,
+          "false_release_reference_only": 6
+        },
+        "necessary_recall_difference": -0.33333333333333326,
+        "false_release_rate_difference": -0.21428571428571427
+      },
+      "crm": {
+        "local": {
+          "cases": 40,
+          "necessary": 12,
+          "released_necessary": 9,
+          "false_releases": 1,
+          "necessary_recall": 0.75,
+          "false_release_rate": 0.03571428571428571
+        },
+        "reference": {
+          "cases": 40,
+          "necessary": 12,
+          "released_necessary": 12,
+          "false_releases": 4,
+          "necessary_recall": 1.0,
+          "false_release_rate": 0.14285714285714285
+        },
+        "paired": {
+          "necessary_local_only": 0,
+          "necessary_reference_only": 3,
+          "false_release_local_only": 1,
+          "false_release_reference_only": 4
+        },
+        "necessary_recall_difference": -0.25,
+        "false_release_rate_difference": -0.10714285714285714
+      },
+      "developer": {
+        "local": {
+          "cases": 40,
+          "necessary": 12,
+          "released_necessary": 12,
+          "false_releases": 0,
+          "necessary_recall": 1.0,
+          "false_release_rate": 0.0
+        },
+        "reference": {
+          "cases": 40,
+          "necessary": 12,
+          "released_necessary": 12,
+          "false_releases": 4,
+          "necessary_recall": 1.0,
+          "false_release_rate": 0.14285714285714285
+        },
+        "paired": {
+          "necessary_local_only": 0,
+          "necessary_reference_only": 0,
+          "false_release_local_only": 0,
+          "false_release_reference_only": 4
+        },
+        "necessary_recall_difference": 0.0,
+        "false_release_rate_difference": -0.14285714285714285
+      },
+      "documents": {
+        "local": {
+          "cases": 40,
+          "necessary": 12,
+          "released_necessary": 9,
+          "false_releases": 0,
+          "necessary_recall": 0.75,
+          "false_release_rate": 0.0
+        },
+        "reference": {
+          "cases": 40,
+          "necessary": 12,
+          "released_necessary": 12,
+          "false_releases": 5,
+          "necessary_recall": 1.0,
+          "false_release_rate": 0.17857142857142858
+        },
+        "paired": {
+          "necessary_local_only": 0,
+          "necessary_reference_only": 3,
+          "false_release_local_only": 0,
+          "false_release_reference_only": 5
+        },
+        "necessary_recall_difference": -0.25,
+        "false_release_rate_difference": -0.17857142857142858
+      },
+      "education": {
+        "local": {
+          "cases": 40,
+          "necessary": 12,
+          "released_necessary": 11,
+          "false_releases": 0,
+          "necessary_recall": 0.9166666666666666,
+          "false_release_rate": 0.0
+        },
+        "reference": {
+          "cases": 40,
+          "necessary": 12,
+          "released_necessary": 12,
+          "false_releases": 6,
+          "necessary_recall": 1.0,
+          "false_release_rate": 0.21428571428571427
+        },
+        "paired": {
+          "necessary_local_only": 0,
+          "necessary_reference_only": 1,
+          "false_release_local_only": 0,
+          "false_release_reference_only": 6
+        },
+        "necessary_recall_difference": -0.08333333333333337,
+        "false_release_rate_difference": -0.21428571428571427
+      },
+      "health": {
+        "local": {
+          "cases": 40,
+          "necessary": 12,
+          "released_necessary": 12,
+          "false_releases": 1,
+          "necessary_recall": 1.0,
+          "false_release_rate": 0.03571428571428571
+        },
+        "reference": {
+          "cases": 40,
+          "necessary": 12,
+          "released_necessary": 12,
+          "false_releases": 5,
+          "necessary_recall": 1.0,
+          "false_release_rate": 0.17857142857142858
+        },
+        "paired": {
+          "necessary_local_only": 0,
+          "necessary_reference_only": 0,
+          "false_release_local_only": 0,
+          "false_release_reference_only": 4
+        },
+        "necessary_recall_difference": 0.0,
+        "false_release_rate_difference": -0.14285714285714285
+      },
+      "mail": {
+        "local": {
+          "cases": 40,
+          "necessary": 12,
+          "released_necessary": 10,
+          "false_releases": 0,
+          "necessary_recall": 0.8333333333333334,
+          "false_release_rate": 0.0
+        },
+        "reference": {
+          "cases": 40,
+          "necessary": 12,
+          "released_necessary": 12,
+          "false_releases": 5,
+          "necessary_recall": 1.0,
+          "false_release_rate": 0.17857142857142858
+        },
+        "paired": {
+          "necessary_local_only": 0,
+          "necessary_reference_only": 2,
+          "false_release_local_only": 0,
+          "false_release_reference_only": 5
+        },
+        "necessary_recall_difference": -0.16666666666666663,
+        "false_release_rate_difference": -0.17857142857142858
+      },
+      "projects": {
+        "local": {
+          "cases": 40,
+          "necessary": 12,
+          "released_necessary": 7,
+          "false_releases": 0,
+          "necessary_recall": 0.5833333333333334,
+          "false_release_rate": 0.0
+        },
+        "reference": {
+          "cases": 40,
+          "necessary": 12,
+          "released_necessary": 11,
+          "false_releases": 6,
+          "necessary_recall": 0.9166666666666666,
+          "false_release_rate": 0.21428571428571427
+        },
+        "paired": {
+          "necessary_local_only": 1,
+          "necessary_reference_only": 5,
+          "false_release_local_only": 0,
+          "false_release_reference_only": 6
+        },
+        "necessary_recall_difference": -0.33333333333333326,
+        "false_release_rate_difference": -0.21428571428571427
+      },
+      "shopping": {
+        "local": {
+          "cases": 40,
+          "necessary": 12,
+          "released_necessary": 12,
+          "false_releases": 0,
+          "necessary_recall": 1.0,
+          "false_release_rate": 0.0
+        },
+        "reference": {
+          "cases": 40,
+          "necessary": 12,
+          "released_necessary": 11,
+          "false_releases": 2,
+          "necessary_recall": 0.9166666666666666,
+          "false_release_rate": 0.07142857142857142
+        },
+        "paired": {
+          "necessary_local_only": 1,
+          "necessary_reference_only": 0,
+          "false_release_local_only": 0,
+          "false_release_reference_only": 2
+        },
+        "necessary_recall_difference": 0.08333333333333337,
+        "false_release_rate_difference": -0.07142857142857142
+      },
+      "support": {
+        "local": {
+          "cases": 40,
+          "necessary": 12,
+          "released_necessary": 9,
+          "false_releases": 0,
+          "necessary_recall": 0.75,
+          "false_release_rate": 0.0
+        },
+        "reference": {
+          "cases": 40,
+          "necessary": 12,
+          "released_necessary": 12,
+          "false_releases": 7,
+          "necessary_recall": 1.0,
+          "false_release_rate": 0.25
+        },
+        "paired": {
+          "necessary_local_only": 0,
+          "necessary_reference_only": 3,
+          "false_release_local_only": 0,
+          "false_release_reference_only": 7
+        },
+        "necessary_recall_difference": -0.25,
+        "false_release_rate_difference": -0.25
+      },
+      "travel": {
+        "local": {
+          "cases": 40,
+          "necessary": 12,
+          "released_necessary": 6,
+          "false_releases": 0,
+          "necessary_recall": 0.5,
+          "false_release_rate": 0.0
+        },
+        "reference": {
+          "cases": 40,
+          "necessary": 12,
+          "released_necessary": 12,
+          "false_releases": 5,
+          "necessary_recall": 1.0,
+          "false_release_rate": 0.17857142857142858
+        },
+        "paired": {
+          "necessary_local_only": 0,
+          "necessary_reference_only": 6,
+          "false_release_local_only": 0,
+          "false_release_reference_only": 5
+        },
+        "necessary_recall_difference": -0.5,
+        "false_release_rate_difference": -0.17857142857142858
+      }
+    }
+  },
+  "operational_fixture_sha256": "0c9de969866bd435235e7a558f7d352087c165a2fda40de2da851d861a116793",
+  "unscored_generated_tests": [
+    {
+      "file": "test.jsonl",
+      "rows": 21114,
+      "sha256": "4e64cba7009ad9c43b04438c797d8e1c5ab7ddf594f6896a07ba8569b48a877c"
+    },
+    {
+      "file": "intent-test.jsonl",
+      "rows": 3028,
+      "sha256": "1e0d369de965a8863b3ad2d099f535301530f5e2c1f5cd8a808e8ec1d54d5c09"
+    },
+    {
+      "file": "events-test.jsonl",
+      "rows": 3934,
+      "sha256": "4d362c404d580f1e907993452c5c5427f2b9f51e4e9187a5060148a7274d083d"
+    }
+  ],
+  "evidence_sha256": {
+    "chrome": "3febddc65213bca6a05111c10540011c04c6cf046ab1b3095b7728f0011b252b",
+    "reference": "82722810812e6aca04c93b6e6003744d0352923c6cdad5fbfddff4b7405455b4",
+    "comparison": "0c0d0d07a3222bb125c2f8d419f8b2561ae53fc67ab068bcec04ceafa39e4298",
+    "development": "fe367ece93faeb6c7b30f7ff7ac108a10a9c78fa00a069a6671bdafc33cfd0c3",
+    "fidelity": "0735b0abaf2d26438831e724d9b8c5718348e2cf3e50e55d8a7a0e442a0e925e",
+    "manifest": "fe40e5a29689bbeb5f1b77be603fd8b68fd3794a68e791358c6ad4a4c0492713",
+    "corpus": "3298e1f469f32f305c0fab7d614aa4dc762d9b7bdf707b4fbab30c580b76c7f0"
+  }
+}

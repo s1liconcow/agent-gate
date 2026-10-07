@@ -27,7 +27,7 @@ export async function adjudicatePurposeRead(task,request,origin,{capture,classif
     const browser = task.inference?.provider === 'purpose_browser';
     const blocks=snapshot.blocks.filter(b=>(browser ? ['inbox_subject','inbox_snippet','semantic_text'].includes(b.source_kind) : ['inbox_subject','inbox_snippet'].includes(b.source_kind))&&typeof b.text==='string'&&b.text.length>0&&b.text.length<=450&&typeof b.context==='string'&&b.context.length<=180&&(browser ? b.context.trim().length > 0 : inboxContext(b.context.normalize('NFKC')))&&!sensitiveInbox.test(b.text.normalize('NFKC'))&&!sensitiveInbox.test(b.context.normalize('NFKC')));
     const prepared=prepareSnapshot({...snapshot,blocks},task).entries.filter(e=>e.kind==='text'&&e.text.length<=450);
-    const entries=blocks.map(block=>financialEntry(block,task,financialPolicy)||prepared.find(entry=>entry.id===block.ref)).filter(Boolean);
+    const entries=blocks.map(block=>financialEntry(block,task,financialPolicy,request.need)||prepared.find(entry=>entry.id===block.ref)).filter(Boolean);
     const items=[];
     for(const entry of entries) {
       const sender=blocks.find(b=>b.ref===entry.id)?.sender;

@@ -46,6 +46,8 @@ def main():
         probabilities = 1 / (1 + np.exp(np.clip((logits[:, 0] - logits[:, 1]) / manifest['temperature'], -80, 80)))
         for row, probability in zip(batch, probabilities):
             results.append({'id': row['id'], 'domain': row['domain'], 'expected': bool(row['label']), 'probability': float(probability), 'allow': bool(probability >= .98)})
+        if len(results) % 800 == 0 or len(results) == len(rows):
+            print(json.dumps({'completed': len(results), 'total': len(rows)}), flush=True)
 
     def summarize(values):
         return {'cases': len(values), 'necessary': sum(r['expected'] for r in values), 'released_necessary': sum(r['expected'] and r['allow'] for r in values), 'false_releases': sum(not r['expected'] and r['allow'] for r in values)}
