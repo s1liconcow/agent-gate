@@ -67,3 +67,4 @@ outputs/
 /public/xpath.mjs
 /public/read-grants.mjs
 /extension/read-grants.mjs
+/dist/pages/

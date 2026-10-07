@@ -6,6 +6,7 @@
   "scripts": {
     "setup": "node scripts/setup.mjs",
     "build": "node scripts/build.mjs",
+    "build:pages": "node scripts/build-pages.mjs",
     "build:trial": "npm run build && node scripts/build-trial.mjs",
     "dev": "node scripts/dev.mjs",
     "deploy": "npm run build && wrangler deploy",
