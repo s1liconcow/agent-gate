@@ -104,25 +104,23 @@ export class LoginSync {
     }
     return {profile: updated, connections: next, connection};
   }
-  async activate(id, sourceId, prepared, browserConnection, cleanup) {
+  async activate(id, sourceId, prepared, cleanup) {
     const {item, config} = await this.get(id, sourceId);
     await this.authority(item, config);
-    await this.save(config, prepared, browserConnection, {...item, status: 'imported', receipt: undefined}, cleanup);
+    await this.save(config, prepared, {...item, status: 'imported', receipt: undefined}, cleanup);
     await this.eraseChunks(item).catch(() => {}); return {connection: prepared.connection, status: 'imported'};
   }
-  async save(config, prepared, connection, transfer, cleanup) {
+  async save(config, prepared, transfer, cleanup) {
     const store = this.store(config); await store.key();
     const commit = async storage => {
       const target = new HostedState(storage, config.account_id, config.browser_id);
       await target.put('login', prepared.profile); await target.put('login-connections', prepared.connections);
-      await target.put('connection', connection);
+      await target.delete('connection');
       await target.delete('login-view-until');
+      await target.delete('live-view-until');
       for (const key of ['agent_tabs', 'bindings', 'guarded', 'checkout_bindings']) await target.delete('session:' + key);
       if (transfer) await storage.put('login-transfer:' + transfer.id, transfer);
-      if (cleanup) {
-        await storage.delete(cleanup.candidate);
-        if (cleanup.previous) await storage.put(cleanup.previous.name, {sessionId: cleanup.previous.sessionId});
-      }
+      if (cleanup) await storage.put(cleanup.name, {sessionId: cleanup.sessionId});
     };
     await this.storage.transaction(commit);
   }

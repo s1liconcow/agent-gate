@@ -206,9 +206,10 @@ test('encrypted uploads support retry, reject changed bytes and activate a singl
   assert.ok(!JSON.stringify([...f.db.items]).includes('synthetic-large-login'));
   const verified = await f.sync.payload(item.id, f.item.id); assert.deepEqual(verified.profile, payload);
   const prepared = await f.sync.prepare(f.config, verified.profile, item.challenge.selection);
-  await f.sync.activate(item.id, f.item.id, prepared, {sessionId: 'new-browser'});
+  await f.sync.activate(item.id, f.item.id, prepared);
   assert.deepEqual(await f.store.get('login'), payload);
-  await assert.rejects(f.sync.activate(item.id, f.item.id, prepared, {sessionId: 'replayed-browser'}));
+  assert.equal(await f.store.get('connection'), undefined);
+  await assert.rejects(f.sync.activate(item.id, f.item.id, prepared));
   assert.ok(![...f.db.items.keys()].some(key => key.includes(':upload:')));
   assert.ok(!JSON.stringify(await f.sync.pending()).includes('synthetic-large-login'));
 });
@@ -232,51 +233,57 @@ test('per-app refresh and erasure remove old app tokens while preserving other a
   assert.equal(erased.origins.length, 1); assert.equal(erased.origins[0].origin, 'https://linear.app');
   assert.equal(erased.origins[0].localStorage[0].value, 'keep-other-app');
 });
-test('profile and connection activation roll back together on storage failure', async () => {
+test('profile, old connection and transfer roll back together on storage failure', async () => {
   const f = await fixture(); await f.store.put('login', {cookies: [cookie('old')], origins: []});
+  await f.store.put('connection', {sessionId: 'old-browser'});
   const {item, raw} = await transfer(f); await upload(f, item, raw);
   const prepared = await f.sync.prepare(f.config, profile(), selected());
-  const put = f.db.put.bind(f.db); f.db.put = async (key, value) => { if (key.endsWith(':connection')) throw new Error('Synthetic storage failure'); return put(key, value); };
-  await assert.rejects(f.sync.activate(item.id, f.item.id, prepared, {sessionId: 'failed-browser'}));
+  const put = f.db.put.bind(f.db); f.db.put = async (key, value) => { if (key === 'login-transfer:' + item.id) throw new Error('Synthetic storage failure'); return put(key, value); };
+  await assert.rejects(f.sync.activate(item.id, f.item.id, prepared));
   assert.equal((await f.store.get('login')).cookies[0].value, 'old'); assert.equal((await f.sync.get(item.id)).item.status, 'ready');
+  assert.equal((await f.store.get('connection')).sessionId, 'old-browser');
   assert.deepEqual(await f.sync.connections(), []);
 });
-test('login restart waits for running browser work and failed restoration keeps the old connection', async () => {
+test('saving a login waits for running work, checkpoints refreshed logins and never contacts Browser Run', async () => {
   const f = await fixture(); await f.store.put('connection', {account_id: account, browser_id: f.config.browser_id, sessionId: 'old'});
   await f.store.put('login', {cookies: [cookie('old')], origins: []});
-  let release, committed = false; const events = [];
-  const context = {addCookies: async () => { events.push('restore'); throw new Error('Synthetic restore failure'); }};
-  const hosted = new HostedBrowser({storage: f.db, consent: f.consent, scripts: {}, factory: {open: async (_, acquire) => { events.push('open'); await acquire('candidate'); return {browser: {contexts: () => [context], close: async () => {}}, sessionId: 'candidate'}; }, close: async id => events.push('close:' + id)}});
-  hosted.connected = async callback => { events.push('save-latest'); return callback({}); };
-  const work = hosted.serial(() => new Promise(resolve => { release = resolve; }));
-  const switched = hosted.replaceLogin(() => f.sync.prepare(f.config, profile(), selected()), async () => { committed = true; });
-  await new Promise(resolve => setImmediate(resolve)); assert.deepEqual(events, []); release(); await work;
-  await assert.rejects(switched); assert.equal(committed, false);
-  assert.equal((await f.store.get('connection')).sessionId, 'old'); assert.equal((await f.store.get('login')).cookies[0].value, 'old');
-  assert.deepEqual(events, ['save-latest', 'open', 'restore', 'close:candidate']);
+  let release, committed = false;
+  const hosted = new HostedBrowser({storage: f.db, consent: f.consent, factory: {open: () => assert.fail('Saving cannot acquire or reconnect'), close: () => assert.fail('Cleanup cannot block saving')}});
+  hosted.connected = () => assert.fail('Saving cannot contact the provider');
+  const work = hosted.serial(async () => { await new Promise(resolve => { release = resolve; }); await f.store.put('login', {cookies: [{...cookie('refreshed-other-app'), domain: 'linear.app'}], origins: []}); });
+  const saved = hosted.updateLogin(() => f.sync.prepare(f.config, profile(), selected()), async (config, prepared, cleanup) => { committed = true; await f.sync.save(config, prepared, undefined, cleanup); });
+  await new Promise(resolve => setImmediate(resolve)); assert.equal(committed, false); release(); await work; await saved;
+  assert.equal(committed, true); assert.equal(await f.store.get('connection'), undefined);
+  assert.equal((await f.store.get('login')).cookies.find(cookie => cookie.domain === 'linear.app').value, 'refreshed-other-app');
+  assert.ok(!JSON.stringify([...f.db.items]).includes('refreshed-other-app'));
 });
-test('successful import ends approved tasks, preserves refreshed cloud state and atomically switches cleanup ownership', async () => {
+test('saving ends approved tasks and invalidates old browser state while cleanup failures preserve the encrypted vault', async () => {
   const f = await fixture(), engine = new Engine(f.db);
   const task = await engine.create({goal: 'Read GitHub project.', origins: ['https://github.com'], permissions: ['read'], ttl_seconds: 300});
   await engine.approveSession(task.id, await f.sign((await engine.get(task.id)).challenge));
   const active = await engine.get(task.id); active.view = {origin: 'https://github.com', text: 'old identity'}; await engine.save(active);
   await f.store.put('connection', {account_id: account, browser_id: f.config.browser_id, sessionId: 'old'});
   const {item, raw} = await transfer(f); await upload(f, item, raw);
-  let oldCloseAttempts = 0, restored;
-  const context = {addCookies: async cookies => { restored = cookies; assert.equal((await engine.get(task.id)).status, 'active'); }, newPage: async () => ({}), newCDPSession: async () => ({send: async () => ({targetInfo: {targetId: 'new-anchor'}}), detach: async () => {}})};
+  let oldCloseAttempts = 0;
+  await f.store.put('live-view-until', Date.now() + 60000);
+  await f.store.put('session:agent_tabs', {stale: 'old-tab'});
+  await f.store.put('browser-retry', {retry_at: Date.now() + 86400000});
   const hosted = new HostedBrowser({storage: f.db, consent: f.consent, scripts: {}, factory: {
-    open: async (_, acquire) => { await acquire('candidate'); return {browser: {contexts: () => [context], close: async () => {}}, sessionId: 'candidate'}; },
+    open: () => assert.fail('Sharing cannot allocate a browser, including during cooldown'),
     close: async id => { assert.equal(id, 'old'); if (++oldCloseAttempts === 1) throw new Error('Synthetic close failure'); }
   }});
-  hosted.connected = async callback => { await f.store.put('login', {cookies: [{...cookie('refreshed-cloud-login'), domain: 'linear.app'}], origins: []}); return callback({}); };
-  const result = await hosted.replaceLogin(async config => {
+  hosted.privateSession.set('stale', 'ephemeral-key');
+  const result = await hosted.updateLogin(async config => {
     const verified = await f.sync.payload(item.id, f.item.id);
     return f.sync.prepare(config, {...verified.profile, origins: []}, selected());
-  }, async (config, prepared, connection, cleanup) => { await engine.end(task.id); return f.sync.activate(item.id, f.item.id, prepared, connection, cleanup); });
+  }, async (config, prepared, cleanup) => { await engine.end(task.id); return f.sync.activate(item.id, f.item.id, prepared, cleanup); });
   assert.equal(result.status, 'imported'); assert.equal((await engine.get(task.id)).status, 'revoked'); assert.equal((await engine.get(task.id)).view, undefined); assert.equal((await engine.get(task.id)).session_receipt, undefined);
-  assert.equal(restored.find(cookie => cookie.domain === 'linear.app').value, 'refreshed-cloud-login');
-  assert.equal((await f.store.get('connection')).sessionId, 'candidate');
+  assert.equal(await f.store.get('connection'), undefined);
+  assert.equal(await f.store.get('live-view-until'), undefined);
+  assert.equal(await f.store.get('session:agent_tabs'), undefined);
+  assert.equal(hosted.privateSession.size, 0); assert.equal(oldCloseAttempts, 0);
   const cleanup = await f.db.list({prefix: 'hosted:cleanup:'}); assert.equal(cleanup.size, 1); assert.equal([...cleanup.values()][0].sessionId, 'old');
+  await assert.rejects(hosted.cleanup()); assert.deepEqual(await f.store.get('login'), {cookies: [cookie()], origins: []});
   await hosted.cleanup(); assert.equal((await f.db.list({prefix: 'hosted:cleanup:'})).size, 0);
 });
 test('overlapping app connections require refresh of their existing shared session', async () => {
@@ -294,6 +301,6 @@ test('revoking a source after verification blocks activation and oversized or in
   await assert.rejects(f.sync.chunk(item.id, f.item.id, {index: 1, data: b64url(raw)}));
   await assert.rejects(f.sync.chunk(item.id, f.item.id, {index: 0, data: b64url(raw.subarray(1))}));
   await upload(f, item, raw); const verified = await f.sync.payload(item.id, f.item.id), prepared = await f.sync.prepare(f.config, verified.profile, selected());
-  await f.sources.revoke(f.item.id); await assert.rejects(f.sync.activate(item.id, f.item.id, prepared, {sessionId: 'denied'}));
+  await f.sources.revoke(f.item.id); await assert.rejects(f.sync.activate(item.id, f.item.id, prepared));
   assert.equal(await f.store.get('login'), undefined);
 });

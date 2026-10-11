@@ -85,8 +85,10 @@ browsing processes raw pages and authentication data on Cloudflare. Agents
 receive the existing filtered views and minimal action results through MCP.
 
 Extension-to-cloud import is implemented in [Login sync](LOGIN_SYNC.md). Its separate
-login-source pairing allows desktop sessions to seed the cloud browser while
-preserving the account's current browser connection.
+login-source pairing saves desktop logins directly into the encrypted profile.
+Sharing needs no running browser. A task or owner Live View creates an account-owned
+process and restores that profile when needed. Login changes end cloud tasks and
+invalidate the old process; durable cleanup closes it independently of saving.
 
 Live View is available only to the authenticated account owner for an active
 task tab. MCP never receives Live View URLs, CDP target IDs, browser session IDs

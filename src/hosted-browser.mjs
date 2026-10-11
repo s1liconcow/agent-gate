@@ -218,36 +218,18 @@ export class HostedBrowser {
     result.record_status = !config ? 'browser_disabled' : result.last_error ? 'provider_error' : result.retry ? 'cooldown_without_error' : 'no_error';
     return result;
   }
-  replaceLogin(prepare, commit) {
+  updateLogin(prepare, commit) {
     return this.serial(async () => {
       const config = await this.config(), store = await this.store();
-      // Capture sessions refreshed in the cloud before merging a desktop import.
-      if (await store.get('connection')) await this.connected(async () => {});
       const prepared = await prepare(config), old = await store.get('connection');
-      const cleanupName = 'hosted:cleanup:' + crypto.randomUUID();
-      const cleanup = {candidate: cleanupName, previous: old ? {name: 'hosted:cleanup:' + crypto.randomUUID(), sessionId: old.sessionId} : null};
-      let candidate, activated = false;
-      try {
-        candidate = await this.openConnection(store, undefined, sessionId => this.storage.put(cleanupName, {sessionId}));
-        const context = candidate.browser.contexts()[0];
-        if (!context) throw new Error('Persistent browser context unavailable.');
-        const adapter = new HostedAdapter(candidate.browser, context, {scripts: this.scripts, store});
-        // Validate restoration in a separate process before changing the profile.
-        await adapter.restore(prepared.profile);
-        const anchor = await adapter.target(await context.newPage());
-        await this.config(config);
-        const result = await commit(config, prepared, {account_id: config.account_id, browser_id: config.browser_id, sessionId: candidate.sessionId, anchor, last_activity_at: this.now()}, cleanup);
-        activated = true; this.privateSession.clear();
-        if (old) {
-          try { await this.factory.close(old.sessionId); await this.storage.delete(cleanup.previous.name); } catch { /* retry through cleanup */ }
-        }
-        return result;
-      } finally {
-        if (candidate) await candidate.browser.close().catch(() => {});
-        if (!activated && candidate) {
-          try { await this.factory.close(candidate.sessionId); await this.storage.delete(cleanupName); } catch { /* retry through cleanup */ }
-        }
-      }
+      // Running work checkpoints refreshed logins before releasing this queue.
+      // Sharing only changes encrypted state. Browser capacity is needed later,
+      // when a task or owner Live View actually restores the profile.
+      const cleanup = old ? {name: 'hosted:cleanup:' + crypto.randomUUID(), sessionId: old.sessionId} : null;
+      await this.config(config);
+      const result = await commit(config, prepared, cleanup);
+      this.privateSession.clear();
+      return result;
     });
   }
   loginView(connectionId) {

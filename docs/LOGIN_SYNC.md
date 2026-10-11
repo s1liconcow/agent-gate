@@ -14,7 +14,9 @@ browser preserves the cloud connection and shared logins.
 That browser click authorizes the transfer. Each app uploads immediately to its
 paired account without another phone approval. A failed or cancelled upload keeps
 remaining apps selected for retry. Sharing replaces those cloud logins and ends
-running cloud tasks. Open an app in the phone app to check sign-in or complete MFA.
+running cloud tasks. It saves encrypted cookies and selected storage without
+starting or reconnecting a browser. The next cloud task or owner Live View
+restores the saved profile. Open an app in the phone app to check sign-in or complete MFA.
 
 Amazon, Google Workspace, GitHub, Slack, Notion and Linear use saved cookies, so
 they can be closed. **More sign-in data** offers selected storage from an open tab.
@@ -51,11 +53,14 @@ The same bound applies to the merged profile. Staging is encrypted with account
 and browser identity. R2 stores public models only. Values stay out of approval
 summaries, logs and MCP responses.
 
-Import and erasure use the hosted operation queue. A new browser process restores
-the profile before activation. Profile, connection metadata and consumed transfer
-commit atomically. Failure preserves the prior browser and profile. Refresh and
-erasure remove all cloud cookies and storage in the app’s scope; other apps are
-preserved. Separate overlapping app connections are rejected.
+Import and erasure use the hosted operation queue. Running browser work saves
+refreshed logins before releasing that queue. The encrypted profile, app metadata,
+consumed transfer and invalidation of the old process commit atomically. Storage
+failure preserves the prior profile and connection. Old processes enter durable
+cleanup; their closure does not delay sharing. Browser quotas and acquisition
+cooldowns apply when a task needs a browser, independently of saving credentials.
+Refresh and erasure remove cookies and storage in the app’s scope while preserving
+other apps. Separate overlapping app connections are rejected.
 
 Device-bound sessions can require signing in again in the cloud browser. Live
 third-party sessions have not been exercised. The owner can mark a shared app
@@ -65,8 +70,9 @@ signed in after checking it; this is a status label, not another transfer approv
 
 `npm run test:login-sync` covers pairing, closed-app cookies, selected-only exports,
 one-click transfers, typed storage restoration, document changes, retries,
-cancellation, revoked sources, expiry, tenant isolation, payload tampering and
-atomic activation in real Chromium and a temporary Workers runtime.
+cancellation, revoked sources, expiry, tenant isolation, payload tampering,
+atomic encrypted saving without browser allocation, and restoration on demand
+in real Chromium and a temporary Workers runtime.
 
 `npm run test:ui` checks signed task consent, running tasks, history, named apps
 and collapsed settings. Pairing accepts 30 seconds of client clock drift; the

@@ -18,7 +18,28 @@ const invite = 'i'.repeat(43);
 let runtime;
 try {
   const config = JSON.parse(await readFile(resolve(root, 'wrangler.jsonc')));
-  config.main = resolve(root, 'src/worker.mjs'); config.assets.directory = resolve(root, 'public');
+  // A test-only owner operation checks the real browser's restored profile.
+  // The deployed Worker exposes no endpoint for retrieving saved credentials.
+  config.main = resolve(temporary, 'worker.mjs'); config.assets.directory = resolve(root, 'public');
+  await writeFile(config.main, `import app, {Gate as AccountGate, Registry} from ${JSON.stringify(resolve(root, 'src/worker.mjs'))};
+export {Registry};
+export class Gate extends AccountGate {
+  async fetch(request) {
+    if(new URL(request.url).pathname !== '/api/owner/synthetic-vault-check') return super.fetch(request);
+    await this.hostedLock(() => this.auth(request, 'owner'));
+    return Response.json(await this.hosted.serial(() => this.hosted.connected(async ({adapter}) => {
+      const cookies = await adapter.context.cookies();
+      const page = await adapter.context.newPage();
+      await page.route('**/*', route => route.fulfill({contentType: 'text/html', body: '<title>Synthetic app</title>'}));
+      await page.goto('https://www.amazon.com');
+      const storage = await page.evaluate(() => localStorage.getItem('auth'));
+      await page.close();
+      return {cookie_restored: cookies.some(item => item.name === 'login' && item.value === 'synthetic-http-only'),
+        storage_restored: storage === 'synthetic-storage-' + 'x'.repeat(14000)};
+    })));
+  }
+}
+export default app;`);
   config.vars = {BETA_INVITE_TOKEN: invite, BETA_MAX_USERS: '10'};
   config.dev = {...config.dev, inspector_port: 0};
   await writeFile(resolve(temporary, 'wrangler.json'), JSON.stringify(config));
@@ -64,9 +85,11 @@ try {
   assert.equal((await source('status', undefined, b.url)).status, 403);
   assert.equal((await source('profile')).status, 404);
   assert.deepEqual((await ok(await source('status'))).login_sync, {version: 2, apps: ['amazon', 'google', 'github', 'slack', 'notion', 'linear', 'tab']});
-  const payload = {cookies: [{name: 'login', value: 'synthetic-http-only-' + 'x'.repeat(12000), domain: '.amazon.com', path: '/', httpOnly: true, secure: true, sameSite: 'Lax', expires: -1}], origins: []};
+  const selection = {...selectionForApp('amazon'), local_storage: ['auth']};
+  const payload = {cookies: [{name: 'login', value: 'synthetic-http-only', domain: '.amazon.com', path: '/', httpOnly: true, secure: true, sameSite: 'Lax', expires: -1}],
+    origins: [{origin: selection.origin, localStorage: [{name: 'auth', value: 'synthetic-storage-' + 'x'.repeat(14000)}], indexedDB: []}]};
   const raw = new TextEncoder().encode(canonical(payload));
-  const transfer = await ok(await source('transfers', {selection: selectionForApp('amazon'), payload_digest: await digest(payload), payload_bytes: raw.length}), 201);
+  const transfer = await ok(await source('transfers', {selection, payload_digest: await digest(payload), payload_bytes: raw.length}), 201);
   const first = {index: 0, data: b64url(raw.subarray(0, LOGIN_CHUNK_BYTES))};
   assert.equal(transfer.status, 'ready');
   assert.deepEqual((await ok(await a.owner('login-transfers'))).transfers, []);
@@ -79,13 +102,24 @@ try {
   assert.equal((await source('transfers/' + transfer.id + '/chunk', {index: 0, data: 'x'.repeat(21000)})).status, 413);
   assert.equal((await source('transfers/' + transfer.id + '/import', {}, b.url)).status, 403);
   assert.ok(!JSON.stringify(await ok(await a.owner('login-transfers'))).includes('synthetic-http-only'));
+  const imported = await ok(await source('transfers/' + transfer.id + '/import', {}));
+  assert.equal(imported.status, 'imported');
+  assert.equal((await source('transfers/' + transfer.id + '/import', {})).status, 409);
+  const saved = await ok(await source('status'));
+  assert.equal(saved.connections.length, 1); assert.ok(!JSON.stringify(saved).includes('synthetic-http-only'));
+  assert.equal((await ok(await a.owner('hosted-browser/diagnostics'))).connection_recorded, false);
+  assert.deepEqual(await ok(await a.owner('synthetic-vault-check')), {cookie_restored: true, storage_restored: true});
+  assert.equal((await ok(await a.owner('hosted-browser/diagnostics'))).connection_recorded, true);
+  await ok(await a.owner('login-connections/' + imported.connection.id + '/disconnect', {}));
+  assert.deepEqual((await ok(await source('status'))).connections, []);
+  assert.equal((await ok(await a.owner('hosted-browser/diagnostics'))).connection_recorded, false);
   await ok(await source('transfers/' + transfer.id + '/cancel', {}));
   assert.equal((await source('transfers/' + transfer.id + '/chunk', first)).status, 404);
   await ok(await a.owner('login-sources/' + paired.id + '/revoke', {}));
   assert.equal((await source('status')).status, 403);
   assert.equal((await ok(await a.owner('hosted-browser'))).enabled, true);
   assert.deepEqual((await ok(await b.owner('login-connections'))).connections, []);
-  console.log('Login-sync Worker route checks passed: QR pairing, independent roles, tenant isolation, one-click sharing, bounded chunks, cancellation and source revocation.');
+  console.log('Login-sync Worker checks passed: encrypted sharing without allocation, real Chromium restoration on demand, removal, QR pairing, tenant isolation, bounded chunks and source revocation.');
 } finally {
   if (runtime && runtime.exitCode === null) { const ended = new Promise(resolve => runtime.once('exit', resolve)); runtime.kill('SIGTERM'); await ended; }
   await rm(temporary, {recursive: true, force: true});

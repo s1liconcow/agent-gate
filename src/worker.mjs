@@ -21,12 +21,13 @@ import {hostedAsset} from './hosted-assets.mjs';
 import {hostedModel, hostedScripts} from './generated-hosted.mjs';
 import {LoginSync} from './login-sync.mjs';
 import {loginSyncCapabilities} from '../shared/login-sync.mjs';
+import {apiFailure} from './api-error.mjs';
 
 export {Registry};
 
 const headers = {'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer'};
 const json = (value, status = 200) => new Response(JSON.stringify(value), {status, headers});
-const errorResponse = error => json({error: {code: error instanceof GateError ? error.code : 'FAILED_CLOSED', message: error instanceof GateError ? error.message : 'The operation failed closed.'}}, error instanceof GateError ? error.status : 500);
+const errorResponse = error => { const {status, ...failure} = apiFailure(error); return json({error: failure}, status); };
 // Chrome omits Origin on some privileged extension GET requests. This declaration
 // is routing metadata, not authentication: the browser credential is still required.
 const browserOrigin = request => request.headers.get('Origin') || request.headers.get('X-AgentGate-Extension');
@@ -130,7 +131,7 @@ export class Gate extends DurableObject {
     });
   }
   async locked(callback) {
-    return this.ctx.blockConcurrencyWhile(async () => { try { return {result: await callback()}; } catch (error) { return {error: {code: error.code || 'FAILED_CLOSED', message: error.code ? error.message : 'The operation failed closed.', status: error.status || 500}}; } });
+    return this.ctx.blockConcurrencyWhile(async () => { try { return {result: await callback()}; } catch (error) { return {error: apiFailure(error)}; } });
   }
   createConnector(auth, name, handle) { return this.locked(async () => { const result = await this.connectors.create(auth, name, handle); this.ctx.waitUntil(this.notify()); return result; }); }
   connectorStatus(id) { return this.locked(async () => { const item = await this.connectors.get(id); return {status: item.status, expires_at: item.expires_at}; }); }
@@ -221,7 +222,7 @@ export class Gate extends DurableObject {
         exact(await body(request), []);
         if (loginOperation[4] === 'live-view') return json(await this.hosted.loginView(loginOperation[3]));
         let transfer;
-        const result = await this.hosted.replaceLogin(
+        const result = await this.hosted.updateLogin(
           config => this.hostedLock(async () => {
             if (loginOperation[2]) {
               transfer = await this.loginSync.payload(loginOperation[2], sourceId);
@@ -232,12 +233,12 @@ export class Gate extends DurableObject {
             if (!connection) fail('NOT_FOUND', 'Unknown app connection.', 404);
             return this.loginSync.prepare(config, null, connection.selection, connection.id);
           }),
-          (config, prepared, connection, cleanup) => this.hostedLock(async () => {
+          (config, prepared, cleanup) => this.hostedLock(async () => {
             if ((await this.hostedConsent.current())?.browser_id !== config.browser_id) fail('STALE_APPROVAL', 'Cloud browser changed.', 409);
             if (!transfer) await this.auth(request, 'owner');
             await this.endHostedTasks();
-            if (transfer) return this.loginSync.activate(transfer.item.id, sourceId, prepared, connection, cleanup);
-            await this.loginSync.save(config, prepared, connection, undefined, cleanup); return {status: 'disconnected'};
+            if (transfer) return this.loginSync.activate(transfer.item.id, sourceId, prepared, cleanup);
+            await this.loginSync.save(config, prepared, undefined, cleanup); return {status: 'disconnected'};
           })
         );
         return json(result);
