@@ -45,6 +45,22 @@ export async function localModel(type,input={}) {
   phoneBrowser = await chromium.launch({headless: true}); const phone = await phoneBrowser.newPage({viewport: {width: 390, height: 844}});
   phone.on('pageerror', error => errors.push(error.message));
   await phone.goto(coordinator + '/#pair=' + pairingToken); await phone.getByRole('button', {name: 'Connect', exact: true}).click(); await phone.locator('#inbox').waitFor({state: 'visible'});
+  // Exercise real Worker authorization and policy routes before any checkout.
+  for (const path of ['purchase-policies', 'purchase-policies/approve', 'purchase-policies/' + 'a'.repeat(32) + '/revoke']) {
+    const denied = await fetch(coordinator + '/api/owner/' + path, {method: 'POST', headers: {'Origin': coordinator, 'Content-Type': 'application/json'}, body: '{}'});
+    assert.equal(denied.status, 403, 'Every owner policy mutation requires the paired owner credential.');
+  }
+  await phone.locator('#device > summary').click(); await phone.locator('#purchasePolicySettings > summary').click();
+  await phone.getByLabel('Approved task', {exact:true}).fill('Buy one blue ceramic coffee mug for at most $20.00 including shipping.');
+  await phone.getByLabel('Merchant website', {exact:true}).fill(origin); await phone.getByLabel('Product ID from order review', {exact:true}).fill('BLUE-MUG-12'); await phone.getByLabel('Exact product name', {exact:true}).fill('Blue ceramic mug');
+  await phone.getByLabel('Exact saved payment description from order review', {exact:true}).fill('Saved synthetic card'); await phone.getByLabel('Exact delivery description from order review', {exact:true}).fill('Saved synthetic address');
+  await phone.getByRole('button', {name:'Review policy',exact:true}).click();
+  const confirmPolicy = phone.getByRole('button', {name:'Confirm and enable policy',exact:true}); await confirmPolicy.waitFor();
+  assert.equal(await phone.getByRole('button', {name:'Revoke policy',exact:true}).count(), 0, 'A policy proposal is inactive.');
+  const [approvedPolicy] = await Promise.all([phone.waitForResponse(response => response.url().endsWith('/purchase-policies/approve') && response.request().method() === 'POST'), confirmPolicy.click()]); assert.equal(approvedPolicy.status(), 200);
+  const [revokedPolicy] = await Promise.all([phone.waitForResponse(response => /purchase-policies\/[a-f0-9]{32}\/revoke$/.test(response.url()) && response.request().method() === 'POST'), phone.getByRole('button', {name:'Revoke policy',exact:true}).click()]); assert.equal(revokedPolicy.status(), 200);
+  await phone.waitForFunction(() => document.getElementById('purchasePolicies').textContent.includes('Inactive'));
+  await phone.locator('#device > summary').click();
   const review = await browser.newPage(); review.on('pageerror', error => errors.push(error.message)); await review.goto('chrome-extension://' + extensionId + '/review.html');
   await review.locator('#inferenceSettings').evaluate(el => el.open = true); await review.locator('#url').fill(coordinator);
   await review.locator('#browserPairing').evaluate(el => el.open = true);await review.getByRole('button', {name: 'Connect', exact: true}).click(); await review.locator('#pairingQR').waitFor({state: 'visible'});
@@ -97,7 +113,7 @@ export async function localModel(type,input={}) {
   await browser.close(); browser = null;
   await until(async () => (await tool('get_browser_session', {session_id: disconnecting.id})).status === 'revoked');
   assert.deepEqual(errors, []);
-  console.log('Shopping E2E passed with an explicit fixture classifier: search, compare, select, quantity, cart, full phone review, encrypted fields, one submission and observed merchant confirmation.');
+  console.log('Shopping E2E passed with an explicit fixture classifier: owner policy authentication/signature/revocation, search, compare, select, quantity, cart, full phone review, encrypted fields, one submission and observed merchant confirmation.');
 } finally {
   await mcp?.close(); await browser?.close(); await phoneBrowser?.close();
   await new Promise(resolve => merchant ? merchant.close(resolve) : resolve());

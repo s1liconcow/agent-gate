@@ -91,3 +91,9 @@ outputs/
 /extension/checkout-review.mjs
 /public/checkout-review.mjs
 /public/policy.mjs
+
+# Generated shared purchase guards
+/extension/purchase-boundary.mjs
+/extension/purchase-policy.mjs
+/public/purchase-boundary.mjs
+/public/purchase-policy.mjs

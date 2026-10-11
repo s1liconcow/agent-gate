@@ -58,7 +58,10 @@ export class LocalClassifier {
     } else if (type === 'check_action') {
       for (const key of ['decision', 'effect', 'payment_cents', 'confidence']) if (data[key] !== row.result[key]) fail('LOCAL_CLASSIFIER_REFUSED', 'The cloud action differs from its local assessment.');
       if (data.command_id !== row.state.operation_id) fail('LOCAL_CLASSIFIER_STALE', 'The command changed.');
-    } else if (row.result.decision !== 'allow' || canonical(data.snapshot?.review) !== canonical(row.input.review)) fail('LOCAL_CLASSIFIER_REFUSED', 'The cart differs from its local purpose assessment.');
+    } else {
+      if (!['allow', 'confirm'].includes(row.result.decision) || canonical(data.snapshot?.review) !== canonical(row.input.review)) fail('LOCAL_CLASSIFIER_REFUSED', 'The cart differs from its local purpose assessment.');
+      if (data.purpose_assessment) for (const key of ['decision', 'effect', 'payment_cents', 'confidence']) if (data.purpose_assessment[key] !== row.result[key]) fail('LOCAL_CLASSIFIER_REFUSED', 'The purchase assessment changed.');
+    }
     return row;
   }
   async used(row) { row.proof_used = true; delete row.input; delete row.result; await this.db.put('classifier:' + row.id, row); }

@@ -5,10 +5,11 @@ import {sessionDefaults} from './session-defaults.mjs';
 import {Engagement} from './engagement.mjs';
 import {engagementDecision} from '../shared/engagement.mjs';
 import {checkoutEnvelope, checkoutRequest, checkoutSnapshot, checkoutStates} from '../shared/checkout.mjs';
+import {PurchasePolicies} from './purchase-policies.mjs';
 
 const terminal = new Set(['revoked', 'expired', 'closed']);
 export class Engine {
-  constructor(storage, now = Date.now) { this.db = storage; this.now = now; }
+  constructor(storage, now = Date.now) { this.db = storage; this.now = now; this.purchasePolicies = new PurchasePolicies(storage, now); }
   async register(publicKey) {
     await importPhoneKey(publicKey);
     if (await this.db.get('phone')) fail('ALREADY_PAIRED', 'A phone is already paired. Reset the deployment to replace it.', 409);
@@ -103,7 +104,7 @@ export class Engine {
       ...(item.task.interaction ? {interaction: item.task.interaction} : {}),
       ...(item.task.action_policy ? {action_policy: item.task.action_policy, payment_remaining_cents: Math.max(0, item.task.action_policy.payment_limit_cents - (item.payment_committed_cents || 0))} : {}),
       ...(item.view && !terminal.has(item.status) && !checkoutStates.includes(item.status) ? {view: item.view, view_digest: item.view_digest} : {}),
-      ...(item.checkout ? {checkout: {id: item.checkout.id, status: item.checkout.status, merchant: item.checkout.merchant, total_cents: item.checkout.request.total_cents, currency: item.checkout.request.currency, code: item.checkout.code || null, site_outcome: item.checkout.confirmation ? 'merchant_confirmed' : 'unverified', ...(item.checkout.confirmation ? {confirmation: item.checkout.confirmation} : {})}} : {}),
+      ...(item.checkout ? {checkout: {id: item.checkout.id, status: item.checkout.status, merchant: item.checkout.merchant, total_cents: item.checkout.request.total_cents, currency: item.checkout.request.currency, code: item.checkout.code || null, authorization: item.checkout.policy_reference ? 'purchase_policy' : 'owner_checkout', policy: item.checkout.policy_reference || null, site_outcome: item.checkout.confirmation ? 'merchant_confirmed' : 'unverified', ...(item.checkout.confirmation ? {confirmation: item.checkout.confirmation} : {})}} : {}),
       ...(item.last_command ? {last_command: item.last_command} : {}),
       disclosure_request: item.disclosure_request || null,
       ...(granularDisclosure(item.task.disclosure) && !terminal.has(item.status) ? {dom_request: item.dom_request || null, dom_access: item.dom_access || null} : {}),
@@ -288,8 +289,13 @@ export class Engine {
     if (item.status !== 'checking_action' || input.command_id !== item.pending?.id || item.pending.deadline <= this.now() || !checksActionPurpose(item.task)) fail('STALE_COMMAND', 'This action no longer awaits a local check.', 409);
     if (!['allow', 'confirm', 'deny', ...(item.task.engagement ? ['unavailable'] : [])].includes(input.decision)) fail('INVALID_RESULT', 'Invalid local action decision.');
     let decision = item.task.interaction === 'automatic' && input.decision === 'confirm' ? 'deny' : input.decision;
-    if (item.task.purpose_guard && (input.decision !== 'allow' || !Number.isFinite(input.confidence) || input.confidence < .98 || input.confidence > 1 || input.effect !== 'other' || input.payment_cents !== 0)) decision = 'deny';
-    if (item.task.purpose_guard && item.pending.action.type === 'click' && /^(?:place\s+(?:your\s+)?order|pay\b|buy\s+now|submit\s+order|complete\s+purchase|confirm\s+(?:purchase|order))/i.test(item.view?.controls.find(control => control.ref === item.pending.action.ref)?.label || '')) decision = 'deny';
+    if (item.task.purpose_guard) {
+      decision = input.decision;
+      if (!Number.isFinite(input.confidence) || input.confidence < 0 || input.confidence > 1 || input.effect !== 'other' || input.payment_cents !== 0) decision = 'deny';
+      else if (decision === 'allow' && input.confidence < .98) decision = 'confirm';
+    }
+    if (item.task.purpose_guard && item.pending.action.type === 'click' && /^(?:place\s+(?:your\s+)?order|send\b|submit\b|pay\b|purchase\b|buy\s+now|checkout\b|complete\s+(?:purchase|order)|confirm\b|transfer\b|donate\b|delete\b|publish\b|post\b|save\b|book\b|reserve\b|unsubscribe\b|cancel\b|invite\b|share\b|subscribe\b)/i.test(item.view?.controls.find(control => control.ref === item.pending.action.ref)?.label || '')) decision = 'deny';
+    if (item.task.purpose_guard && decision === 'confirm') {item.pending.effect = 'other'; item.pending.payment_cents = 0;}
     if (item.task.engagement) {
       if (!Object.hasOwn(input, 'confidence') || !Object.hasOwn(input, 'sensitive')) fail('INVALID_RESULT', 'An engagement action requires its classifier assessment.');
       decision = engagementDecision(item.task.engagement, input);
@@ -340,12 +346,25 @@ export class Engine {
     item.status = 'checkout_preparing'; await this.save(item); return this.public(item);
   }
   async prepareCheckout(id, input) {
-    exact(input, ['checkout_id', 'snapshot']); const item = await this.get(id), checkout = item.checkout;
+    exact(input, ['checkout_id', 'snapshot', ...(input.purpose_assessment ? ['purpose_assessment'] : [])]); const item = await this.get(id), checkout = item.checkout;
     if (item.status !== 'checkout_preparing' || checkout?.id !== input.checkout_id || checkout.deadline <= this.now()) fail('STALE_CHECKOUT', 'This checkout no longer awaits preparation.', 409);
     checkout.snapshot = checkoutSnapshot(input.snapshot, item.task, checkout.request);
     checkout.challenge = {version: 1, stage: 'checkout', session_id: id, checkout_id: checkout.id, nonce: random(), scope_digest: item.scope_digest, view_digest: checkout.request.view_digest, submit_ref: checkout.request.submit_ref, snapshot: checkout.snapshot, expires_at: checkout.deadline};
     checkout.status = 'awaiting_approval'; item.status = 'awaiting_checkout';
+    if (item.task.purpose_guard && input.purpose_assessment) {
+      const result = input.purpose_assessment;
+      exact(result, ['decision', 'effect', 'payment_cents', 'confidence']);
+      if (!['allow', 'confirm'].includes(result.decision) || result.effect !== 'payment' || result.payment_cents !== checkout.snapshot.total_cents || !Number.isFinite(result.confidence) || result.confidence < 0 || result.confidence > 1 || result.decision === 'allow' && result.confidence < .98) fail('OUT_OF_SCOPE', 'A complete local purchase assessment is required.');
+      checkout.purpose_assessment = result;
+      checkout.policy_reference = await this.purchasePolicies.select({task: item.task, snapshot: checkout.snapshot, assessment: result});
+      if (checkout.policy_reference) {checkout.status = 'executing'; item.status = 'checkout_executing';}
+    }
     await this.save(item); return this.public(item);
+  }
+  async claimCheckout(id, input) {
+    exact(input, ['checkout_id', 'snapshot_digest']); const item = await this.get(id), checkout = item.checkout;
+    if (item.status !== 'checkout_executing' || checkout?.id !== input.checkout_id || !checkout.policy_reference || checkout.deadline <= this.now() || input.snapshot_digest !== await digest(checkout.snapshot)) fail('STALE_CHECKOUT', 'This exact policy checkout is no longer executable.', 409);
+    return this.purchasePolicies.claim(checkout.policy_reference, {session_id: id, checkout_id: checkout.id, scope_digest: item.scope_digest, view_digest: checkout.request.view_digest}, {task: item.task, snapshot: checkout.snapshot, assessment: checkout.purpose_assessment});
   }
   async approveCheckout(id, input) {
     exact(input, ['receipt', 'envelope']); const item = await this.get(id), checkout = item.checkout;
@@ -360,7 +379,7 @@ export class Engine {
   }
   clearCheckout(item) {
     if (!item.checkout) return;
-    for (const field of ['snapshot', 'challenge', 'receipt', 'envelope']) delete item.checkout[field];
+    for (const field of ['snapshot', 'challenge', 'receipt', 'envelope', 'purpose_assessment']) delete item.checkout[field];
   }
   async checkoutResult(id, input) {
     exact(input, ['checkout_id', 'code', ...(input.confirmation ? ['confirmation'] : [])]); const item = await this.get(id), checkout = item.checkout;
@@ -373,6 +392,7 @@ export class Engine {
       checkout.confirmation = {...c};
     }
     checkout.status = input.code === 'DISPATCHED' ? 'dispatched' : input.code === 'CHECKOUT_UNCERTAIN' ? 'uncertain' : 'failed'; checkout.code = input.code;
+    if (checkout.policy_reference) await this.purchasePolicies.audit(checkout.policy_reference.id, checkout.status, {checkout_id: checkout.id, total_cents: checkout.request.total_cents, site_outcome: checkout.confirmation ? 'merchant_confirmed' : 'unverified'});
     this.clearCheckout(item); item.status = 'closed'; delete item.view; delete item.view_digest; item.fills = {};
     await this.save(item); return this.public(item);
   }

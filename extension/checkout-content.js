@@ -39,7 +39,9 @@
     if (new Set(items.map(item => item.id)).size !== items.length || parts.subtotal_cents !== items.reduce((sum, item) => sum + item.line_cents, 0) || parts.total_cents !== parts.subtotal_cents + parts.shipping_cents + parts.tax_cents - parts.discount_cents) failure('CHECKOUT_CHANGED');
     const payment_description = text(one('[data-payment-summary]')), delivery_description = text(one('[data-delivery-summary]'));
     if (!payment_description || !delivery_description || payment_description.length > 500 || delivery_description.length > 500) failure('CHECKOUT_UNSUPPORTED');
-    return {review: {origin: location.origin, items, ...parts, currency: 'USD'}, payment_description, delivery_description};
+    const purchase_kind = root.getAttribute('data-agentgate-purchase-kind') || 'unknown', transaction_category = root.getAttribute('data-agentgate-transaction-category') || 'unknown';
+    if (!['one_time', 'subscription', 'unknown'].includes(purchase_kind) || !['goods', 'financial', 'regulated', 'unknown'].includes(transaction_category)) failure('CHECKOUT_UNSUPPORTED');
+    return {review: {origin: location.origin, items, ...parts, currency: 'USD', purchase_kind, transaction_category}, payment_description, delivery_description};
   };
   const total = (summary, button) => {
     if (/\b(?:EUR|GBP|CAD|AUD|NZD)\b|[€£]/i.test(summary + ' ' + button)) failure('CHECKOUT_UNSUPPORTED');
@@ -124,9 +126,15 @@
     const approved = JSON.parse(capture.state);
     if (capture.require_review && JSON.stringify(review(capture.root)) !== JSON.stringify(approved[7])) failure('CHECKOUT_CHANGED');
     if (!capture.button.isConnected || capture.button.disabled || !reader.visible(capture.button) || reader.renderedText(capture.root) !== capture.summary || location.href !== approved[0] || reader.fingerprint(capture.button) !== approved[2] || capture.baseline.some(({node}, index) => !node.isConnected || reader.fingerprint(node) !== approved[3][index][1] || value(node) !== expected.get(node)) || capture.root.querySelectorAll('input,select,textarea').length !== approved[4] || (capture.button.form?.action || '') !== approved[5] || (capture.button.getAttribute('formaction') || '') !== approved[6] || total(reader.renderedText(capture.root), reader.label(capture.button)) !== capture.total_cents || capture.button.form && !capture.button.form.checkValidity()) failure('CHECKOUT_CHANGED');
+    if (message.defer_dispatch) {capture.dispatch_state = state(capture); return {code: 'READY_TO_DISPATCH'};}
     captures.delete(message.checkout_id);
     capture.button.click();
     return {code: 'DISPATCHED'};
+  }
+  function dispatch(message) {
+    const capture = captures.get(message.checkout_id);
+    if (!capture?.dispatch_state || message.expires_at <= Date.now() || message.capture_digest !== capture.digest || state(capture) !== capture.dispatch_state || capture.button.disabled) failure('CHECKOUT_CHANGED');
+    captures.delete(message.checkout_id); capture.button.click(); return {code: 'DISPATCHED'};
   }
   function confirmation(message) {
     const reader = globalThis.__agentgateReader;
@@ -139,9 +147,9 @@
     return {confirmation: {origin: location.origin, order_id, total_cents: message.total_cents, currency: 'USD'}};
   }
   const listener = (message, sender, respond) => {
-    if (sender.id !== chrome.runtime.id || !['checkout_prepare', 'checkout_execute', 'checkout_forget', 'checkout_confirmation'].includes(message.type)) return false;
+    if (sender.id !== chrome.runtime.id || !['checkout_prepare', 'checkout_execute', 'checkout_dispatch', 'checkout_forget', 'checkout_confirmation'].includes(message.type)) return false;
     if (message.type === 'checkout_forget') { captures.delete(message.checkout_id); respond({code: 'FORGOTTEN'}); return false; }
-    Promise.resolve().then(() => message.type === 'checkout_prepare' ? prepare(message) : message.type === 'checkout_confirmation' ? confirmation(message) : execute(message)).then(respond, error => respond({code: ['STALE_VIEW', 'CHECKOUT_CHANGED', 'CHECKOUT_UNSUPPORTED', 'OUT_OF_SCOPE'].includes(error.code) ? error.code : 'BRIDGE_ERROR'}));
+    Promise.resolve().then(() => message.type === 'checkout_prepare' ? prepare(message) : message.type === 'checkout_confirmation' ? confirmation(message) : message.type === 'checkout_dispatch' ? dispatch(message) : execute(message)).then(respond, error => respond({code: ['STALE_VIEW', 'CHECKOUT_CHANGED', 'CHECKOUT_UNSUPPORTED', 'OUT_OF_SCOPE'].includes(error.code) ? error.code : 'BRIDGE_ERROR'}));
     return true;
   };
   chrome.runtime.onMessage.addListener(listener);

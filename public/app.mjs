@@ -3,6 +3,7 @@ import {pairingChallenge, sealPairing} from './browser-pairing.mjs';
 import {checkoutSnapshot, sealCheckout} from './checkout.mjs';
 import {engagementChallenge, engagementDescriptions, engagementModes, engagementLabels} from './engagement.mjs';
 import {loginChallenge, loginApps} from './login-sync-protocol.mjs';
+import {purchasePolicy} from './purchase-policy.mjs';
 import {ApprovalQueue} from './approval-queue.mjs';
 const $ = id => document.getElementById(id);
 const account = location.pathname.match(/^\/u\/([a-f0-9]{32})(?:\/|$)/)?.[1];
@@ -52,6 +53,44 @@ let lastFocusedSession = '';
 let lastFocusedLogin = '';
 const actionChoices = new Map();
 const checkoutChoices = new Map();
+$('purchasePolicyForm').addEventListener('submit', async event => {
+  event.preventDefault(); if (signing) return; signing = true;
+  try {
+    const id = $('purchasePolicyId').value;
+    await api('owner/purchase-policies', { ...(id ? {id} : {}), goal: $('purchasePolicyGoal').value, merchant: $('purchasePolicyMerchant').value, currency: 'USD', payment_description: $('purchasePolicyPayment').value, delivery_description: $('purchasePolicyDelivery').value, limit_exclusive_cents: Math.round(Number($('purchasePolicyLimit').value) * 100), usage: $('purchasePolicyUsage').value, max_purchases: Number($('purchasePolicyCount').value), budget_cents: Math.round(Number($('purchasePolicyBudget').value) * 100), expires_at: Date.now() + Number($('purchasePolicyExpiry').value) * 3600000, items: [{id: $('purchasePolicyProductId').value, name: $('purchasePolicyProductName').value, quantity: Number($('purchasePolicyQuantity').value)}]});
+    message('Review and confirm the policy in Needs you.'); lastRender = '';
+  } catch (error) {message(error.message, true);}
+  finally {signing = false; await refresh();}
+});
+function renderPurchasePolicies(state) {
+  const nodes = [], cards = [];
+  for (const row of state.policies || []) {
+    const p = row.policy, node = el('article', undefined, 'request');
+    node.append(el('h3', p.goal), el('p', (row.enabled && p.expires_at > Date.now() ? 'Enabled' : 'Inactive') + ' · under $' + (p.limit_exclusive_cents / 100).toFixed(2) + ' USD · ' + row.purchases + '/' + p.max_purchases + ' purchases · $' + (row.spent_cents / 100).toFixed(2) + ' spent', 'hint'));
+    node.append(el('p', p.merchant + ' · expires ' + new Date(p.expires_at).toLocaleString(), 'hint'));
+    if (p.items.length === 1) node.append(button('Edit or enable policy', () => {
+      const item = p.items[0]; $('purchasePolicyId').value = p.id; $('purchasePolicyGoal').value = p.goal; $('purchasePolicyMerchant').value = p.merchant; $('purchasePolicyProductId').value = item.id; $('purchasePolicyProductName').value = item.name; $('purchasePolicyQuantity').value = item.quantity; $('purchasePolicyPayment').value = p.payment_description; $('purchasePolicyDelivery').value = p.delivery_description; $('purchasePolicyLimit').value = (p.limit_exclusive_cents / 100).toFixed(2); $('purchasePolicyUsage').value = p.usage; $('purchasePolicyCount').value = p.max_purchases; $('purchasePolicyBudget').value = (p.budget_cents / 100).toFixed(2); $('purchasePolicyGoal').focus();
+    }, 'secondary compact'));
+    node.append(button('Revoke policy', () => api('owner/purchase-policies/' + p.id + '/revoke', {}), 'danger compact')); nodes.push(node);
+  }
+  for (const event of (state.audit || []).slice(0, 10)) nodes.push(el('p', event.type + (event.total_cents ? ' · $' + (event.total_cents / 100).toFixed(2) : '') + (event.reason ? ' · ' + event.reason : '') + ' · ' + new Date(event.at).toLocaleString(), 'hint'));
+  $('purchasePolicies').replaceChildren(...nodes);
+  for (const row of state.pending || []) {
+    const p = purchasePolicy(row.challenge.policy), section = el('article', undefined, 'request');
+    section.append(el('h3', 'Confirm purchase policy'), el('p', p.goal));
+    const dl = el('dl'); detail(dl, 'Merchant', p.merchant); detail(dl, 'Price ceiling including tax and shipping', 'Strictly under $' + (p.limit_exclusive_cents / 100).toFixed(2) + ' USD');
+    for (const item of p.items) detail(dl, item.name + ' · ' + item.id, 'Exact quantity ' + item.quantity);
+    detail(dl, 'Payment', p.payment_description); detail(dl, 'Delivery', p.delivery_description); detail(dl, 'Usage', p.usage === 'once' ? 'One purchase' : 'Repeated one-time goods purchases'); detail(dl, 'Limits', p.max_purchases + ' purchases; $' + (p.budget_cents / 100).toFixed(2) + ' total budget'); detail(dl, 'Expiry', new Date(p.expires_at).toLocaleString());
+    section.append(dl, el('p', 'A confident local purpose check and an unchanged complete checkout are required. Unknown transactions, subscriptions, financial or regulated purchases and missing fields still need approval.', 'hint'));
+    section.append(button('Confirm and enable policy', async () => {
+      if (row.deadline <= Date.now() || row.challenge.stage !== 'purchase_policy' || row.challenge.expires_at !== p.expires_at) throw new Error('Review the current policy again.');
+      const receipt = {challenge: row.challenge, signature: b64url(await crypto.subtle.sign({name: 'ECDSA', hash: 'SHA-256'}, device.key, new TextEncoder().encode(canonical(row.challenge))))};
+      await api('owner/purchase-policies/approve', receipt); $('purchasePolicyId').value = ''; lastRender = '';
+    }), button('Deny policy', () => api('owner/purchase-policies/' + p.id + '/revoke', {}), 'danger'));
+    cards.push(pendingCard(section, 'purchase-policy', {...row, expires_at: row.deadline, challenge: {...row.challenge, expires_at: row.deadline}}));
+  }
+  return cards;
+}
 function readBrowserLink() {
   const values = new URLSearchParams(location.hash.slice(1)), source = values.get('login-source'), id = source || values.get('browser'), secret = values.get('secret');
   if (/^[a-f0-9]{32}$/.test(id || '') && /^[a-f0-9]{64}$/.test(secret || '')) { scannedBrowser = {id, secret, source: Boolean(source)}; history.replaceState(null, '', location.pathname); }
@@ -332,7 +371,7 @@ function render(items) {
         if (item.scope.start_url) detail(dl, 'Starting page', item.scope.start_url);
         if (item.scope.purpose_guard) {
           detail(dl, 'Task browser', item.scope.execution_browser);
-          detail(dl, 'Purpose validation', 'Chrome on-device AI on your paired local browser. Routine actions require a confident purpose match; the exact final purchase needs your approval.');
+          detail(dl, 'Purpose validation', (item.scope.purpose_guard.model === 'onnx' ? 'Pinned ONNX classifier' : 'Chrome built-in Prompt API') + ' on your paired local browser. Routine actions require a confident purpose match. Final purchase requires your exact approval or a separately confirmed bounded purchase policy.');
           if (item.scope.execution_browser === 'cloud') detail(dl, 'Local classifier sharing', 'The cloud browser sends filtered page candidates, proposed actions and the cart review to your paired local browser.');
         }
         if (item.scope.inference) {
@@ -348,7 +387,7 @@ function render(items) {
           detail(dl,'Exact field selector',grant.xpath);
           detail(dl,'Read limits',`${grant.max_chars} characters per field; match offsets 0–${grant.max_offset}. One field per read; at most 16 reads and 8,000 characters in the session.`);
         }
-        detail(dl, 'Actions', item.scope.purpose_guard ? 'Checks routine actions on your device. Reviews every cart item and asks you to approve the exact final purchase.' : item.scope.interaction === 'automatic' ? (granularDisclosure(item.scope.disclosure) ? 'Read and navigate within these websites.' : 'Checks each action against your task. Messages and payments need the options below.') : item.scope.interaction === 'local_gate' ? 'Reads and prepares drafts. Asks about consequential or uncertain actions.' : 'Ask before every action.');
+        detail(dl, 'Actions', item.scope.purpose_guard ? 'Checks routine actions and every cart item on your device. Final purchase needs your exact approval or a matching purchase policy.' : item.scope.interaction === 'automatic' ? (granularDisclosure(item.scope.disclosure) ? 'Read and navigate within these websites.' : 'Checks each action against your task. Messages and payments need the options below.') : item.scope.interaction === 'local_gate' ? 'Reads and prepares drafts. Asks about consequential or uncertain actions.' : 'Ask before every action.');
         const summary = el('dl'); detail(summary, 'Websites', item.scope.origins.map(value => new URL(value).hostname).join(', ')); detail(summary, 'Time', item.scope.ttl_seconds / 60 + ' minutes');
         receipt.append(summary, el('p', item.scope.disclosure === 'bounded' ? 'Share the selected fields below.' : 'Share selected text for this task.', 'hint'));
         if (item.scope.inference && !['purpose_encoder', 'purpose_browser'].includes(item.scope.inference.provider)) receipt.append(el('p', 'Page excerpts and actions are sent to ' + item.scope.inference.provider + '.', 'hint'));
@@ -424,14 +463,15 @@ let lastRender = '';
 async function refresh() {
   if (!device || refreshing || signing) return; refreshing = true; $('refresh').disabled = true;
   try {
-    const [{sessions}, {connectors}, browserState, hosted, engagement, {sources}, {transfers}, {connections}] = await Promise.all([api('owner/sessions'), api('owner/connectors'), api('owner/browsers'), api('owner/hosted-browser'), api('owner/engagement'), api('owner/login-sources'), api('owner/login-transfers'), api('owner/login-connections')]);
+    const [{sessions, purchase_policies = {}}, {connectors}, browserState, hosted, engagement, {sources}, {transfers}, {connections}] = await Promise.all([api('owner/sessions'), api('owner/connectors'), api('owner/browsers'), api('owner/hosted-browser'), api('owner/engagement'), api('owner/login-sources'), api('owner/login-transfers'), api('owner/login-connections')]);
     const {browsers} = browserState;
     browserChoices = browserState.choices || [];
     renderDefaultBrowser(browserState.default_browser_id);
     renderEngagement(engagement);
-    const signature = canonical([sessions, connectors, browserState, hosted, engagement, sources, transfers, connections, scannedBrowser?.id]);
+    const signature = canonical([sessions, purchase_policies, connectors, browserState, hosted, engagement, sources, transfers, connections, scannedBrowser?.id]);
     if (signature !== lastRender) {
       const pending = [...renderPart('sessions', [sessions, browserChoices], () => render(sessions))];
+      pending.push(...renderPart('purchase-policies', purchase_policies, () => renderPurchasePolicies(purchase_policies)));
       pending.push(...renderPart('connectors', connectors, () => { const rows = []; renderConnectors(connectors, rows); return rows; }));
       pending.push(...renderPart('browsers', [browsers, scannedBrowser?.id], () => { const rows = []; renderBrowsers(browsers, rows); return rows; }));
       pending.push(...renderPart('sources', [sources, scannedBrowser?.id], () => { const rows = []; renderBrowsers(sources, rows, true); return rows; }));

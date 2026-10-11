@@ -3,6 +3,7 @@ import {checkoutKey, checkoutRequest, checkoutSnapshot, openCheckout} from './ch
 import {sanitizeText} from './policy.mjs';
 import {localModel} from './model-host.mjs';
 import {deadline} from './deadline.mjs';
+import {evaluatePurchasePolicy, purchasePolicyChallenge} from './purchase-policy.mjs';
 
 export class CheckoutRunner {
   constructor({call, config, verifySession, model = localModel, recordings, api = globalThis.chrome}) { Object.assign(this, {call, config, verifySession, model, recordings, api}); this.busy = new Set(); }
@@ -49,16 +50,17 @@ export class CheckoutRunner {
     if (captured?.code) throw Object.assign(new Error(), {code: captured.code});
     const keys = await checkoutKey();
     const snapshot = checkoutSnapshot({...captured, summary: sanitizeText(captured.summary), public_key: keys.public_key}, packet.scope, request);
-    let classifierProof;
+    let classifierProof, purposeAssessment;
     if (packet.scope.purpose_guard) {
       const assessment = await this.model('check_purchase', {task: packet.scope, view: binding.view, action: {type: 'click', ref: request.submit_ref}, staged: stagedFields(binding.view, binding.fills || {}), review: snapshot.review}, {session_id: sessionId, beforeInference: () => this.authorize(packet, 'checkout_preparing')});
-      if (assessment.decision !== 'allow' || assessment.confidence < .98 || assessment.effect !== 'payment' || assessment.payment_cents !== snapshot.total_cents) throw Object.assign(new Error(), {code: 'OUT_OF_SCOPE'});
+      if (!['allow', 'confirm'].includes(assessment.decision) || assessment.effect !== 'payment' || assessment.payment_cents !== snapshot.total_cents) throw Object.assign(new Error(), {code: 'OUT_OF_SCOPE'});
       classifierProof = assessment.classifier_proof;
+      purposeAssessment = Object.fromEntries(['decision', 'effect', 'payment_cents', 'confidence'].map(key => [key, assessment[key]]));
     }
     checkout_bindings[sessionId] = {checkout_id: checkout.id, tab_id: binding.tab_id, view_digest: request.view_digest, submit_ref: request.submit_ref, snapshot, private_key: keys.private_key};
     await this.api.storage.session.set({checkout_bindings});
     await this.authorize(packet, 'checkout_preparing');
-    await this.call('sessions/' + sessionId + '/checkout-prepare', {checkout_id: checkout.id, snapshot, ...(classifierProof ? {classifier_proof: classifierProof} : {})});
+    await this.call('sessions/' + sessionId + '/checkout-prepare', {checkout_id: checkout.id, snapshot, ...(purposeAssessment ? {purpose_assessment: purposeAssessment} : {}), ...(classifierProof ? {classifier_proof: classifierProof} : {})});
   }
   async execute(packet) {
     const settings = await this.authorize(packet, 'checkout_executing');
@@ -67,17 +69,26 @@ export class CheckoutRunner {
     const {checkout_bindings = {}, agent_tabs = {}} = await this.api.storage.session.get(['checkout_bindings', 'agent_tabs']);
     const binding = checkout_bindings[sessionId], record = agent_tabs[sessionId];
     if (!binding || binding.checkout_id !== checkout.id || binding.tab_id !== record?.current || !record.ids.includes(binding.tab_id)) throw Object.assign(new Error(), {code: 'STALE_VIEW'});
-    const {fields_digest: fieldsDigest, ...challenge} = receipt?.challenge || {};
-    const expected = {version: 1, stage: 'checkout', session_id: sessionId, checkout_id: checkout.id, nonce: challenge.nonce, scope_digest: packet.session_receipt.challenge.scope_digest, view_digest: binding.view_digest, submit_ref: binding.submit_ref, snapshot: binding.snapshot, expires_at: checkout.deadline};
-    if (!/^[a-f0-9]{32}$/.test(challenge.nonce || '') || canonical(challenge) !== canonical(expected) || fieldsDigest !== await digest(checkout.envelope)) throw new Error('Checkout differs from the local capture or approved fields.');
-    await verifyReceipt(receipt, settings.phone_key, {...expected, fields_digest: fieldsDigest});
+    let values, challenge = receipt?.challenge || {};
+    if (checkout.policy_reference) {
+      const claim = await this.call('sessions/' + sessionId + '/checkout-claim', {checkout_id: checkout.id, snapshot_digest: await digest(binding.snapshot)});
+      await verifyReceipt(claim.receipt, settings.phone_key, purchasePolicyChallenge(claim.receipt.challenge));
+      const expected = {session_id: sessionId, checkout_id: checkout.id, scope_digest: packet.session_receipt.challenge.scope_digest, view_digest: binding.view_digest, snapshot_digest: await digest(binding.snapshot), policy: checkout.policy_reference};
+      if (canonical(claim.binding) !== canonical(expected) || canonical(checkout.snapshot) !== canonical(binding.snapshot) || !evaluatePurchasePolicy(claim.receipt.challenge.policy, {task: packet.scope, snapshot: binding.snapshot, assessment: checkout.purpose_assessment, ...claim.before}).eligible) throw new Error('The exact checkout is outside the signed purchase policy.');
+      values = {};
+    } else {
+      const {fields_digest: fieldsDigest, ...signedChallenge} = challenge; challenge = signedChallenge;
+      const expected = {version: 1, stage: 'checkout', session_id: sessionId, checkout_id: checkout.id, nonce: challenge.nonce, scope_digest: packet.session_receipt.challenge.scope_digest, view_digest: binding.view_digest, submit_ref: binding.submit_ref, snapshot: binding.snapshot, expires_at: checkout.deadline};
+      if (!/^[a-f0-9]{32}$/.test(challenge.nonce || '') || canonical(challenge) !== canonical(expected) || fieldsDigest !== await digest(checkout.envelope)) throw new Error('Checkout differs from the local capture or approved fields.');
+      await verifyReceipt(receipt, settings.phone_key, {...expected, fields_digest: fieldsDigest});
+      values = await openCheckout(binding.private_key, challenge, checkout.envelope);
+    }
     const packetDigest = await digest(packet), {checkout_dispatches = {}} = await this.api.storage.local.get('checkout_dispatches');
     const previous = checkout_dispatches[checkout.id];
     if (previous) {
       if (previous.packet_digest !== packetDigest) throw new Error('Checkout authorization changed.');
       return previous.code || 'CHECKOUT_UNCERTAIN';
     }
-    const values = await openCheckout(binding.private_key, challenge, checkout.envelope);
     await this.authorize(packet, 'checkout_executing');
     // Claim BEFORE any private fill or final click. A crash is never replayed.
     checkout_dispatches[checkout.id] = {at: Date.now(), packet_digest: packetDigest};
@@ -85,7 +96,13 @@ export class CheckoutRunner {
     await this.api.storage.local.set({checkout_dispatches});
     let code = 'CHECKOUT_UNCERTAIN';
     try {
-      const result = await deadline(() => this.api.tabs.sendMessage(binding.tab_id, {type: 'checkout_execute', checkout_id: checkout.id, capture_digest: binding.snapshot.capture_digest, values, expires_at: checkout.deadline}, {frameId: 0}), 15000, 'CHECKOUT_UNCERTAIN');
+      let result = await deadline(() => this.api.tabs.sendMessage(binding.tab_id, {type: 'checkout_execute', checkout_id: checkout.id, capture_digest: binding.snapshot.capture_digest, values, expires_at: checkout.deadline, ...(checkout.policy_reference ? {defer_dispatch: true} : {})}, {frameId: 0}), 15000, 'CHECKOUT_UNCERTAIN');
+      if (result?.code === 'READY_TO_DISPATCH' && checkout.policy_reference) {
+        await this.authorize(packet, 'checkout_executing');
+        // Recheck revocation/revision after DOM/fill handlers have settled.
+        await this.call('sessions/' + sessionId + '/checkout-claim', {checkout_id: checkout.id, snapshot_digest: await digest(binding.snapshot)});
+        result = await deadline(() => this.api.tabs.sendMessage(binding.tab_id, {type: 'checkout_dispatch', checkout_id: checkout.id, capture_digest: binding.snapshot.capture_digest, expires_at: checkout.deadline}, {frameId: 0}), 15000, 'CHECKOUT_UNCERTAIN');
+      }
       if (['DISPATCHED', 'CHECKOUT_CHANGED', 'CHECKOUT_UNSUPPORTED', 'OUT_OF_SCOPE', 'BRIDGE_ERROR'].includes(result?.code)) code = result.code;
     } finally {
       for (const ref of Object.keys(values)) delete values[ref];

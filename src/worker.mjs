@@ -94,7 +94,7 @@ export class Gate extends DurableObject {
     if (!current) fail('INFERENCE_NOT_APPROVED', 'Hosted browser access ended.', 403);
     await this.engine.sweep();
     if (path === 'sessions' && data === undefined) return {sessions: (await this.browserTasks(current.browser_id)).sessions.map(item => ({...this.engine.public(item), scope: item.task, session_receipt: item.session_receipt}))};
-    const route = path.match(/^sessions\/([a-f0-9]{32})\/(view|dom|runtime|check|result|checkout-prepare|checkout-result|classifier-request|classifier-read)$/);
+    const route = path.match(/^sessions\/([a-f0-9]{32})\/(view|dom|runtime|check|result|checkout-prepare|checkout-result|checkout-claim|classifier-request|classifier-read)$/);
     if (!route || data === undefined) fail('NOT_FOUND', 'Unknown hosted browser operation.', 404);
     await this.requireTaskBrowser(route[1], current.browser_id);
     if (route[2] === 'classifier-request') {
@@ -108,9 +108,10 @@ export class Gate extends DurableObject {
       const {classifier_proof, ...payload} = data;
       proof = await this.classifier.proof(item.id, {view: 'plan', check: 'check_action', 'checkout-prepare': 'check_purchase'}[route[2]], classifier_proof, payload); data = payload;
     }
-    const methods = {view: 'publishView', dom: 'publishDOM', runtime: 'runtime', check: 'checkAction', result: 'result', 'checkout-prepare': 'prepareCheckout', 'checkout-result': 'checkoutResult'};
+    const methods = {view: 'publishView', dom: 'publishDOM', runtime: 'runtime', check: 'checkAction', result: 'result', 'checkout-prepare': 'prepareCheckout', 'checkout-result': 'checkoutResult', 'checkout-claim': 'claimCheckout'};
     const answer = await this.engine[methods[route[2]]](route[1], data);
     if (proof) await this.classifier.used(proof);
+    if (route[2] === 'checkout-prepare' && answer.status === 'checkout_executing') this.ctx.waitUntil(this.dispatch());
     if (['awaiting_action', 'awaiting_checkout', 'awaiting_read'].includes(answer.status)) this.ctx.waitUntil(this.notify());
     return answer;
   }); }
@@ -197,10 +198,10 @@ export class Gate extends DurableObject {
     if(data!==undefined)await this.dispatch(); return answer;
   }
   async agentCall(path, data, principal = 'cli') {
-    if (path === 'browsers' && data === undefined) return {browsers: await this.browserRouting.choices(), validation: 'on_device', classifier_model: 'chrome_ai'};
+    if (path === 'browsers' && data === undefined) return {browsers: await this.browserRouting.choices(), validation: 'on_device', classifier_backends: ['chrome_ai', 'onnx'], backend_capabilities: {chrome_ai: {disclosure: true, staging: 'confident_or_owner_approval', purchase: 'exact_cart_and_policy_or_owner_approval'}, onnx: {disclosure: true, staging: 'owner_approval', purchase: 'relevant_items_and_deterministic_constraints_then_policy_or_owner_approval'}}};
     if (path === 'sessions' && data !== undefined) {
-      const {browser: kind, validation, classifier_browser_id: classifierId, ...input} = data;
-      if (validation !== undefined && validation !== 'on_device' || classifierId && validation !== 'on_device') fail('INVALID_SCOPE', 'Choose validation=on_device with a paired local classifier.');
+      const {browser: kind, validation, classifier_browser_id: classifierId, classifier_backend: backend = 'chrome_ai', ...input} = data;
+      if (validation !== undefined && validation !== 'on_device' || (classifierId || data.classifier_backend) && validation !== 'on_device' || !['chrome_ai', 'onnx'].includes(backend)) fail('INVALID_SCOPE', 'Choose validation=on_device with an explicit paired local backend.');
       const browser = kind ? await this.browserRouting.choose(kind, kind === 'local' ? classifierId : undefined) : await this.browserRouting.current();
       let localPurpose = null;
       if (validation === 'on_device') {
@@ -208,7 +209,9 @@ export class Gate extends DurableObject {
         const classifier = kind === 'local' ? browser : await this.browserRouting.choose('local', classifierId);
         if (classifierId && classifierId !== classifier.id || !await this.classifier.allowed(classifier.id)) fail('LOCAL_CLASSIFIER_UNAVAILABLE', 'Connect the explicitly selected paired local Chrome classifier.');
         input.disclosure = 'local_planner'; input.interaction = 'automatic';
-        localPurpose = {guard: {version: 1, browser_id: classifier.id, model: 'chrome_ai'}, execution: kind};
+        const profile = backend === 'onnx' ? await configuredInference(this.ctx.storage, classifier.id) : null;
+        if (backend === 'onnx' && profile?.provider !== 'purpose_browser') fail('LOCAL_CLASSIFIER_UNAVAILABLE', 'Prepare and register the local ONNX bundle on this device.');
+        localPurpose = {guard: {version: 1, browser_id: classifier.id, model: backend, ...(profile ? {model_id: profile.model} : {})}, execution: kind};
       }
       const result = await this.engine.create(input, principal, localPurpose ? null : await configuredInference(this.ctx.storage, browser?.id), browser?.id, localPurpose);
       if (result.status === 'requested') this.ctx.waitUntil(this.notify()); return result;
@@ -453,8 +456,12 @@ export class Gate extends DurableObject {
       }
       if (path === '/api/owner/sessions' && method === 'GET') {
         const items = await this.engine.list(), hosted = await this.hostedConsent.current();
-        return json({sessions: await Promise.all(items.map(async item => ({...this.engine.public(item), scope: item.task, browser_id: await this.browserRouting.sessionBrowser(item), hosted: Boolean(hosted && await this.browserRouting.owns(item, hosted.browser_id)), audit: item.history.filter(event => ['session', 'action_check', 'read_check', 'read_approval'].includes(event.type)), read_preview: item.status === 'awaiting_read' ? item.pending_read?.items : undefined, challenge: item.status === 'requested' ? item.challenge : item.status === 'awaiting_action' ? item.action_challenge : item.status === 'awaiting_read' ? item.read_challenge : item.status === 'awaiting_checkout' ? item.checkout.challenge : null})))});
+        return json({purchase_policies: await this.engine.purchasePolicies.list(), sessions: await Promise.all(items.map(async item => ({...this.engine.public(item), scope: item.task, browser_id: await this.browserRouting.sessionBrowser(item), hosted: Boolean(hosted && await this.browserRouting.owns(item, hosted.browser_id)), audit: item.history.filter(event => ['session', 'action_check', 'read_check', 'read_approval'].includes(event.type)), read_preview: item.status === 'awaiting_read' ? item.pending_read?.items : undefined, challenge: item.status === 'requested' ? item.challenge : item.status === 'awaiting_action' ? item.action_challenge : item.status === 'awaiting_read' ? item.read_challenge : item.status === 'awaiting_checkout' ? item.checkout.challenge : null})))});
       }
+      if (path === '/api/owner/purchase-policies' && method === 'POST') {const result = await this.engine.purchasePolicies.request(await body(request)); this.ctx.waitUntil(this.notify()); return json(result);}
+      if (path === '/api/owner/purchase-policies/approve' && method === 'POST') return json(await this.engine.purchasePolicies.approve(await body(request)));
+      const purchasePolicyRoute = path.match(/^\/api\/owner\/purchase-policies\/([a-f0-9]{32})\/revoke$/);
+      if (purchasePolicyRoute && method === 'POST') {exact(await body(request), []); return json(await this.engine.purchasePolicies.revoke(purchasePolicyRoute[1]));}
       if (path === '/api/owner/push-key' && method === 'GET') return json({public_key: this.env.VAPID_PUBLIC_KEY || null});
       if (path === '/api/owner/push' && method === 'POST') {
         const input = await body(request); exact(input, ['endpoint', 'expirationTime', 'keys']); exact(input.keys, ['p256dh', 'auth']);
@@ -485,7 +492,7 @@ export class Gate extends DurableObject {
       if (path === '/api/bridge/classifier/requests' && method === 'GET') return json({requests: await this.classifier.pending(browserId)});
       if (path === '/api/bridge/classifier/result' && method === 'POST') return json(await this.classifier.submit(browserId, await body(request)));
       if (path === '/api/bridge/sessions' && method === 'GET') return json({sessions: (await this.browserTasks(browserId)).sessions.filter(i => ['active', 'checking_action', 'awaiting_action', 'awaiting_read', 'executing', 'checkout_preparing', 'awaiting_checkout', 'checkout_executing'].includes(i.status)).map(i => ({...this.engine.public(i), scope: i.task, session_receipt: i.session_receipt}))});
-      const route = path.match(/^\/api\/bridge\/sessions\/([a-f0-9]{32})\/(view|check|runtime|dom|checkout-prepare|checkout-result)$/);
+      const route = path.match(/^\/api\/bridge\/sessions\/([a-f0-9]{32})\/(view|check|runtime|dom|checkout-prepare|checkout-result|checkout-claim)$/);
       if (route && method === 'POST') {
         await this.requireTaskBrowser(route[1], browserId);
         const input = await body(request);
@@ -493,6 +500,7 @@ export class Gate extends DurableObject {
         if (route[2] === 'dom') { const result = await this.engine.publishDOM(route[1], input); if (result.status === 'awaiting_read') this.ctx.waitUntil(this.notify()); return json(result); }
         if (route[2] === 'runtime') return json(await this.engine.runtime(route[1], input));
         if (route[2] === 'checkout-result') return json(await this.engine.checkoutResult(route[1], input));
+        if (route[2] === 'checkout-claim') return json(await this.engine.claimCheckout(route[1], input));
         if (route[2] === 'checkout-prepare') { const result = await this.engine.prepareCheckout(route[1], input); this.ctx.waitUntil(this.notify()); return json(result); }
         const result = await this.engine.checkAction(route[1], input);
         if (result.status === 'awaiting_action') this.ctx.waitUntil(this.notify());

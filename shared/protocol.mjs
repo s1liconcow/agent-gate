@@ -61,8 +61,8 @@ export function scope(value) {
     task.browser_id = value.browser_id;
   }
   if (value.purpose_guard !== undefined) {
-    exact(value.purpose_guard, ['version', 'browser_id', 'model']);
-    if (value.purpose_guard.version !== 1 || !/^[a-f0-9]{32}$/.test(value.purpose_guard.browser_id) || value.purpose_guard.model !== 'chrome_ai' || !task.browser_id || !['local', 'cloud'].includes(value.execution_browser) || disclosure !== 'local_planner' || value.interaction !== 'automatic' || value.inference || value.engagement || value.action_policy?.communications || value.action_policy?.payments) fail('INVALID_SCOPE', 'Purpose-bound tasks require a pinned browser, local on-device classifier and separate exact checkout approval.');
+    exact(value.purpose_guard, ['version', 'browser_id', 'model', ...(value.purpose_guard.model === 'onnx' ? ['model_id'] : [])]);
+    if (value.purpose_guard.version !== 1 || !/^[a-f0-9]{32}$/.test(value.purpose_guard.browser_id) || !['chrome_ai', 'onnx'].includes(value.purpose_guard.model) || value.purpose_guard.model === 'onnx' && !/^agentgate-purpose-browser-[a-f0-9]{16}$/.test(value.purpose_guard.model_id) || !task.browser_id || !['local', 'cloud'].includes(value.execution_browser) || disclosure !== 'local_planner' || value.interaction !== 'automatic' || value.inference || value.engagement || value.action_policy?.communications || value.action_policy?.payments) fail('INVALID_SCOPE', 'Purpose-bound tasks require a pinned browser and explicit local classifier backend.');
     task.purpose_guard = {...value.purpose_guard}; task.execution_browser = value.execution_browser;
     if (task.execution_browser === 'local' && task.purpose_guard.browser_id !== task.browser_id) fail('INVALID_SCOPE', 'Local execution uses the selected local classifier browser.');
   } else if (value.execution_browser !== undefined) fail('INVALID_SCOPE', 'Execution metadata requires a purpose guard.');

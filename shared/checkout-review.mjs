@@ -3,7 +3,8 @@ import {sanitizeText} from './policy.mjs';
 
 export function purchaseReview(review) {
   origin(review?.origin);
-  exact(review, ['origin', 'items', 'subtotal_cents', 'shipping_cents', 'tax_cents', 'discount_cents', 'total_cents', 'currency', 'capture_digest']);
+  exact(review, ['origin', 'items', 'subtotal_cents', 'shipping_cents', 'tax_cents', 'discount_cents', 'total_cents', 'currency', 'capture_digest', ...['purchase_kind', 'transaction_category'].filter(key => Object.hasOwn(review || {}, key))]);
+  if (review.purchase_kind !== undefined && !['one_time', 'subscription', 'unknown'].includes(review.purchase_kind) || review.transaction_category !== undefined && !['goods', 'financial', 'regulated', 'unknown'].includes(review.transaction_category)) fail('CHECKOUT_UNSUPPORTED', 'Unknown checkout transaction classification.');
   if (!Array.isArray(review.items) || !review.items.length || review.items.length > 24 || review.currency !== 'USD' || !/^[A-Za-z0-9_-]{43}$/.test(review.capture_digest)) fail('CHECKOUT_UNSUPPORTED', 'A complete item and total review is required.');
   for (const item of review.items) {
     exact(item, ['id', 'name', 'quantity', 'unit_cents', 'line_cents']);

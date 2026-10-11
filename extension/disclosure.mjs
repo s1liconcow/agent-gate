@@ -8,7 +8,7 @@ const injection = /ignore\s+(?:(?:all|any|the|your|previous|prior)\s+)*(?:instru
 const clean = s => typeof s === 'string' && s.length > 0 && s.length <= 2000 && !forbidden.test(s.normalize('NFKC').replace(oneTimeCodeLabel, 'one-time code')) && !injection.test(s.normalize('NFKC'));
 const cleanControl = s => clean(s) && !/\b(?:password|passcode|pin|otp|one.time.code|security code|sign in|log in)\b/i.test(s.normalize('NFKC'));
 const useful = s => /[\p{L}\p{N}]/u.test(s.replace(/\[REDACTED[^\]]*\]/g, ''));
-export function sanitizeForTask(raw, goal) {
+export function sanitizeForTask(raw, goal, purchasePricing = false) {
   // Exact identifiers and USD amounts in the signed goal survive redaction.
   // One-time codes remain candidates for purpose checks. No page-derived grant.
   const emails = new Set(goal.match(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi) || []);
@@ -19,24 +19,24 @@ export function sanitizeForTask(raw, goal) {
   const filter = s => s ? sanitizeText(s, {allowOneTimeCodes: true}) : '';
   let value = '', offset = 0;
   for (const match of raw.matchAll(literals)) {
-    if (!emails.has(match[0]) && !amounts.has(cents(match[0]))) continue;
+    if (!emails.has(match[0]) && !amounts.has(cents(match[0])) && !(purchasePricing && cents(match[0]) !== null)) continue;
     value += filter(raw.slice(offset, match.index)) + match[0]; offset = match.index + match[0].length;
   }
   return value + filter(raw.slice(offset));
 }
 export function prepareSnapshot(snapshot, task) {
   if (!task.origins.includes(snapshot.origin) || !Array.isArray(snapshot.controls) || !Array.isArray(snapshot.blocks)) throw new Error('The snapshot is outside the approved task.');
-  const entries = [], seen = new Set();
+  const entries = [], seen = new Set(), pricing = Boolean(task.purpose_guard && /\b(?:buy|purchase|shop|shopping)\b/i.test(task.goal));
   for (const c of snapshot.controls.slice(0, 72)) {
     if (!ref.test(c.ref) || seen.has(c.ref) || !['field', 'button', 'link'].includes(c.role) || !cleanControl(c.label) || (c.context && !cleanControl(c.context))) continue;
     if (!task.permissions.includes(c.role === 'field' ? 'fill' : 'click')) continue;
-    const label = sanitizeForTask(c.label, task.goal).slice(0, 120); if (!cleanControl(label) || !useful(label)) continue;
+    const label = sanitizeForTask(c.label, task.goal, pricing).slice(0, 120); if (!cleanControl(label) || !useful(label)) continue;
     const context = c.context ? sanitizeText(c.context).slice(0, 180) : ''; if (context && !cleanControl(context)) continue;
     seen.add(c.ref); entries.push({id: c.ref, kind: 'control', role: c.role, text: label, context});
   }
   for (const b of snapshot.blocks.slice(0, 96)) {
     if (!ref.test(b.ref) || seen.has(b.ref) || !clean(b.text) || (b.context && !clean(b.context))) continue;
-    const text = sanitizeForTask(b.text, task.goal).slice(0, 500); if (!clean(text) || !useful(text)) continue;
+    const text = sanitizeForTask(b.text, task.goal, pricing).slice(0, 500); if (!clean(text) || !useful(text)) continue;
     const context = b.context ? sanitizeText(b.context).slice(0, 180) : ''; if (context && !clean(context)) continue;
     seen.add(b.ref); entries.push({id: b.ref, kind: 'text', text, context});
   }

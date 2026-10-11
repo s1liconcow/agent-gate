@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {chromium} from '@playwright/test';
 import {readFile, mkdir} from 'node:fs/promises';
 import {resolve} from 'node:path';
+import {PurchasePolicies} from '../src/purchase-policies.mjs';
 import {canonical, digest, scope, verifyReceipt} from '../shared/protocol.mjs';
 const root = resolve(import.meta.dirname, '..'), origin = 'https://ui.example';
 const cloudId = 'e'.repeat(32), localId = 'f'.repeat(32);
@@ -11,6 +12,7 @@ let challenge = {version: 1, stage: 'session', session_id: 'a'.repeat(32), nonce
 const task = {id: challenge.session_id, goal: taskScope.goal, scope: taskScope, status: 'requested', challenge, expires_at: challenge.expires_at, hosted: true, browser_id: cloudId, browser_selectable: true};
 const login = {id: 'c'.repeat(32), selection: {app: 'amazon', origin: 'https://www.amazon.com'}, status: 'sign_in_required'};
 const browser = await chromium.launch({channel: 'chromium', headless: true});
+const records = new Map(), policies = new PurchasePolicies({get: async key => records.get(key), put: async (key,value) => {records.set(key,structuredClone(value));}, delete: async key => records.delete(key), list: async ({prefix}) => new Map([...records].filter(([key]) => key.startsWith(prefix)))});
 let publicKey, allowed = 0, stopped = 0, selected = 0, defaultBrowserId = cloudId;
 try {
   const page = await browser.newPage(), errors = [];
@@ -20,7 +22,10 @@ try {
     if (path.startsWith('/api/')) {
       assert.equal(request.headers().authorization, 'Bearer ' + 'd'.repeat(64));
       let result;
-      if (path.endsWith('/sessions/' + task.id + '/approve')) {
+      if (path.endsWith('/purchase-policies/approve')) result = await policies.approve(request.postDataJSON());
+      else if (/purchase-policies\/[a-f0-9]{32}\/revoke$/.test(path)) result = await policies.revoke(path.split('/').at(-2));
+      else if (path.endsWith('/purchase-policies')) result = await policies.request(request.postDataJSON());
+      else if (path.endsWith('/sessions/' + task.id + '/approve')) {
         await verifyReceipt(request.postDataJSON(), publicKey, challenge); allowed++; task.status = 'active'; task.challenge = null; result = {};
       } else if (path.endsWith('/sessions/' + task.id + '/browser')) {
         selected++; const id = request.postDataJSON().browser_id;
@@ -30,7 +35,7 @@ try {
         task.challenge = challenge; result = task;
       } else if (path.endsWith('/browsers/default')) { defaultBrowserId = request.postDataJSON().browser_id; result = {default_browser_id: defaultBrowserId}; }
       else if (path.endsWith('/sessions/' + task.id + '/revoke')) { stopped++; task.status = 'revoked'; result = {}; }
-      else if (path.endsWith('/sessions')) result = {sessions: [task]};
+      else if (path.endsWith('/sessions')) result = {sessions: [task], purchase_policies: await policies.list()};
       else if (path.endsWith('/connectors')) result = {connectors: []};
       else if (path.endsWith('/browsers')) result = {browsers: [{id: localId, name: 'My Chrome', status: 'active', extension_origin: 'chrome-extension://' + 'a'.repeat(32)}], choices: [{id: cloudId, name: 'Cloud browser', kind: 'cloud'}, {id: localId, name: 'My Chrome', kind: 'local'}], default_browser_id: defaultBrowserId};
       else if (path.endsWith('/hosted-browser')) result = {available: true, enabled: true, browser_id: cloudId};
@@ -95,6 +100,19 @@ try {
   assert.equal(stopped, 1); assert.equal(await page.locator('#activeTasks').isVisible(), false);
   await page.locator('#sessionHistory > summary').click();
   assert.equal(await page.locator('#pastRequests').isVisible(), true);
+  records.set('phone', publicKey);
+  await page.locator('#device > summary').click(); await page.locator('#purchasePolicySettings > summary').click();
+  await page.getByLabel('Approved task', {exact:true}).fill('Buy one blue ceramic coffee mug for at most $20.00 including shipping.');
+  await page.getByLabel('Merchant website', {exact:true}).fill('https://shop.example'); await page.getByLabel('Product ID from order review', {exact:true}).fill('BLUE'); await page.getByLabel('Exact product name', {exact:true}).fill('Blue ceramic coffee mug');
+  await page.getByLabel('Exact saved payment description from order review', {exact:true}).fill('Saved owner payment card'); await page.getByLabel('Exact delivery description from order review', {exact:true}).fill('Saved owner delivery address');
+  await page.getByRole('button', {name:'Review policy',exact:true}).click();
+  const confirm = page.getByRole('button', {name:'Confirm and enable policy',exact:true}); await confirm.waitFor();
+  assert.equal((await policies.list()).policies.length, 0, 'Creating a proposal cannot enable a policy.');
+  assert.match(await page.locator('#requests').textContent(), /Strictly under \$20.00 USD/);
+  await Promise.all([page.waitForResponse(response => response.url().endsWith('/purchase-policies/approve') && response.request().method() === 'POST'), confirm.click()]);
+  assert.equal((await policies.list()).policies[0].enabled, true);
+  await Promise.all([page.waitForResponse(response => /purchase-policies\/[a-f0-9]{32}\/revoke$/.test(response.url()) && response.request().method() === 'POST'), page.getByRole('button', {name:'Revoke policy',exact:true}).click()]);
+  assert.equal((await policies.list()).policies[0].enabled, false);
   assert.deepEqual(errors, []);
-  console.log('Phone UI checks passed: signed task consent, visible running tasks, stop/history, named shared apps and collapsed settings.');
+  console.log('Phone UI checks passed: signed task consent, visible running tasks, stop/history, named shared apps collapsed settings and explicitly signed/revocable purchase policies.');
 } finally { await browser.close(); }

@@ -18,6 +18,7 @@ const check = tools => {
   assert.equal(request.inputSchema.properties.inference, undefined);
   assert.deepEqual(request.inputSchema.properties.browser.enum, ['local', 'cloud']);
   assert.equal(request.inputSchema.properties.validation.const, 'on_device');
+  assert.deepEqual(request.inputSchema.properties.classifier_backend.enum, ['chrome_ai', 'onnx']);
   assert.equal(request.inputSchema.properties.ttl_seconds.maximum, 600);
 };
 test('local and remote discovery advertise all nine tools with explicit on-device routing and bounded reads', async () => {

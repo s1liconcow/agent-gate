@@ -13,6 +13,8 @@ const protocol = await readFile(new URL('shared/protocol.mjs', root), 'utf8');
 const localPurpose = (await readFile(new URL('shared/local-purpose.mjs', root), 'utf8')).replaceAll("'../extension/", "'./");
 await writeFile(new URL('extension/local-purpose.mjs', root), localPurpose);
 for (const destination of ['public/checkout-review.mjs', 'extension/checkout-review.mjs']) await copyFile(new URL('shared/checkout-review.mjs', root), new URL(destination, root));
+for (const destination of ['public/purchase-boundary.mjs', 'extension/purchase-boundary.mjs']) await copyFile(new URL('shared/purchase-boundary.mjs', root), new URL(destination, root));
+for (const destination of ['public/purchase-policy.mjs', 'extension/purchase-policy.mjs']) await copyFile(new URL('shared/purchase-policy.mjs', root), new URL(destination, root));
 await copyFile(new URL('shared/policy.mjs', root), new URL('public/policy.mjs', root));
 await writeFile(new URL('public/protocol.mjs', root), protocol);
 await writeFile(new URL('extension/protocol.mjs', root), purposeProtocol(protocol, purpose));
