@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0d1117">
-  <meta name="description" content="AgentGate gives assistants purpose-bound access to a signed-in browser, with phone approval and a bounded task view.">
+  <meta name="description" content="Give your assistant a dedicated cloud browser. Choose when AgentGate records, checks, or asks before actions proceed.">
   <title>AgentGate — Get the help. Manage the risk.</title>
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/landing.css">
@@ -17,6 +17,7 @@
       <a class="brand" href="/landing.html" aria-label="AgentGate home"><img src="/icon.svg" width="36" height="36" alt="">AgentGate</a>
       <nav aria-label="Main navigation">
         <a href="#how-it-works">How it works</a>
+        <a href="#modes">Three modes</a>
         <a href="#boundaries">What stays private</a>
         <a class="nav-action" href="#demo">Explore demo <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 15 15 5M7 5h8v8"/></svg></a>
       </nav>
@@ -27,23 +28,23 @@
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy">
         <h1 id="hero-title">Get the help.<br> <span>Manage the risk.</span></h1>
-        <p>Let an assistant use your signed-in browser for a purpose you approve on your phone. AgentGate shares a checked task view and asks again before consequential actions.</p>
+        <p>Connect your assistant to a dedicated cloud browser with saved logins. Choose when AgentGate records, checks, or asks you before an action. Open the browser yourself whenever a site needs sign-in or MFA.</p>
         <div class="hero-actions">
           <a class="button button-primary" href="#demo">Explore the live demo <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-5-5 5 5-5 5"/></svg></a>
           <a class="text-link" href="#how-it-works">How it works <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v13m-5-5 5 5 5-5"/></svg></a>
         </div>
-        <p class="hero-note">Chrome extension · phone approval · MCP connection</p>
+        <p class="hero-note">Cloud browser · saved logins · three confirmation levels</p>
       </div>
 
       <div class="hero-artifact" aria-label="Synthetic example showing private browser content and the bounded view shared with an assistant">
-        <div class="artifact-topbar"><div class="window-dots" aria-hidden="true"><i></i><i></i><i></i></div><span class="address">mail.example.com</span><span class="synthetic">SYNTHETIC EXAMPLE</span></div>
+        <div class="artifact-topbar"><div class="window-dots" aria-hidden="true"><i></i><i></i><i></i></div><span class="address">mail.example.com</span><span class="synthetic">BALANCED · EXAMPLE</span></div>
         <div class="artifact-body">
           <div class="browser-side">
-            <div class="pane-label"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 10s2.7-4.3 7.5-4.3 7.5 4.3 7.5 4.3-2.7 4.3-7.5 4.3S2.5 10 2.5 10Z"/><circle cx="10" cy="10" r="2.2"/><path d="m3 3 14 14"/></svg>In your browser <span>private</span></div>
+            <div class="pane-label"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 10s2.7-4.3 7.5-4.3 7.5 4.3 7.5 4.3-2.7 4.3-7.5 4.3S2.5 10 2.5 10Z"/><circle cx="10" cy="10" r="2.2"/><path d="m3 3 14 14"/></svg>Cloud browser <span>your account</span></div>
             <div class="mail-row"><div class="mail-row-top"><strong>Bank notice</strong><time>9:14</time></div><p>Available balance and account activity</p></div>
             <div class="mail-row"><div class="mail-row-top"><strong>Personal message</strong><time>8:03</time></div><p>Weekend plans with Mom</p></div>
             <div class="mail-row relevant"><div class="mail-row-top"><strong>Ali’s daycare</strong><time>Yesterday</time></div><p>Friday pickup is at 3:00 PM</p><span class="row-selection">Selected for this task</span></div>
-            <div class="withheld"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="4.5" y="8.5" width="11" height="8" rx="1.6"/><path d="M7 8.5V6a3 3 0 0 1 6 0v2.5"/></svg>Other content stays out of the assistant view</div>
+            <div class="withheld"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="4.5" y="8.5" width="11" height="8" rx="1.6"/><path d="M7 8.5V6a3 3 0 0 1 6 0v2.5"/></svg>Unrelated rows stay outside this Balanced task view</div>
           </div>
           <div class="boundary"><span class="boundary-line"></span><span class="boundary-badge"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 8 3v6c0 5.2-3.2 8.8-8 11-4.8-2.2-8-5.8-8-11V5l8-3Z"/><path d="m8.5 12 2.3 2.3 4.7-5"/></svg></span><span class="boundary-text">SCOPE<br>BOUNDARY</span><span class="boundary-line"></span></div>
           <div class="assistant-side">
@@ -52,33 +53,77 @@
             <div class="shared-controls"><span>Available controls</span><strong>Compose reply</strong><strong>Review draft</strong></div>
           </div>
         </div>
-        <div class="approval-receipt"><div class="receipt-icon"><img src="/icon.svg" width="22" height="22" alt=""></div><div><strong>Approved on your phone</strong><span>Find Ali’s daycare message and draft a reply</span><small>mail.example.com · 10 minutes</small></div><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg></div>
+        <div class="approval-receipt"><div class="receipt-icon"><img src="/icon.svg" width="22" height="22" alt=""></div><div><strong>Balanced is on</strong><span>Sensitive or uncertain actions ask you</span><small>Saved with your assistant connection</small></div><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg></div>
       </div>
     </section>
 
-    <section class="proof-strip" aria-label="AgentGate controls"><div><strong>Purpose first</strong><span>One task, named before access starts</span></div><div><strong>Bounded view</strong><span>No raw page or browser credentials</span></div><div><strong>Phone approval</strong><span>Exact consequential actions return to you</span></div></section>
+    <section class="proof-strip" aria-label="AgentGate controls"><div><strong>Cloud browser</strong><span>Dedicated to your account, with saved logins</span></div><div><strong>Your setting</strong><span>Record only, Balanced, or Careful</span></div><div><strong>Owner Live View</strong><span>Sign in, complete MFA, or inspect a task</span></div></section>
 
     <section class="demo-section" id="demo" aria-labelledby="demo-title">
-      <div class="section-heading"><div><h2 id="demo-title">Walk through one browser task.</h2><p>Try the approval flow with fictional mail. Nothing here connects to your accounts or sends a message.</p></div><span class="section-tag">INTERACTIVE · SYNTHETIC DATA</span></div>
+      <div class="section-heading"><div><h2 id="demo-title">Walk through a cloud browser task.</h2><p>Choose a setting, open a fictional Live View, and see how AgentGate handles an action. This demo uses synthetic data.</p></div><span class="section-tag">INTERACTIVE · SYNTHETIC DATA</span></div>
       <div class="demo-layout">
-        <div class="demo-steps" aria-label="Demo stages"><div class="demo-step is-current" data-step="request"><span class="step-number">01</span><div><strong>Scope the task</strong><span>Purpose, website and duration arrive on your phone.</span></div></div><div class="demo-step" data-step="view"><span class="step-number">02</span><div><strong>Share a bounded view</strong><span>The assistant gets relevant text and usable controls.</span></div></div><div class="demo-step" data-step="action"><span class="step-number">03</span><div><strong>Approve the exact action</strong><span>Sending waits for a second phone decision.</span></div></div></div>
+        <div class="demo-steps" aria-label="Demo stages">
+          <div class="demo-step is-current" data-step="request"><span class="step-number">01</span><div><strong>Connect and choose</strong><span>Save how often AgentGate asks you.</span></div></div>
+          <div class="demo-step" data-step="view"><span class="step-number">02</span><div><strong>Open the cloud browser</strong><span>Sign in through owner Live View when needed.</span></div></div>
+          <div class="demo-step" data-step="action"><span class="step-number">03</span><div><strong>See the decision</strong><span>Your setting controls confirmation.</span></div></div>
+        </div>
         <div class="demo-stage">
-          <div class="demo-stage-header"><span id="demoStageLabel">PHONE APPROVAL · 01 / 03</span><button id="resetDemo" class="reset-button" type="button">Start over <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 9a6.5 6.5 0 1 1 1.4 4.9M3.5 4.5V9H8"/></svg></button></div>
-          <div id="demoRequest" class="demo-panel"><div class="demo-phone"><div class="phone-top"><span>9:41</span><span class="phone-speaker"></span><span>●●●</span></div><div class="phone-content"><img src="/icon.svg" width="32" height="32" alt=""><h3>Approve this browser task?</h3><dl><dt>Purpose</dt><dd>Find Ali’s daycare email and draft a reply</dd><dt>Website</dt><dd>mail.example.com</dd><dt>Access</dt><dd>Read · fill · click · navigate</dd><dt>Duration</dt><dd>10 minutes</dd></dl><button id="approveTask" class="button button-primary" type="button">Approve scoped task</button><button id="denyTask" class="button button-outline" type="button">Deny request</button></div></div><div class="demo-explainer"><span class="explainer-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 8 3v6c0 5.2-3.2 8.8-8 11-4.8-2.2-8-5.8-8-11V5l8-3Z"/><path d="m8.5 12 2.3 2.3 4.7-5"/></svg></span><h3>The request is fixed before you sign.</h3><p>Your phone shows the purpose, exact website, permissions and time limit. An expired or changed request needs a new approval.</p></div></div>
-          <div id="demoView" class="demo-panel" hidden><div class="view-preview"><div class="view-header"><span>ASSISTANT VIEW</span><span class="view-status">Scoped to Ali’s daycare</span></div><div class="view-message"><strong>Ali’s daycare · Friday pickup change</strong><p>Friday pickup is at 3:00 PM. Please let me know if that still works.</p><small>Source: mail.example.com · selected original text</small></div><div class="view-control"><span>Controls available</span><strong>Compose reply</strong><strong>Review draft</strong></div><div class="view-private"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="4.5" y="8.5" width="11" height="8" rx="1.6"/><path d="M7 8.5V6a3 3 0 0 1 6 0v2.5"/></svg>Bank notice and personal mail remain outside this view.</div></div><div class="demo-explainer"><h3>A smaller view, built for this task.</h3><p>The synthetic assistant can use Ali’s message and reply controls. It receives no inbox dump, screenshot or cookies.</p><button id="prepareReply" class="button button-primary" type="button">Prepare a reply <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-5-5 5 5-5 5"/></svg></button></div></div>
-          <div id="demoAction" class="demo-panel" hidden><div class="demo-phone"><div class="phone-top"><span>9:41</span><span class="phone-speaker"></span><span>●●●</span></div><div class="phone-content"><img src="/icon.svg" width="32" height="32" alt=""><h3>Send this reply?</h3><dl><dt>To</dt><dd>ali@example.test</dd><dt>Subject</dt><dd>Re: Friday pickup change</dd><dt>Message</dt><dd>Thanks for the reminder. 3:00 PM works for us this Friday.</dd></dl><button id="approveAction" class="button button-primary" type="button">Approve demo send</button><button id="denyAction" class="button button-outline" type="button">Deny action</button></div></div><div class="demo-explainer"><h3>The final action is a separate decision.</h3><p>The draft and recipient appear on your phone. The assistant cannot approve its own send request.</p></div></div>
-          <div id="demoDone" class="demo-complete" hidden><span class="complete-mark"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="m7 16 6 6L25 10"/></svg></span><h3 id="demoResultTitle">Demo complete</h3><p id="demoResultText">The fictional reply was sent in this walkthrough. No real message left this page.</p><button id="repeatDemo" class="button button-primary" type="button">Walk through again</button></div>
-          <p class="demo-status" id="demoStatus" role="status" aria-live="polite">Waiting for your demo approval.</p>
+          <div class="demo-stage-header"><span id="demoStageLabel">CONNECT · 01 / 03</span><button id="resetDemo" class="reset-button" type="button">Start over <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 9a6.5 6.5 0 1 1 1.4 4.9M3.5 4.5V9H8"/></svg></button></div>
+          <div id="demoRequest" class="demo-panel">
+            <div class="demo-connect-card">
+              <h3>Choose when to ask</h3>
+              <fieldset class="demo-mode-fieldset"><legend>Confirmation level</legend>
+                <label class="demo-mode-option"><input type="radio" name="demoMode" value="record" checked><span><strong>Record only</strong><small>Record activity without stopping actions.</small></span></label>
+                <label class="demo-mode-option"><input type="radio" name="demoMode" value="balanced"><span><strong>Balanced</strong><small>Ask about sensitive or uncertain actions.</small></span></label>
+                <label class="demo-mode-option"><input type="radio" name="demoMode" value="careful"><span><strong>Careful</strong><small>Ask when confidence falls below 98%.</small></span></label>
+              </fieldset>
+              <button id="connectDemo" class="button button-primary" type="button">Connect demo assistant</button>
+            </div>
+            <div class="demo-explainer"><h3>One connection starts the browser.</h3><p>Choose your level when you connect through MCP. AgentGate enables a cloud browser for your account and saves that setting for new tasks.</p></div>
+          </div>
+          <div id="demoView" class="demo-panel" hidden>
+            <div class="view-preview demo-cloud-browser">
+              <div class="view-header"><span>CLOUD BROWSER · mail.example.com</span><span class="view-status">your account</span></div>
+              <div id="demoSignIn" class="demo-signin"><h3>Sign in through owner Live View</h3><p>Open the browser to enter your login or complete MFA.</p><button id="demoOpenLive" class="button button-primary" type="button">Open demo Live View</button></div>
+              <div id="demoLiveView" class="demo-live-view" hidden><div class="demo-live-tab"><span>OWNER LIVE VIEW · FICTIONAL</span><span>mail.example.com</span></div><div class="demo-live-login"><span class="demo-live-avatar" aria-hidden="true">A</span><h3>Sign in to mail.example.com</h3><p>In a real task, enter your login or complete MFA here. This demo uses no credentials.</p><button id="demoCompleteSignIn" class="button button-primary" type="button">Complete fictional sign-in</button></div></div>
+              <div id="demoSignedIn" hidden><div class="view-message"><span class="demo-overline">FILTERED ASSISTANT VIEW</span><strong>Ali’s daycare · Friday pickup change</strong><p>Friday pickup is at 3:00 PM. Please let me know if that still works.</p><small>Source: mail.example.com · selected original text</small></div><div class="view-control"><span>Controls available</span><strong>Compose reply</strong><strong>Review draft</strong></div><div class="view-private"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="4.5" y="8.5" width="11" height="8" rx="1.6"/><path d="M7 8.5V6a3 3 0 0 1 6 0v2.5"/></svg>Login data and unrelated mail stay outside this example view.</div></div>
+            </div>
+            <div class="demo-explainer"><h3>Step into your browser when needed.</h3><p>Owner Live View handles sign-in and MFA. The cloud browser saves logins for later tasks; you can also share selected desktop logins from the paired extension.</p><button id="demoContinue" class="button button-primary" type="button" hidden>See the task decision</button></div>
+          </div>
+          <div id="demoAction" class="demo-panel" hidden>
+            <div class="demo-action-card">
+              <p class="demo-overline">FICTIONAL ASSISTANT ACTION</p>
+              <div class="demo-scenarios" role="group" aria-label="Action example"><button type="button" data-scenario="send" aria-pressed="true">Send reply</button><button type="button" data-scenario="browse" aria-pressed="false">Open details · 94%</button></div>
+              <div id="demoSendAction"><h3>Send the Friday reply</h3><dl><dt>To</dt><dd>ali@example.test</dd><dt>Message</dt><dd>3:00 PM works for us this Friday.</dd></dl><p class="demo-scope">Sending is within this fictional task’s scope.</p></div>
+              <div id="demoBrowseAction" hidden><h3>Open pickup details</h3><dl><dt>Page</dt><dd>mail.example.com/daycare</dd><dt>Model confidence</dt><dd>94% · relevant and nonsensitive</dd></dl><p class="demo-scope">The 94% assessment is illustrative.</p></div>
+              <p id="demoDecisionResult" class="demo-decision-result"></p>
+              <div id="demoConfirmActions" class="demo-action-buttons" hidden><button id="approveAction" class="button button-primary" type="button">Approve demo action</button><button id="denyAction" class="button button-outline" type="button">Deny action</button></div>
+              <button id="continueAction" class="button button-primary" type="button" hidden>Continue demo</button>
+            </div>
+            <div class="demo-explainer"><h3 id="demoActionHeading">Your setting decides when to ask.</h3><p id="demoActionExplanation">Choose an example to see how this level treats it.</p><p class="demo-mode-hint">Balanced asks about sensitive or uncertain actions. Careful also asks below 98% model confidence.</p></div>
+          </div>
+          <div id="demoDone" class="demo-complete" hidden><span class="complete-mark"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="m7 16 6 6L25 10"/></svg></span><h3 id="demoResultTitle">Demo complete</h3><p id="demoResultText">This walkthrough changed no real website.</p><button id="repeatDemo" class="button button-primary" type="button">Walk through again</button></div>
+          <p class="demo-status" id="demoStatus" role="status" aria-live="polite">Choose a confirmation level to start the demo.</p>
         </div>
       </div>
     </section>
 
-    <section class="how-section" id="how-it-works" aria-labelledby="how-title"><div class="how-intro"><h2 id="how-title">The assistant works. Your local AI checks.</h2><p>In on-device mode, a separate model in your browser checks the remote assistant’s view and proposed actions against your approved purpose. Your phone signs the scope and consequential actions.</p><a class="text-link" href="https://github.com/s1liconcow/agent-gate/blob/main/docs/SETUP.md" target="_blank" rel="noopener noreferrer">Read setup and operation <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 15 15 5M7 5h8v8"/></svg></a></div><div class="how-list"><article><span>01</span><div><h3>Approve a purpose</h3><p>The assistant requests a task, allowed website, permissions and duration. Your phone signs that exact scope.</p></div></article><article><span>02</span><div><h3>Use a checked view</h3><p>The extension examines task tabs locally. Relevant source text and controls become a bounded assistant view; uncertain content waits for review.</p></div></article><article><span>03</span><div><h3>Keep the last word</h3><p>Consequential or uncertain actions return to your phone with the target and staged values before execution.</p></div></article></div></section>
+    <section class="modes-section" id="modes" aria-labelledby="modes-title">
+      <div class="modes-intro"><h2 id="modes-title">Choose when to step in.</h2><p>Set your level when you connect your assistant. Change it later in the approval app; new tasks use the saved setting.</p></div>
+      <div class="mode-list">
+        <article><div class="mode-name"><span>01</span><h3>Record only</h3></div><p>Classifies and records activity. Eligible actions continue without purpose blocking or confirmation.</p><strong>Fewest interruptions</strong></article>
+        <article><div class="mode-name"><span>02</span><h3>Balanced</h3></div><p>Sensitive or uncertain actions ask you. Clearly unrelated actions stop.</p><strong>Ask when it matters</strong></article>
+        <article><div class="mode-name"><span>03</span><h3>Careful</h3></div><p>Applies the same checks and asks whenever model confidence falls below 98%.</p><strong>More confirmation</strong></article>
+      </div>
+      <p class="modes-note">Signed origins, task permissions, expiry, disclosure budgets and credential redaction apply at every level.</p>
+    </section>
 
-    <section class="boundary-section" id="boundaries" aria-labelledby="boundary-title"><div class="boundary-heading"><h2 id="boundary-title">The assistant sees the work.<br><span>You see the boundary.</span></h2><p>AgentGate gives the assistant a task view through MCP. Website login and MFA stay with you, in your own browser.</p></div><div class="boundary-grid"><div><h3>Outside the assistant interface</h3><ul><li>Raw page structure and screenshots</li><li>Browser cookies and saved credentials</li><li>Unapproved tabs and unrelated content</li><li>Arbitrary browser scripts</li></ul></div><div><h3>Inside the approved task</h3><ul><li>Purpose, exact origins and time limit</li><li>Checked text and usable control references</li><li>Phone approval for consequential actions</li><li>Revocation and expiry that end access</li></ul></div></div><p class="boundary-note">Automatic local mode uses Chrome’s on-device model when available. If you configure remote inference, that provider receives locally redacted candidates, which may include unrelated ordinary content. Redaction can miss sensitive details. The acting assistant still receives only the selected view. <a href="https://github.com/s1liconcow/agent-gate/blob/main/docs/SETUP.md#optional-remote-inference" target="_blank" rel="noopener noreferrer">Read the data flow</a>.</p></section>
+    <section class="how-section" id="how-it-works" aria-labelledby="how-title"><div class="how-intro"><h2 id="how-title">One connection. A browser ready for the task.</h2><p>Each account gets a dedicated cloud browser and saved login profile. AgentGate checks browser work separately from the acting assistant.</p><a class="text-link" href="https://github.com/s1liconcow/agent-gate/blob/main/docs/CONNECTION.md" target="_blank" rel="noopener noreferrer">Read the connection guide <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 15 15 5M7 5h8v8"/></svg></a></div><div class="how-list"><article><span>01</span><div><h3>Connect and choose</h3><p>Add AgentGate through MCP, choose a confirmation level, and approve the connection. Your account’s cloud browser is enabled in the same flow.</p></div></article><article><span>02</span><div><h3>Bring your logins</h3><p>Open owner Live View for website sign-in or MFA. You can also share selected logins from a paired desktop extension.</p></div></article><article><span>03</span><div><h3>Run a bounded task</h3><p>The assistant gets filtered views. AgentGate records and checks actions under your saved level; the approval app shows decisions and lets you revoke access.</p></div></article></div></section>
 
-    <section class="closing" aria-labelledby="closing-title"><div><h2 id="closing-title">Give the task a boundary.</h2><p>Explore the synthetic flow, then connect your own browser when you are ready.</p></div><div class="closing-actions"><a class="button button-primary" href="#demo">Explore the live demo <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-5-5 5 5-5 5"/></svg></a><a class="text-link" href="https://github.com/s1liconcow/agent-gate/blob/main/docs/SETUP.md" target="_blank" rel="noopener noreferrer">Read setup <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 15 15 5M7 5h8v8"/></svg></a></div></section>
+    <section class="boundary-section" id="boundaries" aria-labelledby="boundary-title"><div class="boundary-heading"><h2 id="boundary-title">The assistant sees the work.<br><span>You see the boundary.</span></h2><p>Cloudflare runs the browser and processes its pages and saved logins. The acting assistant receives filtered task views through MCP. Owner Live View gives you direct access for sign-in and MFA.</p></div><div class="boundary-grid"><div><h3>Outside the assistant interface</h3><ul><li>Full pages and screenshots</li><li>Saved logins, cookies and MFA</li><li>Other tasks and browser tabs</li><li>Arbitrary browser scripts</li></ul></div><div><h3>Inside the task</h3><ul><li>Signed website origins and time limits</li><li>Filtered text and control references</li><li>Recorded decisions under your setting</li><li>Owner confirmation when your level requires it</li></ul></div></div><p class="boundary-note">The cloud browser’s login profile is encrypted in account storage. Cloudflare and the service operator remain trusted with the raw pages and logins. A paired desktop extension has a separate local data path. Optional remote inference sends hard-redacted candidates to its configured provider. <a href="https://github.com/s1liconcow/agent-gate/blob/main/docs/HOSTED_BROWSER.md#tenant-boundary-and-data" target="_blank" rel="noopener noreferrer">Read the cloud browser data flow</a>.</p></section>
+
+    <section class="closing" aria-labelledby="closing-title"><div><h2 id="closing-title">Start with your level of control.</h2><p>Explore the synthetic cloud browser flow, then connect your assistant through MCP.</p></div><div class="closing-actions"><a class="button button-primary" href="#demo">Explore the live demo <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-5-5 5 5-5 5"/></svg></a><a class="text-link" href="https://github.com/s1liconcow/agent-gate/blob/main/docs/CONNECTION.md" target="_blank" rel="noopener noreferrer">Connection guide <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 15 15 5M7 5h8v8"/></svg></a></div></section>
   </main>
-  <footer class="site-footer"><div><a class="brand" href="/landing.html"><img src="/icon.svg" width="28" height="28" alt="">AgentGate</a><p>Purpose-bound browser access for assistants.</p></div><div><a href="/">Phone approvals</a><a href="https://github.com/s1liconcow/agent-gate" target="_blank" rel="noopener noreferrer">Source &amp; docs</a></div></footer>
+  <footer class="site-footer"><div><a class="brand" href="/landing.html"><img src="/icon.svg" width="28" height="28" alt="">AgentGate</a><p>Cloud browser access with a level you choose.</p></div><div><a href="/">Approval app</a><a href="https://github.com/s1liconcow/agent-gate" target="_blank" rel="noopener noreferrer">Source &amp; docs</a></div></footer>
 </body>
 </html>

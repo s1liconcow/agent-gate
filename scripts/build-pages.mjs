@@ -9,14 +9,14 @@ const approvalUrl = 'https://agentgate-control.dchalloner.workers.dev/';
 
 let html = await readFile(join(source, 'landing.html'), 'utf8');
 const brandLink = 'class="brand" href="/landing.html"';
-const approvalLink = '<a href="/">Phone approvals</a>';
+const approvalLink = '<a href="/">Approval app</a>';
 
 if (html.split(brandLink).length !== 3 || !html.includes(approvalLink)) {
   throw new Error('Landing page links changed; update the Pages build.');
 }
 
 html = html.replaceAll(brandLink, 'class="brand" href="/"');
-html = html.replace(approvalLink, `<a href="${approvalUrl}">Phone approvals</a>`);
+html = html.replace(approvalLink, `<a href="${approvalUrl}">Approval app</a>`);
 
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });

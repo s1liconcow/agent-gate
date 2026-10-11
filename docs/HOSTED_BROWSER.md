@@ -4,8 +4,8 @@ Every account gets a dedicated Cloudflare Browser Run connection through
 [one-tap MCP sign-in](CONNECTION.md). The sign-in page saves engagement and enables
 the cloud browser together. The policy controls session and action confirmations.
 
-Choose **Audit Only**, **Auto Approve** or **Aggressive** on the connection page.
-Audit Only is the default. Change it later in the account's approval app.
+Choose **Record only**, **Balanced** or **Careful** on the connection page.
+Record only is the default. Change it later in the account's approval app.
 
 ## Deploy
 
@@ -71,7 +71,7 @@ the service operator and Cloudflare remain trusted with browser data. Hosted
 browsing processes raw pages and authentication data on Cloudflare. Agents
 receive the existing filtered views and minimal action results through MCP.
 
-Extension-to-cloud import is planned in [Login sync](LOGIN_SYNC.md). Its separate
+Extension-to-cloud import is implemented in [Login sync](LOGIN_SYNC.md). Its separate
 login-source pairing allows desktop sessions to seed the cloud browser while
 preserving the account's current browser connection.
 

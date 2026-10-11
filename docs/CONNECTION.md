@@ -4,7 +4,7 @@ Add `https://agentgate-control.dchalloner.workers.dev/mcp` with OAuth in OpenAI 
 another MCP client. The AgentGate sign-in page shows the assistant and return
 address, an engagement slider, and **Approve and connect**.
 
-Audit Only starts selected. One tap approves the assistant for 30 days, saves
+Record only starts selected. One tap approves the assistant for 30 days, saves
 engagement for 90 days, and enables the account's cloud browser for 90 days.
 There is no cloud-browser checkbox or separate phone setup.
 
