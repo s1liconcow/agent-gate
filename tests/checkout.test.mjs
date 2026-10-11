@@ -73,6 +73,15 @@ test('checkout idempotency survives approval and completion; changed requests an
   await f.engine.checkoutResult(f.id, {checkout_id: first.checkout.id, code: 'DISPATCHED'});
   assert.equal((await f.engine.requestCheckout(f.id, f.request)).checkout.status, 'dispatched');
 });
+test('observed merchant confirmation must match the approved merchant and total', async () => {
+  const f = await fixture(); await f.prepare(); await f.engine.approveCheckout(f.id, await f.approve());
+  const checkout_id = (await f.engine.get(f.id)).checkout.id;
+  const confirmation = {origin, order_id: 'SYNTHETIC-123', total_cents: 2500, currency: 'USD'};
+  for (const change of [{origin: 'https://other.example'}, {total_cents: 2600}, {currency: 'EUR'}, {order_id: '<script>'}]) await assert.rejects(f.engine.checkoutResult(f.id, {checkout_id, code: 'DISPATCHED', confirmation: {...confirmation, ...change}}), {code: 'INVALID_RESULT'});
+  const result = await f.engine.checkoutResult(f.id, {checkout_id, code: 'DISPATCHED', confirmation});
+  assert.equal(result.checkout.site_outcome, 'merchant_confirmed'); assert.deepEqual(result.checkout.confirmation, confirmation);
+  await assert.rejects(f.engine.checkoutResult(f.id, {checkout_id, code: 'DISPATCHED', confirmation}), {code: 'STALE_CHECKOUT'});
+});
 test('approval binds cart, amount and encrypted values; denials, expiry and replay prevent dispatch', async () => {
   const f = await fixture(); await f.prepare(); const input = await f.approve();
   await assert.rejects(f.engine.approveCheckout(f.id, {...input, envelope: {...input.envelope, ciphertext: input.envelope.ciphertext.slice(0, -2) + 'AA'}}), {code: 'STALE_APPROVAL'});

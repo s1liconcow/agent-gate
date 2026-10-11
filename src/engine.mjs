@@ -14,7 +14,8 @@ export class Engine {
     if (await this.db.get('phone')) fail('ALREADY_PAIRED', 'A phone is already paired. Reset the deployment to replace it.', 409);
     await this.db.put('phone', publicKey);
   }
-  async create(input, principal = 'cli', inference = null, browserId = null) {
+  async create(input, principal = 'cli', inference = null, browserId = null, localPurpose = null) {
+    if (Object.hasOwn(input || {}, 'purpose_guard') || Object.hasOwn(input || {}, 'execution_browser')) fail('INVALID_SCOPE', 'The coordinator binds the selected browser and local classifier.');
     if (Object.hasOwn(input || {}, 'browser_id')) fail('INVALID_SCOPE', 'The task browser is selected by the owner.');
     if (Object.hasOwn(input || {}, 'inference')) fail('INVALID_SCOPE', 'Inference is configured by the browser owner.');
     if (Object.hasOwn(input || {}, 'action_policy')) fail('INVALID_SCOPE', 'Communications and payments are selected by the owner during purpose approval.');
@@ -24,11 +25,11 @@ export class Engine {
     if (active.length >= 8) fail('QUEUE_FULL', 'Eight requests are already open. Close an existing session first.', 429);
     let automatic = sessionDefaults(input, inference);
     const authorization = await new Engagement(this.db, this.now).current();
-    if (authorization && automatic.disclosure !== 'bounded') {
+    if (authorization && automatic.disclosure !== 'bounded' && !localPurpose) {
       delete automatic.action_policy;
       automatic = {...automatic, interaction: automatic.disclosure === 'local_planner' ? 'local_gate' : 'automatic', engagement: authorization.challenge.mode};
     }
-    const task = scope({...automatic, ...(['local_planner', 'granular'].includes(automatic.disclosure) && inference ? {inference} : {}), ...(browserId ? {browser_id: browserId} : {})}), id = random();
+    const task = scope({...automatic, ...(['local_planner', 'granular'].includes(automatic.disclosure) && inference ? {inference} : {}), ...(browserId ? {browser_id: browserId} : {}), ...(localPurpose ? {purpose_guard: localPurpose.guard, execution_browser: localPurpose.execution} : {})}), id = random();
     const item = {id, task, request_scope: input, principal, status: 'requested', created_at: this.now(), expires_at: this.now() + 900000, operations: 0, fills: {}, history: [], keys: {}};
     item.scope_digest = await digest(task);
     item.challenge = {version: 1, stage: 'session', session_id: id, nonce: random(), scope_digest: item.scope_digest, scope: task, expires_at: this.now() + task.ttl_seconds * 1000};
@@ -79,6 +80,10 @@ export class Engine {
       CONTENT_NOT_READY: 'The page has not provided a stable usable task view. The extension continues automatic retries while approval is valid; do not claim the inbox was read.',
       MODEL_SETUP_REQUIRED: item.task.disclosure==='bounded'?'Enable exact phone-approved field reads in extension setup. This mode needs no model.':'Enable automatic tasks once in AgentGate extension setup using on-device AI or a remote provider.',
       MODEL_UNAVAILABLE: 'The Chrome on-device model is unavailable. Check local AI setup in the AgentGate extension.',
+      LOCAL_CLASSIFIER_UNAVAILABLE: 'Reconnect the pinned local Chrome classifier. This task requires its on-device checks.',
+      LOCAL_CLASSIFIER_REFUSED: 'The on-device classifier withheld this request because its purpose or data boundary was uncertain.',
+      LOCAL_CLASSIFIER_STALE: 'The task or view changed before its local classification completed. Read the current task state.',
+      LOCAL_CLASSIFIER_REPLAY: 'This local classification was already consumed. Read the current task state.',
       PERMISSION_REQUIRED: 'Allow approved tasks on websites once in AgentGate extension setup.',
       LOGIN_REQUIRED: 'Sign in or complete MFA in the task tab; the approved task resumes automatically.',
       LOCAL_CHECK_REFUSED: 'The local privacy check withheld this page. No usable task view was published.',
@@ -90,15 +95,15 @@ export class Engine {
       const reasons = {daily_time: 'the daily browser time quota is exhausted', concurrency: 'the concurrent browser limit is reached', acquisition_rate: 'the browser acquisition rate is limited', unknown: 'the limit reason is unconfirmed'};
       blockers.BROWSER_RATE_LIMITED = 'Cloudflare browser acquisition is blocked: ' + reasons[runtime.browser_limit.reason] + '. AgentGate will retry no earlier than ' + new Date(runtime.browser_limit.retry_at).toISOString() + ' while approval remains valid. Poll this session; the owner can inspect the exact provider error in hosted-browser diagnostics.';
     }
-    const checkoutNext = item.checkout?.status === 'dispatched' ? 'The final order button was dispatched once. Verify the merchant confirmation before reporting purchase success; do not submit again.' : item.checkout?.status === 'uncertain' ? 'Checkout may have submitted. Verify the merchant order history or existing task tab before any new purchase; do not retry.' : item.checkout?.status === 'failed' ? ({CHECKOUT_UNSUPPORTED: 'The checkout requires owner completion in the existing task tab. Hosted payment frames, redirects and unknown totals are unsupported.', CHECKOUT_CHANGED: 'The cart, fields or total changed. Review the existing cart before a new checkout.', STALE_VIEW: 'The prepared checkout view changed. Review the existing cart before a new checkout.', OUT_OF_SCOPE: 'The checkout did not match the approved purchase purpose or website. Review the intended order.', BRIDGE_ERROR: 'AgentGate could not complete checkout. Check the existing task tab and merchant order history before another purchase.'}[item.checkout.code]) : null;
+    const checkoutNext = item.checkout?.status === 'dispatched' ? item.checkout.confirmation ? 'The merchant reported order confirmation ' + item.checkout.confirmation.order_id + '. The final button was dispatched once; do not submit again.' : 'The final order button was dispatched once. Verify the merchant confirmation before reporting purchase success; do not submit again.' : item.checkout?.status === 'uncertain' ? 'Checkout may have submitted. Verify the merchant order history or existing task tab before any new purchase; do not retry.' : item.checkout?.status === 'failed' ? ({CHECKOUT_UNSUPPORTED: 'The checkout requires owner completion in the existing task tab. Hosted payment frames, redirects and unknown totals are unsupported.', CHECKOUT_CHANGED: 'The cart, fields or total changed. Review the existing cart before a new checkout.', STALE_VIEW: 'The prepared checkout view changed. Review the existing cart before a new checkout.', OUT_OF_SCOPE: 'The checkout did not match the approved purchase purpose or website. Review the intended order.', BRIDGE_ERROR: 'AgentGate could not complete checkout. Check the existing task tab and merchant order history before another purchase.'}[item.checkout.code]) : null;
     return {id: item.id, status: item.status, goal: item.task.goal, disclosure:item.task.disclosure, expires_at: item.expires_at, operations_remaining: Math.max(0, 24 - item.operations),
       ...(item.task.browser_id || item.browser_id ? {browser_id: item.task.browser_id || item.browser_id} : {}),
-      browser_selectable: ['requested', 'active'].includes(item.status) && item.operations === 0 && !item.checkout && !Object.keys(item.fills).length,
+      browser_selectable: !item.task.purpose_guard && ['requested', 'active'].includes(item.status) && item.operations === 0 && !item.checkout && !Object.keys(item.fills).length,
       ...(item.task.engagement ? {engagement: item.task.engagement, category: item.category} : {}),
       ...(item.task.interaction ? {interaction: item.task.interaction} : {}),
       ...(item.task.action_policy ? {action_policy: item.task.action_policy, payment_remaining_cents: Math.max(0, item.task.action_policy.payment_limit_cents - (item.payment_committed_cents || 0))} : {}),
       ...(item.view && !terminal.has(item.status) && !checkoutStates.includes(item.status) ? {view: item.view, view_digest: item.view_digest} : {}),
-      ...(item.checkout ? {checkout: {id: item.checkout.id, status: item.checkout.status, merchant: item.checkout.merchant, total_cents: item.checkout.request.total_cents, currency: item.checkout.request.currency, code: item.checkout.code || null, site_outcome: 'unverified'}} : {}),
+      ...(item.checkout ? {checkout: {id: item.checkout.id, status: item.checkout.status, merchant: item.checkout.merchant, total_cents: item.checkout.request.total_cents, currency: item.checkout.request.currency, code: item.checkout.code || null, site_outcome: item.checkout.confirmation ? 'merchant_confirmed' : 'unverified', ...(item.checkout.confirmation ? {confirmation: item.checkout.confirmation} : {})}} : {}),
       ...(item.last_command ? {last_command: item.last_command} : {}),
       disclosure_request: item.disclosure_request || null,
       ...(granularDisclosure(item.task.disclosure) && !terminal.has(item.status) ? {dom_request: item.dom_request || null, dom_access: item.dom_access || null} : {}),
@@ -131,6 +136,7 @@ export class Engine {
   }
   async chooseBrowser(id, browserId, inference) {
     const item = await this.get(id);
+    if (item.task.purpose_guard) fail('PURPOSE_GUARD_PINNED', 'Request a new purpose-bound session to change its execution or classifier browser.', 409);
     if (!this.public(item).browser_selectable) fail('SESSION_BUSY', 'Choose a browser before this task starts taking actions.', 409);
     const {inference: oldInference, engagement, action_policy, browser_id, ...previous} = item.task;
     const automatic = sessionDefaults(item.request_scope || previous, inference);
@@ -282,6 +288,8 @@ export class Engine {
     if (item.status !== 'checking_action' || input.command_id !== item.pending?.id || item.pending.deadline <= this.now() || !checksActionPurpose(item.task)) fail('STALE_COMMAND', 'This action no longer awaits a local check.', 409);
     if (!['allow', 'confirm', 'deny', ...(item.task.engagement ? ['unavailable'] : [])].includes(input.decision)) fail('INVALID_RESULT', 'Invalid local action decision.');
     let decision = item.task.interaction === 'automatic' && input.decision === 'confirm' ? 'deny' : input.decision;
+    if (item.task.purpose_guard && (input.decision !== 'allow' || !Number.isFinite(input.confidence) || input.confidence < .98 || input.confidence > 1 || input.effect !== 'other' || input.payment_cents !== 0)) decision = 'deny';
+    if (item.task.purpose_guard && item.pending.action.type === 'click' && /^(?:place\s+(?:your\s+)?order|pay\b|buy\s+now|submit\s+order|complete\s+purchase|confirm\s+(?:purchase|order))/i.test(item.view?.controls.find(control => control.ref === item.pending.action.ref)?.label || '')) decision = 'deny';
     if (item.task.engagement) {
       if (!Object.hasOwn(input, 'confidence') || !Object.hasOwn(input, 'sensitive')) fail('INVALID_RESULT', 'An engagement action requires its classifier assessment.');
       decision = engagementDecision(item.task.engagement, input);
@@ -308,7 +316,7 @@ export class Engine {
   async runtime(id, input) {
     exact(input, ['state', 'code', ...['phase', 'extension_version', 'browser_limit'].filter(key => Object.hasOwn(input || {}, key))]); const item = await this.get(id);
     if (terminal.has(item.status)) fail('SESSION_NOT_ACTIVE', 'This session has ended.', 409);
-    if (!['starting', 'planning', 'ready', 'blocked'].includes(input.state) || ![null, 'PERMISSION_REQUIRED', 'MODEL_SETUP_REQUIRED', 'MODEL_UNAVAILABLE', 'MODEL_TIMEOUT', 'BROWSER_UNRESPONSIVE', 'BROWSER_RATE_LIMITED', 'LOGIN_REQUIRED', 'OUT_OF_SCOPE', 'TAB_CLOSED', 'LOCAL_CHECK_REFUSED', 'PAGE_UNSUPPORTED', 'CONTENT_NOT_READY', 'INFERENCE_CONFIG_CHANGED', 'INFERENCE_AUTH_FAILED', 'INFERENCE_RATE_LIMITED', 'INFERENCE_UNAVAILABLE', 'INFERENCE_NOT_APPROVED'].includes(input.code)) fail('INVALID_RESULT', 'Invalid browser runtime status.');
+    if (!['starting', 'planning', 'ready', 'blocked'].includes(input.state) || ![null, 'PERMISSION_REQUIRED', 'MODEL_SETUP_REQUIRED', 'MODEL_UNAVAILABLE', 'MODEL_TIMEOUT', 'LOCAL_CLASSIFIER_UNAVAILABLE', 'LOCAL_CLASSIFIER_REFUSED', 'LOCAL_CLASSIFIER_STALE', 'LOCAL_CLASSIFIER_REPLAY', 'BROWSER_UNRESPONSIVE', 'BROWSER_RATE_LIMITED', 'LOGIN_REQUIRED', 'OUT_OF_SCOPE', 'TAB_CLOSED', 'LOCAL_CHECK_REFUSED', 'PAGE_UNSUPPORTED', 'CONTENT_NOT_READY', 'INFERENCE_CONFIG_CHANGED', 'INFERENCE_AUTH_FAILED', 'INFERENCE_RATE_LIMITED', 'INFERENCE_UNAVAILABLE', 'INFERENCE_NOT_APPROVED'].includes(input.code)) fail('INVALID_RESULT', 'Invalid browser runtime status.');
     if ((input.phase !== undefined && input.phase !== null && !browserPhases.includes(input.phase)) || (input.extension_version !== undefined && !/^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(input.extension_version))) fail('INVALID_RESULT', 'Invalid browser progress metadata.');
     if (input.browser_limit !== undefined) {
       exact(input.browser_limit, ['reason', 'retry_at']);
@@ -355,9 +363,15 @@ export class Engine {
     for (const field of ['snapshot', 'challenge', 'receipt', 'envelope']) delete item.checkout[field];
   }
   async checkoutResult(id, input) {
-    exact(input, ['checkout_id', 'code']); const item = await this.get(id), checkout = item.checkout;
+    exact(input, ['checkout_id', 'code', ...(input.confirmation ? ['confirmation'] : [])]); const item = await this.get(id), checkout = item.checkout;
     if (!['checkout_preparing', 'checkout_executing'].includes(item.status) || checkout?.id !== input.checkout_id) fail('STALE_CHECKOUT', 'This checkout is no longer pending.', 409);
     if (!['DISPATCHED', 'STALE_VIEW', 'CHECKOUT_CHANGED', 'CHECKOUT_UNSUPPORTED', 'OUT_OF_SCOPE', 'BRIDGE_ERROR', 'CHECKOUT_UNCERTAIN'].includes(input.code) || item.status === 'checkout_preparing' && ['DISPATCHED', 'CHECKOUT_UNCERTAIN'].includes(input.code)) fail('INVALID_RESULT', 'Invalid checkout result.');
+    if (input.confirmation) {
+      exact(input.confirmation, ['origin', 'order_id', 'total_cents', 'currency']);
+      const c = input.confirmation;
+      if (input.code !== 'DISPATCHED' || c.origin !== checkout.merchant || c.total_cents !== checkout.request.total_cents || c.currency !== 'USD' || !/^[A-Za-z0-9-]{1,100}$/.test(c.order_id)) fail('INVALID_RESULT', 'The merchant confirmation differs from the approved order.');
+      checkout.confirmation = {...c};
+    }
     checkout.status = input.code === 'DISPATCHED' ? 'dispatched' : input.code === 'CHECKOUT_UNCERTAIN' ? 'uncertain' : 'failed'; checkout.code = input.code;
     this.clearCheckout(item); item.status = 'closed'; delete item.view; delete item.view_digest; item.fills = {};
     await this.save(item); return this.public(item);

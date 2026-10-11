@@ -18,8 +18,8 @@ const setupBlockers = new Set(['LOGIN_REQUIRED', 'PERMISSION_REQUIRED', 'MODEL_S
   'INFERENCE_CONFIG_CHANGED', 'INFERENCE_AUTH_FAILED', 'INFERENCE_NOT_APPROVED', 'OUT_OF_SCOPE', 'TAB_CLOSED', 'LOCAL_CHECK_REFUSED', 'PAGE_UNSUPPORTED']);
 
 export class HostedBrowser {
-  constructor({storage, consent, factory, scripts, call, snapshot, reset, now = Date.now}) {
-    Object.assign(this, {storage, consent, factory, scripts, call, snapshot, reset, now}); this.queue = Promise.resolve(); this.privateSession = new Map();
+  constructor({storage, consent, factory, scripts, call, snapshot, reset, classifierReady = async () => false, now = Date.now}) {
+    Object.assign(this, {storage, consent, factory, scripts, call, snapshot, reset, classifierReady, now}); this.queue = Promise.resolve(); this.privateSession = new Map();
   }
   serial(operation) { const pending = this.queue.then(operation, operation); this.queue = pending.catch(() => {}); return pending; }
   async config(expected) {
@@ -30,6 +30,7 @@ export class HostedBrowser {
   async authorize(packet, status, expected) {
     const config = await this.config(expected);
     if (packet.scope.browser_id && packet.scope.browser_id !== config.browser_id) fail('INFERENCE_NOT_APPROVED', 'This task belongs to another browser.', 403);
+    if (packet.scope.purpose_guard && !await this.classifierReady(packet.scope.purpose_guard.browser_id)) fail('LOCAL_CLASSIFIER_UNAVAILABLE', 'The selected local classifier disconnected. No cloud inference fallback is allowed.', 409);
     if (packet.scope.inference && canonical(packet.scope.inference) !== canonical(config.inference)) fail('INFERENCE_CONFIG_CHANGED', 'The inference provider changed.', 403);
     await verifyBrowserSession(packet, config.phone_key, Date.now(), config.coordinator);
     const state = await this.snapshot(), item = state.sessions.find(session => session.id === (packet.session_id || packet.id));
@@ -71,7 +72,24 @@ export class HostedBrowser {
       const settings = async () => await store.get('local:inference_settings') || {profile: config.inference, api_key: ''};
       const authorize = (packet, status) => this.authorize(packet, status, config);
       const call = async (path, data) => { await this.config(config); return this.call(path, data); };
-      const model = async (type, input, {beforeInference, onStage} = {}) => {
+      const model = async (type, input, {beforeInference, onStage, session_id: sessionId} = {}) => {
+        if (input.task?.purpose_guard) {
+          if (!/^[a-f0-9]{32}$/.test(sessionId || '') || !beforeInference || input.task.inference) fail('LOCAL_CLASSIFIER_REFUSED', 'A bound local classification request is required.');
+          await beforeInference();
+          const {request_id} = await call('sessions/' + sessionId + '/classifier-request', {type, input});
+          const until = this.now() + 90000;
+          while (this.now() < until) {
+            await beforeInference();
+            const answer = await call('sessions/' + sessionId + '/classifier-read', {request_id});
+            if (answer.status === 'ready') {
+              await beforeInference();
+              if (!answer.result.ok) fail(answer.result.code, 'The local on-device classifier withheld this request.');
+              return {...answer.result, classifier_proof: answer.proof};
+            }
+            await new Promise(resolve => setTimeout(resolve, 250));
+          }
+          fail('MODEL_TIMEOUT', 'The local classifier did not finish before its deadline.');
+        }
         const current = await settings();
         if (!current || canonical(input.task?.inference) !== canonical(current.profile) || !beforeInference) throw new Error('Inference differs from its approval.');
         const runtime = new ModelRuntime(new LocalPlanner(remoteModelAPI(current, {authorize: beforeInference})));

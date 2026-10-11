@@ -88,7 +88,7 @@ $('defaultBrowserForm').addEventListener('submit', async event => {
 function taskBrowser(item) {
   const browser = browserChoices.find(browser => browser.id === item.browser_id);
   if (!browser) return el('p', item.hosted ? 'Cloud browser' : 'Local browser', 'hint');
-  if (!item.browser_selectable && item.status !== 'requested') return el('p', browserLabel(browser), 'hint');
+  if (item.scope?.purpose_guard || !item.browser_selectable && item.status !== 'requested') return el('p', browserLabel(browser), 'hint');
   const label = el('label', 'Browser for this task'), select = el('select');
   select.id = 'task-browser-' + item.id; label.htmlFor = select.id; browserOptions(select, browser.id); label.append(select);
   select.addEventListener('change', async () => {
@@ -330,6 +330,11 @@ function render(items) {
       if (item.challenge.stage === 'session') {
         detail(dl, 'Allowed websites', item.scope.origins.join('\n')); detail(dl, 'Duration', `${item.scope.ttl_seconds / 60} minutes from request`);
         if (item.scope.start_url) detail(dl, 'Starting page', item.scope.start_url);
+        if (item.scope.purpose_guard) {
+          detail(dl, 'Task browser', item.scope.execution_browser);
+          detail(dl, 'Purpose validation', 'Chrome on-device AI on your paired local browser. Routine actions require a confident purpose match; the exact final purchase needs your approval.');
+          if (item.scope.execution_browser === 'cloud') detail(dl, 'Local classifier sharing', 'The cloud browser sends filtered page candidates, proposed actions and the cart review to your paired local browser.');
+        }
         if (item.scope.inference) {
           detail(dl, 'Inference provider', item.scope.inference.provider + ' · ' + item.scope.inference.model);
           detail(dl, 'Inference endpoint', item.scope.inference.endpoint);
@@ -343,7 +348,7 @@ function render(items) {
           detail(dl,'Exact field selector',grant.xpath);
           detail(dl,'Read limits',`${grant.max_chars} characters per field; match offsets 0–${grant.max_offset}. One field per read; at most 16 reads and 8,000 characters in the session.`);
         }
-        detail(dl, 'Actions', item.scope.interaction === 'automatic' ? (granularDisclosure(item.scope.disclosure) ? 'Read and navigate within these websites.' : 'Checks each action against your task. Messages and payments need the options below.') : item.scope.interaction === 'local_gate' ? 'Reads and prepares drafts. Asks about consequential or uncertain actions.' : 'Ask before every action.');
+        detail(dl, 'Actions', item.scope.purpose_guard ? 'Checks routine actions on your device. Reviews every cart item and asks you to approve the exact final purchase.' : item.scope.interaction === 'automatic' ? (granularDisclosure(item.scope.disclosure) ? 'Read and navigate within these websites.' : 'Checks each action against your task. Messages and payments need the options below.') : item.scope.interaction === 'local_gate' ? 'Reads and prepares drafts. Asks about consequential or uncertain actions.' : 'Ask before every action.');
         const summary = el('dl'); detail(summary, 'Websites', item.scope.origins.map(value => new URL(value).hostname).join(', ')); detail(summary, 'Time', item.scope.ttl_seconds / 60 + ' minutes');
         receipt.append(summary, el('p', item.scope.disclosure === 'bounded' ? 'Share the selected fields below.' : 'Share selected text for this task.', 'hint'));
         if (item.scope.inference && !['purpose_encoder', 'purpose_browser'].includes(item.scope.inference.provider)) receipt.append(el('p', 'Page excerpts and actions are sent to ' + item.scope.inference.provider + '.', 'hint'));
@@ -361,6 +366,11 @@ function render(items) {
         const snapshot = item.challenge.snapshot;
         detail(dl, 'Merchant', snapshot.origin); detail(dl, 'Checkout page', snapshot.url);
         detail(dl, 'Order', snapshot.summary); detail(dl, 'Total including shipping and tax', '$' + (snapshot.total_cents / 100).toFixed(2) + ' ' + snapshot.currency);
+        if (snapshot.review) {
+          for (const item of snapshot.review.items) detail(dl, item.name + ' · ' + item.id, item.quantity + ' × $' + (item.unit_cents / 100).toFixed(2) + ' = $' + (item.line_cents / 100).toFixed(2));
+          for (const key of ['subtotal', 'shipping', 'tax', 'discount']) detail(dl, key[0].toUpperCase() + key.slice(1), '$' + (snapshot.review[key + '_cents'] / 100).toFixed(2));
+          detail(dl, 'Payment', snapshot.payment_description); detail(dl, 'Delivery', snapshot.delivery_description);
+        }
         detail(dl, 'Final action', 'Click “' + snapshot.submit_label + '” once after filling the fields below.');
         receipt.append(dl);
       } else {
@@ -374,7 +384,7 @@ function render(items) {
       }
       section.append(receipt);
       if (item.challenge.stage === 'checkout') section.append(checkoutFields(item));
-      if (item.challenge.stage === 'session' && item.scope.interaction === 'automatic' && item.scope.disclosure === 'local_planner' && item.scope.permissions.includes('click')) section.append(optionalActions(item));
+      if (item.challenge.stage === 'session' && !item.scope.purpose_guard && item.scope.interaction === 'automatic' && item.scope.disclosure === 'local_planner' && item.scope.permissions.includes('click')) section.append(optionalActions(item));
       const actions = el('div', undefined, 'actions'); actions.append(button(item.challenge.stage === 'session' ? 'Allow task' : item.challenge.stage === 'checkout' ? 'Place order' : item.challenge.stage === 'read' ? 'Share text' : 'Allow action', () => approve(item)), button('Deny', () => api(`owner/sessions/${item.id}/revoke`, {}), 'danger')); section.append(actions);
     } else if (['checkout_preparing', 'checkout_executing'].includes(item.status)) {
       section.append(el('p', item.next_action, 'hint'), button('Stop task', () => api(`owner/sessions/${item.id}/revoke`, {}), 'danger compact'));

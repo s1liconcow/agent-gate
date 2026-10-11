@@ -1,4 +1,5 @@
 import {b64url, canonical, exact, fail, origin, text} from './protocol.mjs';
+import {purchaseReview} from './checkout-review.mjs';
 
 const ref = value => typeof value === 'string' && /^[a-f0-9]{32}$/.test(value);
 export const checkoutStates = ['checkout_preparing', 'awaiting_checkout', 'checkout_executing'];
@@ -8,7 +9,11 @@ export function checkoutRequest(input) {
   return {...input, idempotency_key: text(input.idempotency_key, 8, 100)};
 }
 export function checkoutSnapshot(input, task, request) {
-  exact(input, ['origin', 'url', 'summary', 'total_cents', 'currency', 'submit_label', 'fields', 'capture_digest', 'public_key']);
+  exact(input, ['origin', 'url', 'summary', 'total_cents', 'currency', 'submit_label', 'fields', 'capture_digest', 'public_key', ...['review', 'payment_description', 'delivery_description'].filter(key => Object.hasOwn(input || {}, key))]);
+  if (task.purpose_guard || input.review) {
+    const review = purchaseReview(input.review);
+    if (review.origin !== input.origin || review.total_cents !== input.total_cents || review.capture_digest !== input.capture_digest || typeof input.payment_description !== 'string' || !input.payment_description.trim() || input.payment_description.length > 500 || typeof input.delivery_description !== 'string' || !input.delivery_description.trim() || input.delivery_description.length > 500) fail('CHECKOUT_UNSUPPORTED', 'Review every item, full total, payment and delivery choice before approving the purchase.');
+  }
   if (!task.origins.includes(origin(input.origin)) || input.currency !== request.currency || input.total_cents !== request.total_cents || !/^[A-Za-z0-9_-]{43}$/.test(input.capture_digest)) fail('CHECKOUT_CHANGED', 'The checkout website or total differs from the requested order.', 409);
   let url; try { url = new URL(input.url); } catch { fail('INVALID_CHECKOUT', 'Invalid checkout page.'); }
   if (url.origin !== input.origin || url.username || url.password || input.url.length > 1000 || url.hash) fail('INVALID_CHECKOUT', 'Invalid checkout page.');

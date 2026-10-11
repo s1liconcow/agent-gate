@@ -5,7 +5,7 @@ import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
 import {createServer} from '../mcp/tools.mjs';
 import {remoteMcp} from '../src/remote-mcp.mjs';
 
-const names = ['request_browser_session', 'get_browser_session', 'read_browser_view', 'request_browser_disclosure', 'read_browser_dom', 'perform_browser_action', 'close_browser_session', 'checkout'].sort();
+const names = ['request_browser_session', 'list_browser_runtimes', 'get_browser_session', 'read_browser_view', 'request_browser_disclosure', 'read_browser_dom', 'perform_browser_action', 'close_browser_session', 'checkout'].sort();
 const check = tools => {
   assert.deepEqual(tools.map(tool => tool.name).sort(), names);
   const dom = tools.find(tool => tool.name === 'read_browser_dom');
@@ -16,8 +16,11 @@ const check = tools => {
   const request = tools.find(tool => tool.name === 'request_browser_session');
   assert.equal(request.inputSchema.properties.engagement, undefined);
   assert.equal(request.inputSchema.properties.inference, undefined);
+  assert.deepEqual(request.inputSchema.properties.browser.enum, ['local', 'cloud']);
+  assert.equal(request.inputSchema.properties.validation.const, 'on_device');
+  assert.equal(request.inputSchema.properties.ttl_seconds.maximum, 600);
 };
-test('local and remote discovery advertise all eight tools with bounded DOM-read schemas', async () => {
+test('local and remote discovery advertise all nine tools with explicit on-device routing and bounded reads', async () => {
   for (const remote of [false, true]) {
     const server = createServer({url: 'https://gate.example', call: async () => {throw new Error('Discovery must not read page content');}}, remote);
     const client = new Client({name: 'discovery-test', version: '1.0.0'});

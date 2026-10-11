@@ -85,3 +85,9 @@ outputs/
 /extension/login-storage.js
 /extension/purpose-runtime.mjs
 /extension/purpose-vendor/
+
+# Generated purpose-bound shopping modules
+/extension/local-purpose.mjs
+/extension/checkout-review.mjs
+/public/checkout-review.mjs
+/public/policy.mjs

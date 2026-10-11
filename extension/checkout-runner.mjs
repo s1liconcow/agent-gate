@@ -19,14 +19,15 @@ export class CheckoutRunner {
     const id = packet.checkout.id;
     if (this.busy.has(id)) return;
     this.busy.add(id);
-    let code;
+    let code, confirmation;
     try {
       if (packet.checkout.status === 'preparing') { await this.prepare(packet); return; }
       if (packet.checkout.status !== 'executing') throw new Error('Invalid checkout state.');
       code = await this.execute(packet);
+      if (code === 'DISPATCHED' && packet.scope.purpose_guard) confirmation = await this.confirmation(packet);
     } catch (error) { code = ['STALE_VIEW', 'CHECKOUT_CHANGED', 'CHECKOUT_UNSUPPORTED', 'OUT_OF_SCOPE', 'CHECKOUT_UNCERTAIN'].includes(error.code) ? error.code : 'BRIDGE_ERROR'; }
     finally { this.busy.delete(id); }
-    await this.call('sessions/' + packet.session_id + '/checkout-result', {checkout_id: id, code});
+    await this.call('sessions/' + packet.session_id + '/checkout-result', {checkout_id: id, code, ...(confirmation ? {confirmation} : {})});
     await this.forget(packet.session_id);
   }
   async prepare(packet) {
@@ -38,18 +39,26 @@ export class CheckoutRunner {
     if (!binding || binding.view_digest !== request.view_digest || binding.tab_id !== record?.current || !record.ids.includes(binding.tab_id)) throw Object.assign(new Error(), {code: 'STALE_VIEW'});
     // Check purchase necessity using ordinary published data; private values never
     // enter the guardian's model input, including owner-configured remote models.
-    const assessment = await this.model('check_action', {task: {...packet.scope, interaction: 'local_gate'}, view: binding.view, action: {type: 'click', ref: request.submit_ref}, staged: stagedFields(binding.view, binding.fills || {}), submit: true}, {beforeInference: () => this.authorize(packet, 'checkout_preparing')});
-    if (!['confirm', 'allow'].includes(assessment.decision)) throw Object.assign(new Error(), {code: 'OUT_OF_SCOPE'});
+    if (!packet.scope.purpose_guard) {
+      const assessment = await this.model('check_action', {task: {...packet.scope, interaction: 'local_gate'}, view: binding.view, action: {type: 'click', ref: request.submit_ref}, staged: stagedFields(binding.view, binding.fills || {}), submit: true}, {beforeInference: () => this.authorize(packet, 'checkout_preparing')});
+      if (!['confirm', 'allow'].includes(assessment.decision)) throw Object.assign(new Error(), {code: 'OUT_OF_SCOPE'});
+    }
     await this.authorize(packet, 'checkout_preparing');
     await this.api.scripting.executeScript({target: {tabId: binding.tab_id, frameIds: [0]}, files: ['checkout-content.js']});
-    const captured = await deadline(() => this.api.tabs.sendMessage(binding.tab_id, {type: 'checkout_prepare', checkout_id: checkout.id, submit_ref: request.submit_ref, total_cents: request.total_cents, origins: packet.scope.origins}, {frameId: 0}), 15000, 'CHECKOUT_UNSUPPORTED');
+    const captured = await deadline(() => this.api.tabs.sendMessage(binding.tab_id, {type: 'checkout_prepare', checkout_id: checkout.id, submit_ref: request.submit_ref, total_cents: request.total_cents, origins: packet.scope.origins, require_review: Boolean(packet.scope.purpose_guard)}, {frameId: 0}), 15000, 'CHECKOUT_UNSUPPORTED');
     if (captured?.code) throw Object.assign(new Error(), {code: captured.code});
     const keys = await checkoutKey();
     const snapshot = checkoutSnapshot({...captured, summary: sanitizeText(captured.summary), public_key: keys.public_key}, packet.scope, request);
+    let classifierProof;
+    if (packet.scope.purpose_guard) {
+      const assessment = await this.model('check_purchase', {task: packet.scope, view: binding.view, action: {type: 'click', ref: request.submit_ref}, staged: stagedFields(binding.view, binding.fills || {}), review: snapshot.review}, {session_id: sessionId, beforeInference: () => this.authorize(packet, 'checkout_preparing')});
+      if (assessment.decision !== 'allow' || assessment.confidence < .98 || assessment.effect !== 'payment' || assessment.payment_cents !== snapshot.total_cents) throw Object.assign(new Error(), {code: 'OUT_OF_SCOPE'});
+      classifierProof = assessment.classifier_proof;
+    }
     checkout_bindings[sessionId] = {checkout_id: checkout.id, tab_id: binding.tab_id, view_digest: request.view_digest, submit_ref: request.submit_ref, snapshot, private_key: keys.private_key};
     await this.api.storage.session.set({checkout_bindings});
     await this.authorize(packet, 'checkout_preparing');
-    await this.call('sessions/' + sessionId + '/checkout-prepare', {checkout_id: checkout.id, snapshot});
+    await this.call('sessions/' + sessionId + '/checkout-prepare', {checkout_id: checkout.id, snapshot, ...(classifierProof ? {classifier_proof: classifierProof} : {})});
   }
   async execute(packet) {
     const settings = await this.authorize(packet, 'checkout_executing');
@@ -83,6 +92,24 @@ export class CheckoutRunner {
       checkout_dispatches[checkout.id].code = code; await this.api.storage.local.set({checkout_dispatches});
     }
     return code;
+  }
+  async confirmation(packet) {
+    // Observation uses the same owned task tab. Missing evidence never retries.
+    try {
+      const {checkout_bindings = {}, agent_tabs = {}} = await this.api.storage.session.get(['checkout_bindings', 'agent_tabs']);
+      const binding = checkout_bindings[packet.session_id], record = agent_tabs[packet.session_id];
+      if (!binding || binding.tab_id !== record?.current || !record.ids.includes(binding.tab_id)) return null;
+      for (let attempt = 0; attempt < 10; attempt++) {
+        await this.authorize(packet, 'checkout_executing');
+        try {
+          await this.api.scripting.executeScript({target: {tabId: binding.tab_id, frameIds: [0]}, files: ['xpath.js', 'content.js', 'checkout-content.js']});
+          const result = await deadline(() => this.api.tabs.sendMessage(binding.tab_id, {type: 'checkout_confirmation', origins: [binding.snapshot.origin], total_cents: binding.snapshot.total_cents}, {frameId: 0}), 1000, 'CHECKOUT_UNCERTAIN');
+          if (result?.confirmation) return result.confirmation;
+        } catch { /* Navigation may still be replacing the document. */ }
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    } catch { /* Approval or the task tab ended after dispatch. */ }
+    return null;
   }
   async forget(sessionId) {
     const {checkout_bindings = {}} = await this.api.storage.session.get('checkout_bindings'), binding = checkout_bindings[sessionId];

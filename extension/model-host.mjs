@@ -8,7 +8,8 @@ import {ensureLocalDocument} from './offscreen-host.mjs';
 const runtime = new ModelRuntime();
 export async function localModel(type, input = {}, {onStage = () => {}, beforeInference} = {}) {
   const settings = await inferenceSettings();
-  if (type === 'availability' && settings) return {ok: true, availability: 'available'};
+  if (input.task?.purpose_guard && input.task.inference) throw inferenceError('INFERENCE_NOT_APPROVED');
+  if (type === 'availability' && settings && !input.task?.purpose_guard) return {ok: true, availability: 'available'};
   const remote = approvedInference(settings, input.task);
   if (remote) {
     if (typeof beforeInference !== 'function') throw inferenceError('INFERENCE_NOT_APPROVED');

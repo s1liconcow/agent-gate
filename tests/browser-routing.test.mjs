@@ -25,6 +25,15 @@ async function fixture() {
   const create = async () => { const browser = await routing.current(); return engine.create(input, 'cli', await configuredInference(db, browser.id), browser.id); };
   return {db, routing, engine, profile, sign, create};
 }
+test('explicit runtime selection never falls back to another browser kind or unknown classifier', async () => {
+  const f = await fixture();
+  assert.equal((await f.routing.choose('local', local)).id, local);
+  assert.equal((await f.routing.choose('cloud')).id, cloud);
+  await assert.rejects(f.routing.choose('local', cloud), {code: 'BROWSER_SELECTION_REQUIRED'});
+  await assert.rejects(f.routing.choose('local', 'f'.repeat(32)), {code: 'BROWSER_SELECTION_REQUIRED'});
+  await f.db.put('browser:' + local, {...await f.db.get('browser:' + local), status: 'revoked'});
+  await assert.rejects(f.routing.choose('local'), {code: 'BROWSER_SELECTION_REQUIRED'});
+});
 test('cloud is the default despite later local registration; preferences and task assignments are independent', async () => {
   const f = await fixture(); assert.equal((await f.routing.current()).id, cloud);
   assert.deepEqual(await configuredInference(f.db, cloud), f.profile);

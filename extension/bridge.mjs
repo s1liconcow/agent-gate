@@ -8,11 +8,13 @@ import {purposeBrowserModel} from './purpose-browser-model.mjs';
 import {auditActiveSessions, auditConnectionEnded, auditEvent, auditPrune, auditRecording, auditStatuses} from './audit-log.mjs';
 import {SessionRecordings} from './session-recording.mjs';
 import {CheckoutRunner} from './checkout-runner.mjs';
+import {PairedLocalClassifier} from './local-classifier.mjs';
 const ready = Promise.all([chrome.storage.local.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'}), chrome.storage.session.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'}), chrome.storage.session.remove(['source', 'binding', 'snapshot'])]);
 let socket, heartbeat, reconnectTimer, setupPromise, setupCredential, queue = Promise.resolve(), pairingQueue = Promise.resolve();
 const leases = new Map();
 const recordings = new SessionRecordings({audit: auditRecording});
 const automatic = new AutomaticBrowser({call, config, verifySession, audit: auditEvent, recordings});
+const classifier = new PairedLocalClassifier({call, config});
 const checkout = new CheckoutRunner({call, config, verifySession, recordings});
 async function config() { await ready; return (await chrome.storage.local.get('settings')).settings; }
 async function setupBrowser() {
@@ -190,7 +192,10 @@ async function connect() {
       if (event.data === 'pong') return;
       try {
         const packet = JSON.parse(event.data);
+        // Command acknowledgements are not browser assignment snapshots.
+        if (!Array.isArray(packet.sessions)) return;
         queue = queue.then(async () => {
+          await classifier.tick(packet.classifier_requests || []);
           await automatic.stop(packet.sessions);
           await checkout.stop(packet.sessions);
           for (const check of packet.checks || []) await automatic.check(check);
@@ -209,9 +214,9 @@ chrome.alarms.create('agentgate-reconnect', {periodInMinutes: 1});
 chrome.alarms.create('agentgate-audit-prune', {periodInMinutes: 1440});
 chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === 'agentgate-audit-prune') { auditPrune(); return; }
-  connect(); automatic.tick().catch(() => {});
+  connect(); automatic.tick().catch(() => {}); classifier.tick().catch(() => {});
 });
-setInterval(() => { automatic.activity.expire(); automatic.tick().catch(() => {}); }, 5000);
+setInterval(() => { automatic.activity.expire(); automatic.tick().catch(() => {}); classifier.tick().catch(() => {}); }, 5000);
 chrome.tabs.onUpdated.addListener((tabId, change) => { if (change.status === 'complete') automatic.activity.loaded(tabId); });
 chrome.debugger.onDetach.addListener(source => recordings.detached(source.tabId));
 automatic.activity.initialize();

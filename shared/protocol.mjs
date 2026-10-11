@@ -47,7 +47,7 @@ export function coordinator(value) {
   return base + (url.pathname === '/' ? '' : url.pathname);
 }
 export function scope(value) {
-  exact(value, ['goal', 'origins', 'permissions', 'ttl_seconds', ...['disclosure', 'interaction', 'start_url', 'inference','read_grants', 'action_policy', 'engagement', 'browser_id'].filter(key => Object.hasOwn(value || {}, key))]);
+  exact(value, ['goal', 'origins', 'permissions', 'ttl_seconds', ...['disclosure', 'interaction', 'start_url', 'inference','read_grants', 'action_policy', 'engagement', 'browser_id', 'purpose_guard', 'execution_browser'].filter(key => Object.hasOwn(value || {}, key))]);
   const disclosure = value.disclosure === undefined ? 'local_planner' : value.disclosure;
   if (!['local_planner', 'granular','bounded'].includes(disclosure)) fail('INVALID_SCOPE', 'Choose automatic local_planner, granular or bounded disclosure.');
   if (value.interaction !== undefined && !['automatic', 'local_gate', 'every_action'].includes(value.interaction)) fail('INVALID_SCOPE', 'Choose automatic actions, local purpose checks with confirmation, or approval for every action.');
@@ -60,6 +60,12 @@ export function scope(value) {
     if (!/^[a-f0-9]{32}$/.test(value.browser_id)) fail('INVALID_SCOPE', 'Select a connected task browser.');
     task.browser_id = value.browser_id;
   }
+  if (value.purpose_guard !== undefined) {
+    exact(value.purpose_guard, ['version', 'browser_id', 'model']);
+    if (value.purpose_guard.version !== 1 || !/^[a-f0-9]{32}$/.test(value.purpose_guard.browser_id) || value.purpose_guard.model !== 'chrome_ai' || !task.browser_id || !['local', 'cloud'].includes(value.execution_browser) || disclosure !== 'local_planner' || value.interaction !== 'automatic' || value.inference || value.engagement || value.action_policy?.communications || value.action_policy?.payments) fail('INVALID_SCOPE', 'Purpose-bound tasks require a pinned browser, local on-device classifier and separate exact checkout approval.');
+    task.purpose_guard = {...value.purpose_guard}; task.execution_browser = value.execution_browser;
+    if (task.execution_browser === 'local' && task.purpose_guard.browser_id !== task.browser_id) fail('INVALID_SCOPE', 'Local execution uses the selected local classifier browser.');
+  } else if (value.execution_browser !== undefined) fail('INVALID_SCOPE', 'Execution metadata requires a purpose guard.');
   if (value.engagement !== undefined) {
     if (!['AUDIT_ONLY', 'AUTO_APPROVE', 'AGGRESSIVE'].includes(value.engagement) || value.action_policy || disclosure === 'bounded' || value.interaction !== (disclosure === 'local_planner' ? 'local_gate' : 'automatic')) fail('INVALID_SCOPE', 'Engagement is selected by the owner for model-classified sessions.');
     task.engagement = value.engagement;
@@ -75,7 +81,7 @@ export function scope(value) {
     task.inference = inferenceProfile(value.inference);
   }
   if (task.disclosure === 'granular' && (!['openjev','purpose_encoder','purpose_browser'].includes(task.inference?.provider) || !task.permissions.includes('read') || task.permissions.some(p => !['read', 'navigate'].includes(p)) || !['automatic', 'every_action'].includes(task.interaction))) fail('INVALID_SCOPE', 'Granular reads require an owner-configured decision provider, read/navigate permissions and automatic or every_action interaction.');
-  if (['openjev','purpose_encoder','purpose_browser'].includes(task.inference?.provider) && task.disclosure !== 'granular') fail('INVALID_SCOPE', 'This classifier supports granular reads. Request disclosure=granular.');
+  if (['openjev','purpose_encoder','purpose_browser'].includes(task.inference?.provider) && task.disclosure !== 'granular') fail('INVALID_SCOPE', 'This classifier supports granular read/navigate tasks. For on-device shopping, refresh MCP tools and explicitly select browser=local or cloud with validation=on_device; a paired local Chrome classifier is required.');
   if(value.read_grants!==undefined&&task.disclosure!=='bounded')fail('INVALID_SCOPE','Read grants require bounded disclosure.');
   if(task.disclosure==='bounded') {
     if(task.inference||task.interaction!=='every_action'||!task.permissions.includes('read')||task.permissions.some(p=>!['read','navigate'].includes(p)))fail('INVALID_SCOPE','Bounded grants permit read/navigate with exact navigation approval and local enforcement.');

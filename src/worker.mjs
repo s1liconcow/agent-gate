@@ -6,6 +6,7 @@ import {ConnectionSetup} from './connection-setup.mjs';
 import {Connectors} from './connectors.mjs';
 import {Browsers} from './browsers.mjs';
 import {BrowserRouting} from './browser-routing.mjs';
+import {LocalClassifier} from './local-classifier.mjs';
 import {registerInference, configuredInference} from './inference.mjs';
 import {withOAuth, oauthRoute} from './oauth.mjs';
 import {assetResponse} from './generated-assets.mjs';
@@ -49,13 +50,17 @@ export class Gate extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env); this.engine = new Engine(ctx.storage); this.engagement = new Engagement(ctx.storage); this.connectors = new Connectors(ctx.storage); this.browsers = new Browsers(ctx.storage); this.tickets = new Map();
     this.browserRouting = new BrowserRouting(ctx.storage);
+    this.classifier = new LocalClassifier(ctx.storage, {engine: this.engine, allowed: async id => {
+      const item = await ctx.storage.get('browser:' + id);
+      return item?.kind !== 'hosted' && item?.status === 'active' && item.expires_at > Date.now() && ctx.getWebSockets('browser:' + id).some(ws => ws.readyState === 1);
+    }});
     this.cloudDeployment = {browser_binding: Boolean(env.BROWSER), assets_binding: Boolean(env.HOSTED_MODELS), model_installed: Boolean(hostedModel)};
     this.hostedConsent = new HostedConsent(ctx.storage, {model: hostedModel, available: Boolean(env.BROWSER && env.HOSTED_MODELS && hostedModel)});
     this.connectionSetup = new ConnectionSetup(ctx.storage, {model: hostedModel, available: Boolean(env.BROWSER && env.HOSTED_MODELS && hostedModel)});
     this.loginSources = new Browsers(ctx.storage, Date.now, {loginSource: true});
     this.loginSync = new LoginSync(ctx.storage, this.hostedConsent, this.loginSources);
     this.hosted = new HostedBrowser({storage: ctx.storage, consent: this.hostedConsent, factory: cloudflareBrowserFactory(env.BROWSER), scripts: hostedScripts,
-      call: (path, data) => this.hostedCall(path, data), snapshot: () => this.hostedSnapshot(), reset: () => this.hostedLock(async () => {
+      call: (path, data) => this.hostedCall(path, data), snapshot: () => this.hostedSnapshot(), classifierReady: id => this.classifier.allowed(id), reset: () => this.hostedLock(async () => {
         const hosted = await this.hostedConsent.current();
         for (const item of await this.engine.list()) if (item.status === 'active' && hosted && await this.browserRouting.owns(item, hosted.browser_id)) {
           if (Object.keys(item.fills).length) { await this.engine.end(item.id); continue; }
@@ -74,7 +79,7 @@ export class Gate extends DurableObject {
     for (const item of items) if (await this.browserRouting.owns(item, browserId)) sessions.push(item);
     const ids = new Set(sessions.map(item => item.id));
     return {sessions, commands: (await this.engine.commands()).filter(item => ids.has(item.session_id)),
-      checks: (await this.engine.checks()).filter(item => ids.has(item.session_id)), checkouts: (await this.engine.checkouts()).filter(item => ids.has(item.session_id))};
+      checks: (await this.engine.checks()).filter(item => ids.has(item.session_id)), checkouts: (await this.engine.checkouts()).filter(item => ids.has(item.session_id)), classifier_requests: await this.classifier.pending(browserId)};
   }
   hostedSnapshot() { return this.hostedLock(async () => {
     const current = await this.hostedConsent.current();
@@ -89,11 +94,23 @@ export class Gate extends DurableObject {
     if (!current) fail('INFERENCE_NOT_APPROVED', 'Hosted browser access ended.', 403);
     await this.engine.sweep();
     if (path === 'sessions' && data === undefined) return {sessions: (await this.browserTasks(current.browser_id)).sessions.map(item => ({...this.engine.public(item), scope: item.task, session_receipt: item.session_receipt}))};
-    const route = path.match(/^sessions\/([a-f0-9]{32})\/(view|dom|runtime|check|result|checkout-prepare|checkout-result)$/);
+    const route = path.match(/^sessions\/([a-f0-9]{32})\/(view|dom|runtime|check|result|checkout-prepare|checkout-result|classifier-request|classifier-read)$/);
     if (!route || data === undefined) fail('NOT_FOUND', 'Unknown hosted browser operation.', 404);
     await this.requireTaskBrowser(route[1], current.browser_id);
+    if (route[2] === 'classifier-request') {
+      exact(data, ['type', 'input']); const answer = await this.classifier.request(route[1], data.type, data.input);
+      this.ctx.waitUntil(this.dispatch()); return answer;
+    }
+    if (route[2] === 'classifier-read') { exact(data, ['request_id']); return this.classifier.read(route[1], data.request_id); }
+    const item = await this.engine.get(route[1]);
+    let proof;
+    if (item.task.purpose_guard && ['view', 'check', 'checkout-prepare'].includes(route[2])) {
+      const {classifier_proof, ...payload} = data;
+      proof = await this.classifier.proof(item.id, {view: 'plan', check: 'check_action', 'checkout-prepare': 'check_purchase'}[route[2]], classifier_proof, payload); data = payload;
+    }
     const methods = {view: 'publishView', dom: 'publishDOM', runtime: 'runtime', check: 'checkAction', result: 'result', 'checkout-prepare': 'prepareCheckout', 'checkout-result': 'checkoutResult'};
     const answer = await this.engine[methods[route[2]]](route[1], data);
+    if (proof) await this.classifier.used(proof);
     if (['awaiting_action', 'awaiting_checkout', 'awaiting_read'].includes(answer.status)) this.ctx.waitUntil(this.notify());
     return answer;
   }); }
@@ -105,7 +122,7 @@ export class Gate extends DurableObject {
         this.hostedAgain = false;
         try { await this.hosted.tick(); }
         catch (error) {
-          const code = ['MODEL_TIMEOUT', 'BROWSER_RATE_LIMITED'].includes(error.code) ? error.code : 'BROWSER_UNRESPONSIVE';
+          const code = ['MODEL_TIMEOUT', 'MODEL_UNAVAILABLE', 'BROWSER_RATE_LIMITED', 'LOCAL_CLASSIFIER_UNAVAILABLE', 'LOCAL_CLASSIFIER_REFUSED', 'LOCAL_CLASSIFIER_STALE', 'LOCAL_CLASSIFIER_REPLAY'].includes(error.code) ? error.code : 'BROWSER_UNRESPONSIVE';
           if (await this.hostedConsent.current()) await this.hostedLock(async () => {
             const current = await this.hostedConsent.current();
             for (const item of (await this.browserTasks(current.browser_id)).sessions) if (item.status === 'active') await this.engine.runtime(item.id, {state: 'blocked', code, ...(error.browser_limit ? {browser_limit: error.browser_limit} : {})});
@@ -117,7 +134,7 @@ export class Gate extends DurableObject {
   }
   async endBrowserTasks(browserId) {
     if (!browserId) return;
-    for (const item of (await this.browserTasks(browserId)).sessions) if (!['expired', 'revoked', 'closed'].includes(item.status)) await this.engine.end(item.id);
+    for (const item of await this.engine.list()) if ((await this.browserRouting.owns(item, browserId) || item.task.purpose_guard?.browser_id === browserId) && !['expired', 'revoked', 'closed'].includes(item.status)) await this.engine.end(item.id);
   }
   async endHostedTasks(browserId) { await this.endBrowserTasks(browserId || (await this.hostedConsent.current())?.browser_id); }
   async endAllTasks() { for (const item of await this.engine.list()) if (!['expired', 'revoked', 'closed'].includes(item.status)) await this.engine.end(item.id); }
@@ -174,13 +191,28 @@ export class Gate extends DurableObject {
     return item;
   }
   async remoteCall(connectorId, path, data) {
-    const answer = await this.locked(async () => { await this.connectors.allowed(connectorId); await this.ensureHosted(); await this.engine.sweep(); return this.agentCall(path, data, 'remote:' + connectorId); });
+    const answer = await this.locked(async () => { await this.connectors.allowed(connectorId); if (path === 'sessions' && data !== undefined && data.browser !== 'local') await this.ensureHosted(); await this.engine.sweep(); return this.agentCall(path, data, 'remote:' + connectorId); });
     // Read-only MCP status polls must not generate new browser work. A short
     // read wait polls often; dispatching each poll caused a websocket/tick storm.
     if(data!==undefined)await this.dispatch(); return answer;
   }
   async agentCall(path, data, principal = 'cli') {
-    if (path === 'sessions' && data !== undefined) { const browser = await this.browserRouting.current(); const result = await this.engine.create(data, principal, await configuredInference(this.ctx.storage, browser?.id), browser?.id); if (result.status === 'requested') this.ctx.waitUntil(this.notify()); return result; }
+    if (path === 'browsers' && data === undefined) return {browsers: await this.browserRouting.choices(), validation: 'on_device', classifier_model: 'chrome_ai'};
+    if (path === 'sessions' && data !== undefined) {
+      const {browser: kind, validation, classifier_browser_id: classifierId, ...input} = data;
+      if (validation !== undefined && validation !== 'on_device' || classifierId && validation !== 'on_device') fail('INVALID_SCOPE', 'Choose validation=on_device with a paired local classifier.');
+      const browser = kind ? await this.browserRouting.choose(kind, kind === 'local' ? classifierId : undefined) : await this.browserRouting.current();
+      let localPurpose = null;
+      if (validation === 'on_device') {
+        if (!kind || input.disclosure && input.disclosure !== 'local_planner' || input.interaction && input.interaction !== 'automatic') fail('INVALID_SCOPE', 'On-device shopping requires explicit browser=local or cloud, local_planner disclosure and automatic routine actions.');
+        const classifier = kind === 'local' ? browser : await this.browserRouting.choose('local', classifierId);
+        if (classifierId && classifierId !== classifier.id || !await this.classifier.allowed(classifier.id)) fail('LOCAL_CLASSIFIER_UNAVAILABLE', 'Connect the explicitly selected paired local Chrome classifier.');
+        input.disclosure = 'local_planner'; input.interaction = 'automatic';
+        localPurpose = {guard: {version: 1, browser_id: classifier.id, model: 'chrome_ai'}, execution: kind};
+      }
+      const result = await this.engine.create(input, principal, localPurpose ? null : await configuredInference(this.ctx.storage, browser?.id), browser?.id, localPurpose);
+      if (result.status === 'requested') this.ctx.waitUntil(this.notify()); return result;
+    }
     const match = path.match(/^sessions\/([a-f0-9]{32})(?:\/(actions|close|revoke|disclosure|dom|checkout))?$/);
     if (!match) fail('NOT_FOUND', 'Unknown assistant endpoint.', 404);
     const [, id, operation] = match, item = await this.engine.get(id);
@@ -450,6 +482,8 @@ export class Gate extends DurableObject {
         if (this.tickets.size >= 16) fail('TOO_MANY_CONNECTIONS', 'Too many bridge connection requests.', 429);
         this.tickets.set(ticket, {expires_at: Date.now() + 30000, browser_id: browserId, extension_origin: browserOrigin(request)}); return json({ticket});
       }
+      if (path === '/api/bridge/classifier/requests' && method === 'GET') return json({requests: await this.classifier.pending(browserId)});
+      if (path === '/api/bridge/classifier/result' && method === 'POST') return json(await this.classifier.submit(browserId, await body(request)));
       if (path === '/api/bridge/sessions' && method === 'GET') return json({sessions: (await this.browserTasks(browserId)).sessions.filter(i => ['active', 'checking_action', 'awaiting_action', 'awaiting_read', 'executing', 'checkout_preparing', 'awaiting_checkout', 'checkout_executing'].includes(i.status)).map(i => ({...this.engine.public(i), scope: i.task, session_receipt: i.session_receipt}))});
       const route = path.match(/^\/api\/bridge\/sessions\/([a-f0-9]{32})\/(view|check|runtime|dom|checkout-prepare|checkout-result)$/);
       if (route && method === 'POST') {
@@ -491,6 +525,15 @@ export class Gate extends DurableObject {
       ws.send(JSON.stringify({ack: input.result.command_id}));
     } catch { ws.send(JSON.stringify({error: 'RESULT_REJECTED'})); }
   }
+  async webSocketClose(ws) {
+    const id = this.ctx.getTags(ws).find(tag => tag.startsWith('browser:'))?.slice(8);
+    if (!id || this.ctx.getWebSockets('browser:' + id).some(socket => socket !== ws && socket.readyState === 1)) return;
+    await this.hostedLock(async () => {
+      for (const item of await this.engine.list()) if (item.task.purpose_guard?.browser_id === id && !['expired', 'revoked', 'closed'].includes(item.status)) await this.engine.end(item.id);
+    });
+    await this.dispatch();
+  }
+  async webSocketError(ws) { await this.webSocketClose(ws); }
   async dispatch() {
     this.kickHosted();
     const sockets = [];
@@ -524,6 +567,7 @@ export class Gate extends DurableObject {
         await this.ensureHosted();
       }
       await this.engine.sweep();
+      await this.classifier.sweep();
       await this.loginSync.sweep();
     });
     await this.dispatch(); await this.ctx.storage.setAlarm(Date.now() + 30000);

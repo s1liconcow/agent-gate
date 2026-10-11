@@ -9,6 +9,38 @@
   };
   const orderButton = /^(?:place (?:your )?order|submit order|buy now|pay(?: now|\s+\$)|complete (?:purchase|order)|confirm (?:purchase|order))/i;
   const value = node => ['checkbox', 'radio'].includes(node.type) ? node.checked : node.value;
+  // A merchant adapter must expose every line and each component of the total.
+  // Unknown layouts require owner completion instead of guessing a cart.
+  const review = root => {
+    const reader = globalThis.__agentgateReader;
+    const text = node => node && reader.visible(node) ? reader.renderedText(node).trim() : failure('CHECKOUT_UNSUPPORTED');
+    const one = selector => {
+      const nodes = [...root.querySelectorAll(selector)].filter(reader.visible);
+      if (nodes.length !== 1) failure('CHECKOUT_UNSUPPORTED'); return nodes[0];
+    };
+    const money = node => {
+      const raw = text(node);
+      if (/^(?:free|\$0(?:\.00)?(?: USD)?)$/i.test(raw)) return 0;
+      if (!/^\$\s*(?:0|[1-9]\d*)(?:\.\d{2})?(?: USD)?$/.test(raw)) failure('CHECKOUT_UNSUPPORTED');
+      return Math.round(Number(raw.replace(/[^\d.]/g, '')) * 100);
+    };
+    const rows = [...root.querySelectorAll('[data-agentgate-cart-item]')];
+    if (!rows.length || rows.length > 24 || rows.some(node => !reader.visible(node))) failure('CHECKOUT_UNSUPPORTED');
+    const items = rows.map(row => {
+      const find = selector => { const nodes = [...row.querySelectorAll(selector)].filter(reader.visible); if (nodes.length !== 1) failure('CHECKOUT_UNSUPPORTED'); return nodes[0]; };
+      const id = row.getAttribute('data-item-id'), name = text(find('[data-product-name]'));
+      const quantityText = text(find('[data-quantity]')), quantity = Number(quantityText);
+      if (!id || id.length > 100 || !name || !/^\d+$/.test(quantityText) || quantity < 1 || quantity > 100) failure('CHECKOUT_UNSUPPORTED');
+      const unit_cents = money(find('[data-unit-price]')), line_cents = money(find('[data-line-price]'));
+      if (unit_cents < 1 || line_cents !== unit_cents * quantity) failure('CHECKOUT_CHANGED');
+      return {id, name, quantity, unit_cents, line_cents};
+    });
+    const parts = Object.fromEntries(['subtotal', 'shipping', 'tax', 'discount', 'total'].map(key => [key + '_cents', money(one('[data-' + key + ']'))]));
+    if (new Set(items.map(item => item.id)).size !== items.length || parts.subtotal_cents !== items.reduce((sum, item) => sum + item.line_cents, 0) || parts.total_cents !== parts.subtotal_cents + parts.shipping_cents + parts.tax_cents - parts.discount_cents) failure('CHECKOUT_CHANGED');
+    const payment_description = text(one('[data-payment-summary]')), delivery_description = text(one('[data-delivery-summary]'));
+    if (!payment_description || !delivery_description || payment_description.length > 500 || delivery_description.length > 500) failure('CHECKOUT_UNSUPPORTED');
+    return {review: {origin: location.origin, items, ...parts, currency: 'USD'}, payment_description, delivery_description};
+  };
   const total = (summary, button) => {
     if (/\b(?:EUR|GBP|CAD|AUD|NZD)\b|[€£]/i.test(summary + ' ' + button)) failure('CHECKOUT_UNSUPPORTED');
     const amounts = [];
@@ -27,7 +59,7 @@
   };
   const state = capture => {
     const reader = globalThis.__agentgateReader;
-    return JSON.stringify([location.href, reader.renderedText(capture.root), reader.fingerprint(capture.button), capture.baseline.map(entry => [entry.node.isConnected, reader.fingerprint(entry.node), value(entry.node)]), [...capture.root.querySelectorAll('input,select,textarea')].length, capture.button.form?.action || '', capture.button.getAttribute('formaction') || '']);
+    return JSON.stringify([location.href, reader.renderedText(capture.root), reader.fingerprint(capture.button), capture.baseline.map(entry => [entry.node.isConnected, reader.fingerprint(entry.node), value(entry.node)]), [...capture.root.querySelectorAll('input,select,textarea')].length, capture.button.form?.action || '', capture.button.getAttribute('formaction') || '', capture.require_review ? review(capture.root) : null]);
   };
   async function prepare(message) {
     const reader = globalThis.__agentgateReader, reference = reader?.reference(message.submit_ref), button = reference?.node;
@@ -42,6 +74,7 @@
     if (!root || !root.contains(button) || [...root.querySelectorAll('iframe')].some(reader.visible)) failure('CHECKOUT_UNSUPPORTED');
     const summary = reader.renderedText(root);
     if (!summary || summary.length > 2000 || total(summary, submitLabel) !== message.total_cents) failure('CHECKOUT_CHANGED');
+    if (message.require_review && document.querySelector('[data-agentgate-order-confirmation]')) failure('CHECKOUT_UNSUPPORTED');
     const nodes = [...root.querySelectorAll('input,select,textarea')].filter(node => reader.visible(node) && !node.disabled && !['submit', 'button', 'hidden', 'reset'].includes(node.type));
     const fields = [], baseline = [...root.querySelectorAll('input,select,textarea')].map(node => ({node})), missing = new Map();
     for (const node of nodes) {
@@ -58,10 +91,12 @@
       if (options.length > 250 || fields.length >= 24) failure('CHECKOUT_UNSUPPORTED');
       fields.push({ref, label: name, autocomplete, kind, options}); missing.set(ref, node);
     }
-    const capture = {root, button, baseline, missing, summary, total_cents: message.total_cents, origins: message.origins};
+    const purchase = message.require_review ? review(root) : null;
+    if (purchase && purchase.review.total_cents !== message.total_cents) failure('CHECKOUT_CHANGED');
+    const capture = {root, button, baseline, missing, summary, total_cents: message.total_cents, origins: message.origins, require_review: Boolean(message.require_review)};
     capture.state = state(capture); capture.digest = await hash(capture.state);
     captures.set(message.checkout_id, capture);
-    return {origin: location.origin, url: location.origin + location.pathname, summary, total_cents: message.total_cents, currency: 'USD', submit_label: submitLabel, fields, capture_digest: capture.digest};
+    return {origin: location.origin, url: location.origin + location.pathname, summary, total_cents: message.total_cents, currency: 'USD', submit_label: submitLabel, fields, capture_digest: capture.digest, ...(purchase ? {...purchase, review: {...purchase.review, capture_digest: capture.digest}} : {})};
   }
   async function execute(message) {
     const capture = captures.get(message.checkout_id), reader = globalThis.__agentgateReader;
@@ -87,15 +122,26 @@
     await new Promise(resolve => setTimeout(resolve, 500));
     if (message.expires_at <= Date.now()) failure('CHECKOUT_CHANGED');
     const approved = JSON.parse(capture.state);
+    if (capture.require_review && JSON.stringify(review(capture.root)) !== JSON.stringify(approved[7])) failure('CHECKOUT_CHANGED');
     if (!capture.button.isConnected || capture.button.disabled || !reader.visible(capture.button) || reader.renderedText(capture.root) !== capture.summary || location.href !== approved[0] || reader.fingerprint(capture.button) !== approved[2] || capture.baseline.some(({node}, index) => !node.isConnected || reader.fingerprint(node) !== approved[3][index][1] || value(node) !== expected.get(node)) || capture.root.querySelectorAll('input,select,textarea').length !== approved[4] || (capture.button.form?.action || '') !== approved[5] || (capture.button.getAttribute('formaction') || '') !== approved[6] || total(reader.renderedText(capture.root), reader.label(capture.button)) !== capture.total_cents || capture.button.form && !capture.button.form.checkValidity()) failure('CHECKOUT_CHANGED');
     captures.delete(message.checkout_id);
     capture.button.click();
     return {code: 'DISPATCHED'};
   }
+  function confirmation(message) {
+    const reader = globalThis.__agentgateReader;
+    if (!message.origins?.includes(location.origin)) failure('OUT_OF_SCOPE');
+    const roots = [...document.querySelectorAll('[data-agentgate-order-confirmation]')].filter(reader.visible);
+    if (roots.length !== 1 || !/\border (?:placed|confirmed)\b/i.test(reader.renderedText(roots[0]))) return {code: 'UNVERIFIED'};
+    const id = roots[0].querySelector('[data-order-id]'), amount = roots[0].querySelector('[data-confirmed-total]');
+    const order_id = id && reader.visible(id) ? reader.renderedText(id).trim() : '';
+    if (!/^[A-Za-z0-9-]{1,100}$/.test(order_id) || !amount || !reader.visible(amount) || total('Order total: ' + reader.renderedText(amount), '') !== message.total_cents) return {code: 'UNVERIFIED'};
+    return {confirmation: {origin: location.origin, order_id, total_cents: message.total_cents, currency: 'USD'}};
+  }
   const listener = (message, sender, respond) => {
-    if (sender.id !== chrome.runtime.id || !['checkout_prepare', 'checkout_execute', 'checkout_forget'].includes(message.type)) return false;
+    if (sender.id !== chrome.runtime.id || !['checkout_prepare', 'checkout_execute', 'checkout_forget', 'checkout_confirmation'].includes(message.type)) return false;
     if (message.type === 'checkout_forget') { captures.delete(message.checkout_id); respond({code: 'FORGOTTEN'}); return false; }
-    (message.type === 'checkout_prepare' ? prepare(message) : execute(message)).then(respond, error => respond({code: ['STALE_VIEW', 'CHECKOUT_CHANGED', 'CHECKOUT_UNSUPPORTED', 'OUT_OF_SCOPE'].includes(error.code) ? error.code : 'BRIDGE_ERROR'}));
+    Promise.resolve().then(() => message.type === 'checkout_prepare' ? prepare(message) : message.type === 'checkout_confirmation' ? confirmation(message) : execute(message)).then(respond, error => respond({code: ['STALE_VIEW', 'CHECKOUT_CHANGED', 'CHECKOUT_UNSUPPORTED', 'OUT_OF_SCOPE'].includes(error.code) ? error.code : 'BRIDGE_ERROR'}));
     return true;
   };
   chrome.runtime.onMessage.addListener(listener);

@@ -39,14 +39,19 @@ export class AutomaticBrowser {
     await this.api.storage.session.set({capture_diagnostics: Object.fromEntries(Object.entries(capture_diagnostics).slice(-8))});
   }
   async stop(items) {
+    if (!Array.isArray(items)) return;
     const {bindings = {}, agent_tabs = {}, capture_diagnostics = {}} = await this.api.storage.session.get(['bindings', 'agent_tabs', 'capture_diagnostics']);
     const assigned = new Set((items || []).map(item => item.id));
     const moved = [...new Set([...Object.keys(bindings), ...Object.keys(agent_tabs), ...Object.keys(capture_diagnostics)])].filter(id => !assigned.has(id));
+    const ended = (items || []).filter(item => ['closed', 'expired', 'revoked'].includes(item.status));
     await this.recordings?.statuses([...(items || []), ...moved.map(id => ({id, status: 'revoked'}))]);
+    // Status packets can overlap a newly published view or staged fill. A
+    // housekeeping packet with no removals must never overwrite that binding.
+    if (!moved.length && !ended.length) { await this.activity.statuses(items || []); return; }
     for (const id of moved) {
       delete bindings[id]; delete agent_tabs[id]; delete capture_diagnostics[id]; this.attempts.delete(id);
     }
-    for (const item of items || []) if (['closed', 'expired', 'revoked'].includes(item.status)) {
+    for (const item of ended) {
       this.ended.add(item.id); delete bindings[item.id]; delete agent_tabs[item.id]; delete capture_diagnostics[item.id];
       this.attempts.delete(item.id);
     }
@@ -115,7 +120,7 @@ export class AutomaticBrowser {
           let phase = 'model_availability';
           const heartbeat = setInterval(() => this.runtime(item.id, 'planning', null, phase), 10000);
           let planned;
-          try { planned = item.scope.engagement === 'AUDIT_ONLY' ? {ids: [...prepared.entries.filter(e => e.kind === 'control').slice(0,24), ...prepared.entries.filter(e => e.kind === 'text').slice(0,8)].map(e => e.id)} : await this.model('plan', {snapshot, task: item.scope, need: item.disclosure_request?.need || ''}, {onStage: current => { if (modelPhases.includes(current)) phase = current; }, beforeInference: () => this.authorizeInference(item)}); }
+          try { planned = item.scope.engagement === 'AUDIT_ONLY' && !item.scope.purpose_guard ? {ids: [...prepared.entries.filter(e => e.kind === 'control').slice(0,24), ...prepared.entries.filter(e => e.kind === 'text').slice(0,8)].map(e => e.id)} : await this.model('plan', {snapshot, task: item.scope, need: item.disclosure_request?.need || ''}, {session_id: item.id, onStage: current => { if (modelPhases.includes(current)) phase = current; }, beforeInference: () => this.authorizeInference(item)}); }
           catch (error) { error.phase = phase; throw error; }
           finally { clearInterval(heartbeat); }
           const approved = selectedView(prepared, item.scope, {allow: true, ids: planned.ids}, {allow: true});
@@ -127,7 +132,7 @@ export class AutomaticBrowser {
           await this.receipt(item);
           const current = (await this.call('sessions')).sessions.find(i => i.id === item.id);
           if (this.ended.has(item.id) || current?.status !== 'active' || current.view || canonical(current.scope) !== canonical(item.scope) || current.disclosure_request?.id !== item.disclosure_request?.id || new URL((await this.api.tabs.get(tab.id)).url).origin !== site) continue;
-          const response = await this.call('sessions/' + item.id + '/view', approved);
+          const response = await this.call('sessions/' + item.id + '/view', {...approved, ...(planned.classifier_proof ? {classifier_proof: planned.classifier_proof} : {})});
           const {bindings = {}} = await this.api.storage.session.get('bindings');
           bindings[item.id] = {session_id: item.id, tab_id: tab.id, view: response.view, view_digest: response.view_digest, fills: {}, submit_refs: snapshot.controls.filter(c => c.submit).map(c => c.ref)};
           await this.api.storage.session.set({bindings});
@@ -135,7 +140,7 @@ export class AutomaticBrowser {
           await this.runtime(item.id, 'ready', null, 'ready');
           this.attempts.delete(item.id);
         } catch (error) {
-          const code = ['PERMISSION_REQUIRED', 'MODEL_UNAVAILABLE', 'MODEL_TIMEOUT', 'BROWSER_UNRESPONSIVE', 'LOGIN_REQUIRED', 'OUT_OF_SCOPE', 'TAB_CLOSED', 'LOCAL_CHECK_REFUSED', 'PAGE_UNSUPPORTED', 'CONTENT_NOT_READY', ...remoteCodes].includes(error.code) ? error.code : 'LOCAL_CHECK_REFUSED';
+          const code = ['PERMISSION_REQUIRED', 'MODEL_UNAVAILABLE', 'MODEL_TIMEOUT', 'BROWSER_UNRESPONSIVE', 'LOGIN_REQUIRED', 'OUT_OF_SCOPE', 'TAB_CLOSED', 'LOCAL_CHECK_REFUSED', 'LOCAL_CLASSIFIER_UNAVAILABLE', 'LOCAL_CLASSIFIER_REFUSED', 'LOCAL_CLASSIFIER_STALE', 'LOCAL_CLASSIFIER_REPLAY', 'PAGE_UNSUPPORTED', 'CONTENT_NOT_READY', ...remoteCodes].includes(error.code) ? error.code : 'LOCAL_CHECK_REFUSED';
           const waiting = code === 'CONTENT_NOT_READY' && this.now() - attempt.since < 60000;
           attempt.retry_at = this.now() + (waiting ? 0 : 30000);
           if (counts) await this.diagnostic(item.id, {...counts, stage: 'withheld', code});
@@ -250,17 +255,17 @@ export class AutomaticBrowser {
       await this.receipt(packet);
       const {bindings = {}} = await this.api.storage.session.get('bindings'), binding = bindings[id];
       if (!binding || binding.view_digest !== command.view_digest) throw new Error('The task view changed.');
-      const classify = () => this.model('check_action', {task: packet.scope, view: binding.view, action: command.action, staged: stagedFields(binding.view, binding.fills), submit: binding.submit_refs.includes(command.action.ref)}, {beforeInference: () => this.authorizeInference(packet, true)});
+      const classify = () => this.model('check_action', {task: packet.scope, view: binding.view, action: command.action, staged: stagedFields(binding.view, binding.fills), submit: binding.submit_refs.includes(command.action.ref)}, {session_id: id, beforeInference: () => this.authorizeInference(packet, true)});
       const result = await (packet.scope.engagement === 'AUDIT_ONLY' ? deadline(classify, 1000) : classify());
       if (!['allow', 'confirm', 'deny'].includes(result.decision)) throw new Error('Invalid local decision.');
       const decision = packet.scope.engagement ? engagementDecision(packet.scope.engagement, result) : packet.scope.interaction === 'automatic' && (result.decision === 'confirm' || result.decision === 'allow' && !automaticActionAllowed(packet.scope, result)) ? 'deny' : result.decision;
-      const assessment = packet.scope.engagement ? {confidence: result.confidence, sensitive: result.sensitive} : packet.scope.interaction === 'automatic' && decision === 'allow' ? {effect: result.effect, payment_cents: result.payment_cents} : {};
+      const assessment = packet.scope.purpose_guard ? {effect: result.effect, payment_cents: result.payment_cents, confidence: result.confidence} : packet.scope.engagement ? {confidence: result.confidence, sensitive: result.sensitive} : packet.scope.interaction === 'automatic' && decision === 'allow' ? {effect: result.effect, payment_cents: result.payment_cents} : {};
       await this.receipt(packet);
       if (this.ended.has(id)) return;
       const {guarded = {}} = await this.api.storage.session.get('guarded');
       guarded[command.id] = {decision, ...assessment, digest: await this.commandDigest(packet)};
       await this.api.storage.session.set({guarded});
-      await this.call('sessions/' + id + '/check', {command_id: command.id, decision: packet.scope.engagement ? result.decision : decision, ...assessment});
+      await this.call('sessions/' + id + '/check', {command_id: command.id, decision: packet.scope.engagement ? result.decision : decision, ...assessment, ...(result.classifier_proof ? {classifier_proof: result.classifier_proof} : {})});
       await this.audit(id, {id: 'check:' + command.id, type: 'action_check', action: command.action, decision, ...assessment});
     } catch (error) {
       if (packet.scope.engagement) {
@@ -273,7 +278,7 @@ export class AutomaticBrowser {
         } catch { /* A stale account policy cannot authorize a command. */ }
         return;
       }
-      if (remoteCodes.includes(error.code) || error.code === 'MODEL_TIMEOUT') await this.runtime(id, 'blocked', error.code, 'action_check');
+      if (remoteCodes.includes(error.code) || ['MODEL_TIMEOUT', 'MODEL_UNAVAILABLE', 'LOCAL_CLASSIFIER_UNAVAILABLE', 'LOCAL_CLASSIFIER_REFUSED', 'LOCAL_CLASSIFIER_STALE', 'LOCAL_CLASSIFIER_REPLAY'].includes(error.code)) await this.runtime(id, 'blocked', error.code, 'action_check');
       try { await this.call('sessions/' + id + '/check', {command_id: command.id, decision: 'deny'}); await this.audit(id, {id: 'check:' + command.id, type: 'action_check', action: command.action, decision: 'deny'}); } catch { /* Ended or revoked. */ }
     }
     finally { this.checking.delete(command.id); }

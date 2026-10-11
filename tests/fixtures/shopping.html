@@ -1,0 +1,28 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Synthetic marketplace</title>
+<main id="main"></main><script>
+window.orders = 0;
+const main = document.getElementById('main');
+const search = () => {
+  main.innerHTML = '<h1>Marketplace</h1><label>Search products<input id="query"></label><button id="search">Search products</button>';
+  document.getElementById('search').onclick = results;
+};
+const results = () => {
+  main.innerHTML = '<h1>Blue coffee mugs</h1><p>Blue ceramic mug · $10.00 · 12 ounces</p><p>Red ceramic mug · $12.00 · 12 ounces</p><button id="blue">Select blue ceramic mug</button>';
+  document.getElementById('blue').onclick = product;
+};
+const product = () => {
+  main.innerHTML = '<h1>Blue ceramic mug</h1><p>Blue ceramic mug · $10.00 each</p><label>Quantity<input id="quantity" type="number" min="1" value="1"></label><button id="add">Add blue mugs to cart</button>';
+  document.getElementById('add').onclick = () => cart(Number(document.getElementById('quantity').value));
+};
+const cart = (quantity = 2) => {
+  main.innerHTML = `<h1>Review order</h1><section data-agentgate-cart>
+    <article data-agentgate-cart-item data-item-id="BLUE-MUG-12"><span data-product-name>Blue ceramic coffee mug</span> · Quantity <span data-quantity>${quantity}</span> · Unit <span data-unit-price>$10.00</span> · Line <span data-line-price>$${quantity * 10}.00</span></article>
+    <p>Subtotal <span data-subtotal>$${quantity * 10}.00</span></p><p>Shipping <span data-shipping>$5.00</span></p><p>Tax <span data-tax>$0.00</span></p><p>Discount <span data-discount>$0.00</span></p><p>Order total: <span data-total>$${quantity * 10 + 5}.00</span> USD</p>
+    <p data-payment-summary>Card selected by the owner below</p><p data-delivery-summary>Standard shipping to the owner-selected delivery address</p>
+    <form id="checkout" action="/order" method="post"><label>Card number<input name="card" autocomplete="cc-number" required pattern="[0-9]{16}"></label><label>Security code<input name="cvc" autocomplete="cc-csc" required pattern="[0-9]{3}"></label><label>Delivery address<input name="address" autocomplete="shipping street-address" required></label><button id="order" disabled>Place order</button></form></section>`;
+  const form = document.getElementById('checkout');
+  form.oninput = () => { document.getElementById('order').disabled = !form.checkValidity(); };
+  form.onsubmit = event => { event.preventDefault(); window.orders++; const receipt = document.createElement('section'); receipt.setAttribute('data-agentgate-order-confirmation', ''); receipt.innerHTML = `Order confirmed <span data-order-id>SYNTHETIC-123</span><span data-confirmed-total>$${quantity * 10 + 5}.00</span>`; main.replaceChildren(receipt); };
+};
+if (location.pathname === '/checkout') cart(); else search();
+</script></html>
