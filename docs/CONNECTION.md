@@ -5,7 +5,8 @@ another MCP client. The AgentGate sign-in page shows the assistant and return
 address, an engagement slider, and **Approve and connect**.
 
 Record only starts selected. One tap approves the assistant for 30 days, saves
-engagement for 90 days, and enables the account's cloud browser for 90 days.
+engagement for 90 days, and enables the account's cloud browser. Cloud access
+renews automatically while preserving website logins and inference settings.
 There is no cloud-browser checkbox or separate phone setup.
 
 A first connection creates a private account after consent. The approval key is

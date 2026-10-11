@@ -1,4 +1,4 @@
-import {exact, fail, inferenceProfile, random, verifyReceipt} from '../shared/protocol.mjs';
+import {canonical, exact, fail, inferenceProfile, random, verifyReceipt} from '../shared/protocol.mjs';
 import {hostedChallenge} from '../shared/hosted-browser.mjs';
 
 export class HostedConsent {
@@ -6,6 +6,24 @@ export class HostedConsent {
   async current() {
     const item = await this.storage.get('hosted:consent');
     if (!item || item.expires_at <= this.now()) return null;
+    return item;
+  }
+  async ensure(accountId, coordinator) {
+    if (!this.available || !this.model) return null;
+    const phoneKey = await this.storage.get('phone');
+    if (!phoneKey) return null;
+    const previous = await this.storage.get('hosted:consent');
+    if (previous?.account_id === accountId && canonical(previous.phone_key) === canonical(phoneKey)) {
+      if (previous.expires_at > this.now()) return previous;
+      // Renew the same browser so its encrypted logins and inference settings survive.
+      previous.expires_at = this.now() + 90 * 86400000;
+      await this.storage.put('hosted:consent', previous);
+      return previous;
+    }
+    const inference = inferenceProfile({id: random(), provider: 'purpose_browser', endpoint: 'browser://purpose', model: this.model, format: 'classifier'});
+    const item = {account_id: accountId, browser_id: random(), coordinator, model: this.model, phone_key: phoneKey, inference, expires_at: this.now() + 90 * 86400000};
+    await this.storage.put('hosted:consent', item);
+    await this.storage.delete('hosted:pending');
     return item;
   }
   async status() {
@@ -33,7 +51,7 @@ export class HostedConsent {
   async configure(input) {
     exact(input, ['provider', 'endpoint', 'model', 'format', 'api_key']);
     const item = await this.current();
-    if (!item) fail('NOT_PAIRED', 'Approve the hosted browser on your phone first.', 409);
+    if (!item) fail('HOSTED_UNAVAILABLE', 'The cloud browser is temporarily unavailable.', 503);
     const inference = inferenceProfile({id: random(), provider: input.provider, endpoint: input.endpoint, model: input.model, format: input.format});
     if (inference.provider === 'purpose_encoder' || inference.provider !== 'purpose_browser' && new URL(inference.endpoint).hostname === '127.0.0.1') fail('INVALID_INFERENCE', 'Hosted inference requires the installed classifier or a public HTTPS provider.');
     if (inference.provider === 'purpose_browser' && inference.model !== this.model) fail('INVALID_INFERENCE', 'Select the installed classifier.');

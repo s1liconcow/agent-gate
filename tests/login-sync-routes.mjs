@@ -42,8 +42,8 @@ try {
     return {url: account.account_url, owner, sign, publicKey, id: account.account_id};
   }
   const a = await enroll(), b = await enroll();
-  const {challenge} = await ok(await a.owner('hosted-browser/request', {}));
-  await ok(await a.owner('hosted-browser/approve', await a.sign(challenge)));
+  assert.equal((await ok(await a.owner('hosted-browser'))).enabled, true);
+  assert.equal((await ok(await b.owner('hosted-browser'))).enabled, true);
   const local = {}, session = {};
   const storage = values => ({get: async keys => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).map(key => [key, structuredClone(values[key])])), set: async updates => Object.assign(values, structuredClone(updates)), remove: async key => { delete values[key]; }});
   const client = new LoginSource({runtime: {id: 'a'.repeat(32)}, storage: {local: storage(local), session: storage(session)}});

@@ -8,6 +8,9 @@ Implemented in the extension and cloud browser.
 2. Connect once with the account’s paired phone.
 3. Choose apps and click **Share logins**.
 
+The account’s cloud browser is ready automatically. Connecting a local task
+browser preserves the cloud connection and shared logins.
+
 That browser click authorizes the transfer. Each app uploads immediately to its
 paired account without another phone approval. A failed or cancelled upload keeps
 remaining apps selected for retry. Sharing replaces those cloud logins and ends

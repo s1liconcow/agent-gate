@@ -14,7 +14,7 @@ export class LoginSync {
   constructor(storage, consent, sources, now = Date.now) { Object.assign(this, {storage, consent, sources, now}); }
   async config() {
     const config = await this.consent.current();
-    if (!config) fail('NOT_PAIRED', 'Approve the cloud browser on your phone first.', 409);
+    if (!config) fail('HOSTED_UNAVAILABLE', 'The cloud browser is temporarily unavailable. Try refreshing.', 503);
     return config;
   }
   store(config) { return new HostedState(this.storage, config.account_id, config.browser_id); }

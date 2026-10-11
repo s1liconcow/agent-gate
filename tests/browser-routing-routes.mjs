@@ -38,8 +38,9 @@ try {
   const paired = await ok(await request(site + '/api/pair', {pairing_token: 'p'.repeat(64), public_key: publicKey}));
   const owner = (path, data) => request(site + '/api/owner/' + path, data, paired.owner_token);
   const sign = async challenge => ({challenge, signature: b64url(await crypto.subtle.sign({name: 'ECDSA', hash: 'SHA-256'}, keys.privateKey, new TextEncoder().encode(canonical(challenge))))});
-  const {challenge: cloud} = await ok(await owner('hosted-browser/request', {}));
-  await ok(await owner('hosted-browser/approve', await sign(cloud)));
+  const cloud = await ok(await owner('hosted-browser'));
+  assert.equal(cloud.enabled, true); assert.equal(cloud.challenge, null);
+  assert.equal((await ok(await owner('browsers'))).default_browser_id, cloud.browser_id);
   // Agent requests have no browser Origin header.
   const agentRequest = (path, data) => fetch(site + '/api/agent/' + path, {method: data === undefined ? 'GET' : 'POST', headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + 'g'.repeat(64)}, ...(data === undefined ? {} : {body: JSON.stringify(data)})});
   const taskInput = {goal: 'Summarize project updates.', origins: ['https://github.com'], permissions: ['read', 'navigate'], ttl_seconds: 300};
@@ -122,14 +123,15 @@ try {
   assert.equal((await ok(await agentRequest('sessions/' + cloudTask.id))).status, 'revoked');
   assert.equal((await ok(await agentRequest('sessions/' + localTask.id))).status, 'active');
   assert.equal((await ok(await source('status'))).browser_id, cloud.browser_id);
-  await ok(await owner('hosted-browser/disable', {}));
+  const reconnected = await ok(await owner('hosted-browser/disable', {}));
+  assert.equal(reconnected.enabled, true); assert.notEqual(reconnected.browser_id, cloud.browser_id);
+  assert.equal((await ok(await source('status'))).browser_id, reconnected.browser_id);
+  assert.equal((await ok(await owner('browsers'))).default_browser_id, local.id);
   assert.equal((await ok(await agentRequest('sessions/' + localTask.id))).status, 'active');
   assert.equal((await ok(await local.bridge('sessions'))).sessions[0].id, localTask.id);
-  const {challenge: reconnected} = await ok(await owner('hosted-browser/request', {}));
-  await ok(await owner('hosted-browser/approve', await sign(reconnected)));
   assert.equal((await ok(await agentRequest('sessions/' + localTask.id))).status, 'active');
   assert.equal((await ok(await local.bridge('sessions'))).sessions[0].id, localTask.id);
-  console.log('Browser routing Worker checks passed: simultaneous connections, cloud default, independent login sharing, per-task selection, isolated task access and scoped revocation.');
+  console.log('Browser routing Worker checks passed: automatic cloud provisioning, simultaneous connections, cloud default, independent login sharing, per-task selection, isolated task access and scoped reset.');
 } finally {
   for (const socket of sockets) socket.close();
   if (runtime && runtime.exitCode === null) { const ended = new Promise(resolve => runtime.once('exit', resolve)); runtime.kill('SIGTERM'); await ended; }

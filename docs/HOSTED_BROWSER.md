@@ -2,7 +2,9 @@
 
 Every account gets a dedicated Cloudflare Browser Run connection through
 [one-tap MCP sign-in](CONNECTION.md). The sign-in page saves engagement and enables
-the cloud browser together. The policy controls session and action confirmations.
+the cloud browser together. Existing paired accounts get their cloud browser
+automatically when they open the app or share logins. The policy controls session
+and action confirmations.
 
 Choose **Record only**, **Balanced** or **Careful** on the connection page.
 Record only is the default. Change it later in the account's approval app.
@@ -43,8 +45,13 @@ during graph parsing. The desktop extension uses its existing loading path.
    is enabled automatically; this browser becomes the approval device.
 3. Start a browser task under your saved engagement setting. Choose **Open cloud browser** on the task to sign in,
    complete MFA or inspect the page. Each link expires after 60 seconds.
-4. Choose **Disconnect and erase saved logins** to revoke open tasks, close the
-   browser and delete the stored profile.
+4. Choose **Reset cloud browser and erase logins** to stop cloud tasks and delete
+   its saved profile. A fresh cloud browser is ready automatically. Local browsers
+   and their tasks stay connected.
+
+Cloud is the initial default for new tasks. Connect local browsers through the
+extension, then use **Default for new tasks** or **Browser for this task** in the
+approval app. Cloud access renews automatically while preserving saved logins.
 
 The default trained ONNX classifier supports purpose-bound field reads and
 scoped navigation. Enforcement modes load it before the first view; Audit Only

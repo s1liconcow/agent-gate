@@ -63,6 +63,8 @@ try {
   assert.equal(await page.locator('#requests details').getAttribute('open'), null);
   assert.ok(await page.locator('#requests').textContent().then(text => text.includes('github.com')));
   assert.equal(await page.getByLabel('Default for new tasks').inputValue(), cloudId);
+  assert.equal(await page.getByRole('button', {name: 'Connect cloud browser', exact: true}).count(), 0);
+  assert.match(await page.locator('#hostedBrowser').textContent(), /Ready automatically/);
   assert.equal(await page.getByLabel('Browser for this task').inputValue(), cloudId);
   assert.equal(await page.getByRole('heading', {name: 'Local browsers', exact: true}).isVisible(), true);
   if (process.env.UI_SCREENSHOT_DIR) {

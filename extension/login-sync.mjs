@@ -130,11 +130,11 @@ async function refresh() {
     item.append(refresh, ' ', erase); children.push(item);
   }
   $('connections').replaceChildren(...children); $('sharedApps').hidden = !children.length;
-  if (!cloudReady) message('Connect a cloud browser in the app first.');
+  if (!cloudReady) message('The cloud browser is temporarily unavailable. Try refreshing.');
   else {
     try { requireLoginSync(result); }
     catch (error) { cloudReady = false; updateButton(); throw error; }
-    if ($('message').textContent === LOGIN_SYNC_UPDATE_MESSAGE) $('message').hidden = true;
+    if ([LOGIN_SYNC_UPDATE_MESSAGE, 'The cloud browser is temporarily unavailable. Try refreshing.'].includes($('message').textContent)) $('message').hidden = true;
   }
   updateButton();
 }

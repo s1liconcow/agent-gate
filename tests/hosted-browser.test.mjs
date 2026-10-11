@@ -24,6 +24,30 @@ async function phone(storage) {
   await storage.put('phone', {kty, crv, x, y});
   return async challenge => ({challenge, signature: b64url(await crypto.subtle.sign({name: 'ECDSA', hash: 'SHA-256'}, keys.privateKey, new TextEncoder().encode(canonical(challenge))))});
 }
+test('paired accounts get a cloud browser automatically and renewal preserves encrypted logins and settings', async () => {
+  const storage = new Memory(); let now = 100000;
+  const consent = new HostedConsent(storage, {model, available: true, now: () => now});
+  const base = 'https://gate.example/u/' + tenant;
+  assert.equal(await consent.ensure(tenant, base), null);
+  await phone(storage);
+  const record = await consent.ensure(tenant, base);
+  assert.equal(record.account_id, tenant); assert.equal(record.coordinator, base);
+  assert.equal(record.inference.provider, 'purpose_browser');
+  assert.equal((await consent.status()).enabled, true); assert.equal((await consent.status()).challenge, null);
+  const {item, settings} = await consent.configure({provider: 'purpose_browser', endpoint: 'browser://purpose', model, format: 'classifier', api_key: ''});
+  const store = new HostedState(storage, tenant, record.browser_id);
+  await store.put('login', {cookies: [{name: 'session', value: 'shared-login'}]});
+  await store.put('local:inference_settings', settings);
+  assert.deepEqual(await consent.ensure(tenant, base), item);
+  now = item.expires_at + 1;
+  assert.equal(await consent.current(), null);
+  const renewed = await consent.ensure(tenant, base);
+  assert.equal(renewed.browser_id, record.browser_id); assert.deepEqual(renewed.inference, item.inference);
+  assert.ok(renewed.expires_at > now);
+  assert.equal((await store.get('login')).cookies[0].value, 'shared-login');
+  assert.deepEqual(await store.get('local:inference_settings'), settings);
+  assert.equal(await new HostedConsent(storage, {model, available: false}).ensure(tenant, base), null);
+});
 test('hosted consent pins account, coordinator, browser and model; replay and expiry fail', async () => {
   const storage = new Memory(), sign = await phone(storage); let now = 100000;
   const consent = new HostedConsent(storage, {model, available: true, now: () => now});

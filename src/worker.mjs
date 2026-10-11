@@ -143,6 +143,7 @@ export class Gate extends DurableObject {
     const result = await this.connectionSetup.complete(id, receipts);
     await this.endAllTasks();
     if (result.hosted) await this.activateHosted(result.hosted);
+    else await this.ensureHosted(new URL(result.coordinator).origin);
     await this.ctx.storage.setAlarm(Date.now() + 30000);
     return {coordinator: result.coordinator};
   }); }
@@ -154,8 +155,24 @@ export class Gate extends DurableObject {
     await this.ctx.storage.put('legacy_bridge_retired', true);
     await registerInference(this.ctx.storage, item.browser_id, {inference: item.inference});
   }
+  async ensureHosted(origin) {
+    const current = await this.hostedConsent.current();
+    if (current) {
+      const browser = await this.ctx.storage.get('browser:' + current.browser_id);
+      if (browser?.status !== 'active' || browser.expires_at !== current.expires_at) await this.activateHosted(current);
+      return current;
+    }
+    const account = await this.ctx.storage.get('account_id') || 'owner';
+    const previous = await this.ctx.storage.get('hosted:consent');
+    const site = origin || (previous && new URL(previous.coordinator).origin) || this.env.PUBLIC_ORIGIN;
+    if (!site) return null;
+    await this.browserRouting.pinSessions(await this.engine.list());
+    const item = await this.hostedConsent.ensure(account, site + (account === 'owner' ? '' : '/u/' + account));
+    if (item) await this.activateHosted(item);
+    return item;
+  }
   async remoteCall(connectorId, path, data) {
-    const answer = await this.locked(async () => { await this.connectors.allowed(connectorId); await this.engine.sweep(); return this.agentCall(path, data, 'remote:' + connectorId); });
+    const answer = await this.locked(async () => { await this.connectors.allowed(connectorId); await this.ensureHosted(); await this.engine.sweep(); return this.agentCall(path, data, 'remote:' + connectorId); });
     // Read-only MCP status polls must not generate new browser work. A short
     // read wait polls often; dispatching each poll caused a websocket/tick storm.
     if(data!==undefined)await this.dispatch(); return answer;
@@ -196,7 +213,10 @@ export class Gate extends DurableObject {
       // Waiting for that queue while holding blockConcurrencyWhile deadlocks ticks.
       const loginOperation = path.match(/^\/api\/(login-source\/transfers\/([a-f0-9]{32})\/import|owner\/login-connections\/([a-f0-9]{32})\/(disconnect|live-view))$/);
       if (loginOperation && request.method === 'POST') {
-        const sourceId = await this.hostedLock(() => loginOperation[2] ? this.loginSources.authorize(request.headers.get('Authorization')?.replace(/^Bearer /, ''), browserOrigin(request)) : this.auth(request, 'owner'));
+        const sourceId = await this.hostedLock(async () => {
+          const id = await (loginOperation[2] ? this.loginSources.authorize(request.headers.get('Authorization')?.replace(/^Bearer /, ''), browserOrigin(request)) : this.auth(request, 'owner'));
+          await this.ensureHosted(new URL(request.url).origin); return id;
+        });
         exact(await body(request), []);
         if (loginOperation[4] === 'live-view') return json(await this.hosted.loginView(loginOperation[3]));
         let transfer;
@@ -252,6 +272,7 @@ export class Gate extends DurableObject {
         fail('NOT_FOUND', 'Unknown login source operation.', 404);
       }
       const sourceId = await this.loginSources.authorize(credential, extensionOrigin);
+      await this.ensureHosted(url.origin);
       if (path === '/api/login-source/status' && method === 'GET') {
         const hosted = await this.hostedConsent.current();
         return json({source_id: sourceId, account_id: hosted?.account_id || await this.ctx.storage.get('account_id') || 'owner', browser_id: hosted?.browser_id || null, login_sync: loginSyncCapabilities, connections: hosted ? await this.loginSync.connections(hosted) : []});
@@ -276,6 +297,7 @@ export class Gate extends DurableObject {
       const suppliedPairing = account && typeof input.pairing_token === 'string' ? await digest(input.pairing_token) : input.pairing_token;
       if (!matches(suppliedPairing, expectedPairing)) fail('UNAUTHORIZED', 'The pairing code is invalid.', 403);
       await this.engine.register(input.public_key);
+      await this.ensureHosted(url.origin);
       const token = random() + random(); await this.ctx.storage.put('owner_hash', await digest(token));
       await this.ctx.storage.setAlarm(Date.now() + 30000);
       return json({owner_token: token});
@@ -295,6 +317,7 @@ export class Gate extends DurableObject {
         exact(await body(request), []);
         await this.browserRouting.pinSessions(await this.engine.list());
         const result = await this.browsers.claim(pairing[1], credential, extensionOrigin);
+        await this.ensureHosted(url.origin);
         await this.ctx.storage.put('legacy_bridge_retired', true);
         for (const ws of this.ctx.getWebSockets('browser:legacy')) ws.close(4001, 'Connect the browser through QR pairing');
         return json(result);
@@ -303,7 +326,7 @@ export class Gate extends DurableObject {
     }
     const role = path.split('/')[2];
     if (!['agent', 'owner', 'bridge'].includes(role)) fail('NOT_FOUND', 'Unknown endpoint.', 404);
-    const browserId = await this.auth(request, role); await this.engine.sweep();
+    const browserId = await this.auth(request, role); await this.ensureHosted(url.origin); await this.engine.sweep();
     if (role === 'agent') {
       if (['GET', 'POST'].includes(method)) return json(await this.agentCall(path.slice('/api/agent/'.length), method === 'POST' ? await body(request) : undefined), method === 'POST' ? 202 : 200);
     }
@@ -365,6 +388,7 @@ export class Gate extends DurableObject {
       if (path === '/api/owner/hosted-browser/disable' && method === 'POST') {
         exact(await body(request), []); const item = await this.hostedConsent.disable();
         if (item) { await this.browsers.revoke(item.browser_id); await this.endHostedTasks(item.browser_id); this.stopHosted(item); }
+        await this.ensureHosted(url.origin);
         return json(await this.hostedConsent.status());
       }
       if (path === '/api/owner/browsers' && method === 'GET') return json({browsers: (await this.browsers.list()).filter(item => item.kind !== 'hosted').map(item => this.browsers.public(item)), choices: await this.browserRouting.choices(), default_browser_id: (await this.browserRouting.current())?.id || null});
@@ -492,13 +516,12 @@ export class Gate extends DurableObject {
   }
   async alarm() {
     await this.ctx.blockConcurrencyWhile(async () => {
-      await this.engine.sweep();
-      await this.loginSync.sweep();
       const item = await this.ctx.storage.get('hosted:consent');
       if (item && item.expires_at <= Date.now()) {
-        await this.hostedConsent.disable(); await this.browsers.revoke(item.browser_id);
-        await this.endHostedTasks(item.browser_id); this.stopHosted(item);
+        await this.ensureHosted();
       }
+      await this.engine.sweep();
+      await this.loginSync.sweep();
     });
     await this.dispatch(); await this.ctx.storage.setAlarm(Date.now() + 30000);
   }

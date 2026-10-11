@@ -242,17 +242,18 @@ try {
     const hosted={available:true,enabled:false,challenge:{version:1,stage:'hosted_browser',account_id:'owner',browser_id:id('f'),coordinator:origin,model:'agentgate-purpose-browser-'+'a'.repeat(16),nonce:id('f'),connection_ttl_seconds:90*86400,expires_at:expires}};
     const f=await setup([t],undefined,{connectors:[connector],browsers:[pairing('c')],sources:[pairing('d',true)],transfers:[transfer],hosted});
     try {
-      assert.equal(await f.page.locator('#count').textContent(),'6');
+      assert.equal(await f.page.locator('#count').textContent(),'5');
+      assert.equal(await f.page.getByRole('button',{name:'Connect cloud browser',exact:true}).count(),0);
       const keys=[];
       await f.page.getByRole('button',{name:'Next pending approval'}).focus();
-      for(let i=0;i<6;i++){
+      for(let i=0;i<5;i++){
         keys.push(await f.page.locator('.pending-approval:visible').getAttribute('data-approval-key'));
         await visibleControls(f.page); await f.page.keyboard.press('Enter');
         assert.equal(await f.page.evaluate(() => document.activeElement.id),'nextApproval');
       }
-      assert.equal(new Set(keys).size,6); assert.deepEqual(f.state.posts,[]); assert.deepEqual(f.errors,[]);
+      assert.equal(new Set(keys).size,5); assert.deepEqual(f.state.posts,[]); assert.deepEqual(f.errors,[]);
       await f.page.screenshot({path:resolve(output,'approvals-multiple-types.png')});
-      for(let i=0;i<6 && await f.page.locator('.pending-approval:visible').getAttribute('data-approval-key')!=='session:'+t.id;i++) await f.page.getByRole('button',{name:'Next pending approval'}).click();
+      for(let i=0;i<5 && await f.page.locator('.pending-approval:visible').getAttribute('data-approval-key')!=='session:'+t.id;i++) await f.page.getByRole('button',{name:'Next pending approval'}).click();
       assert.equal(await f.page.locator('.pending-approval:visible').getAttribute('data-approval-key'),'session:'+t.id);
       for(const [name,width,height] of [['mobile-task',390,844],['desktop-task',1280,900]]) {
         await f.page.setViewportSize({width,height}); await visibleControls(f.page);

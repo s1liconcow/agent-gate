@@ -12,4 +12,4 @@ Use **Share logins**, **Connect**, **Allow task**, **Open** and **Stop task** fo
 
 The browser page uses one column: connection and task controls first, Advanced settings last.
 
-The approval app shows cloud and local connections together under **Browsers**. Use **Default for new tasks** for the saved preference and **Browser for this task** on each task before actions begin. Cloud is the initial default. Local pairing preserves the cloud connection and shared logins.
+The approval app shows cloud and local connections together under **Browsers**. Use **Default for new tasks** for the saved preference and **Browser for this task** on each task before actions begin. Cloud is ready automatically and is the initial default. Local pairing preserves the cloud connection and shared logins.

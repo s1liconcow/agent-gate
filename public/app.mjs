@@ -1,7 +1,6 @@
 import {canonical, digest, b64url, defaultActionPolicy, scope, exact,granularDisclosure} from './protocol.mjs';
 import {pairingChallenge, sealPairing} from './browser-pairing.mjs';
 import {checkoutSnapshot, sealCheckout} from './checkout.mjs';
-import {hostedChallenge} from './hosted-browser.mjs';
 import {engagementChallenge, engagementDescriptions, engagementModes, engagementLabels} from './engagement.mjs';
 import {loginChallenge, loginApps} from './login-sync-protocol.mjs';
 import {ApprovalQueue} from './approval-queue.mjs';
@@ -174,27 +173,13 @@ function focusLinkedLogin() {
   }
 }
 function openHostedLogin(id) { return openCloudView('owner/login-connections/' + id + '/live-view', {}); }
-function renderHosted(item, pending) {
+function renderHosted(item) {
   $('hostedSection').hidden = !item.available && !browserChoices.length;
   const nodes = [];
   if (item.enabled) {
-    nodes.push(el('p', 'Connected · Shared logins available.', 'hint'));
-    nodes.push(more('Manage browser', button('Disconnect and erase logins', () => api('owner/hosted-browser/disable', {}), 'danger')));
-  } else if (item.challenge) {
-    const c = hostedChallenge(item.challenge);
-    if (c.account_id !== (account || 'owner') || c.coordinator !== location.origin + base) throw new Error('Hosted browser approval belongs to another account.');
-    const section = el('article', undefined, 'request');
-    section.append(el('h3', 'Connect cloud browser', 'request-title'), el('p', 'Cloudflare runs this browser and stores its logins. Your local browsers stay connected.', 'hint'));
-    const actions = el('div', undefined, 'actions');
-    actions.append(button('Connect', async () => {
-      if (remaining(c.expires_at) === 0) throw new Error('Request a fresh cloud browser approval.');
-      const signature = b64url(await crypto.subtle.sign({name: 'ECDSA', hash: 'SHA-256'}, device.key, new TextEncoder().encode(canonical(c))));
-      await api('owner/hosted-browser/approve', {challenge: c, signature});
-      message('Cloud browser connected.');
-    }));
-    actions.append(button('Cancel', () => api('owner/hosted-browser/disable', {}), 'secondary'));
-    section.append(actions); if (item.available) pending.push(pendingCard(section, 'hosted', {...item, id: c.browser_id}));
-  } else nodes.push(button('Connect cloud browser', () => api('owner/hosted-browser/request', {})));
+    nodes.push(el('p', 'Ready automatically · Shared logins available.', 'hint'));
+    nodes.push(more('Manage browser', button('Reset cloud browser and erase logins', () => api('owner/hosted-browser/disable', {}), 'danger')));
+  } else nodes.push(el('p', item.available ? 'Preparing cloud browser…' : 'Cloud browser unavailable.', 'hint'));
   const diagnostics = el('a', 'Diagnostics'); diagnostics.href = base + '/browser-diagnostics.html' + (account ? '' : '?account=owner');
   if (item.enabled) nodes.at(-1).append(diagnostics); else nodes.push(more('Details', diagnostics));
   $('hostedBrowser').replaceChildren(...nodes);
@@ -441,7 +426,7 @@ async function refresh() {
       pending.push(...renderPart('browsers', [browsers, scannedBrowser?.id], () => { const rows = []; renderBrowsers(browsers, rows); return rows; }));
       pending.push(...renderPart('sources', [sources, scannedBrowser?.id], () => { const rows = []; renderBrowsers(sources, rows, true); return rows; }));
       pending.push(...renderPart('logins', [transfers, connections], () => { const rows = []; renderLogins(transfers, connections, rows); return rows; }));
-      pending.push(...renderPart('hosted', hosted, () => { const rows = []; renderHosted(hosted, rows); return rows; }));
+      renderPart('hosted', hosted, () => { renderHosted(hosted); return []; });
       renderInbox(pending, sessions.length > 0); focusLinkedSession(); focusLinkedLogin(); lastRender = signature;
     }
     $('connection').textContent = 'Connected'; $('connection').className = 'status connected';
