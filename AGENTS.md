@@ -7,5 +7,6 @@
 
 # Completing committed work
 
+- Publish completed fixes to the coordinator and push them without asking for confirmation.
 - When committing and pushing completed work, merge it into `main` and push `main` unless the user explicitly requests branch-only work.
 - Fetch the latest remote state, preserve existing changes, and verify the merged result before pushing. Never force-push `main`.

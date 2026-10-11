@@ -1,6 +1,6 @@
 // Runs in Chrome's isolated extension world. The web page cannot access the reference map.
 (() => {
-  const version = '0.7.0-purpose-5-draft-1-checkout-1';
+  const version = '0.7.0-purpose-5-draft-1-checkout-1-heading-1';
   if (globalThis.__agentgateReader?.version === version) return;
   globalThis.__agentgateReader?.dispose?.();
   let references = new Map(), capturedAt = 0, captureId;
@@ -29,6 +29,12 @@
         if (!text || text.length > 180) incomplete = true;
         return text;
       };
+      // The selected heading is part of the observed hierarchy. Starting at its
+      // rank also prevents a preceding peer heading from supplying its context.
+      if (node.matches('h1,h2,h3,h4,h5,h6,[role="heading"]')) {
+        level = /^H[1-6]$/.test(node.tagName) ? Number(node.tagName[1]) : Number(node.getAttribute('aria-level')) || 2;
+        headings.push(observed(node));
+      }
       if (node.matches('dd') && node.previousElementSibling?.matches('dt') && visible(node.previousElementSibling)) attributes.push(observed(node.previousElementSibling));
       if (node.matches('td')) {
         const row = node.closest('tr'), table = node.closest('table');
@@ -55,6 +61,13 @@
       if (!headings.length && !attributes.length) {
         const fallback = container?.querySelector('h1,h2,h3,h4,h5,h6,legend,th');
         if (fallback && visible(fallback)) headings.push(observed(fallback));
+        else if (purposeKind(node) === 'semantic_text') {
+          // Inbox subjects/snippets still require an observed structural Inbox
+          // heading; a page title cannot supply that mailbox authority.
+          const title = document.title.trim();
+          if (title.length > 180) incomplete = true;
+          else if (title) headings.push(title);
+        }
       }
       const text = [...new Set([...headings, ...attributes].filter(Boolean))].join(' / ');
       return incomplete || text.length > 180 ? '' : text;

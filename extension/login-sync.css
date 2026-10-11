@@ -1,0 +1,22 @@
+#apps{border:0;padding:0;margin:24px 0 12px;min-width:0}
+#apps legend{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;font-size:19px;font-weight:600;margin-bottom:12px;letter-spacing:-.02em}
+.login-app{border-top:1px solid var(--edge);padding:8px 0}
+.login-app:last-child{border-bottom:1px solid var(--edge)}
+.login-choice{display:flex;align-items:center;gap:12px;margin:0;min-height:44px;color:var(--text);cursor:pointer}
+.login-choice input{width:19px;height:19px;margin:0;flex-shrink:0;accent-color:var(--accent)}
+.login-choice strong{font-size:15px;font-weight:600}
+.login-result{margin-left:auto;text-align:right;font-size:12px;color:var(--muted);max-width:45%;overflow-wrap:anywhere}
+.login-result[data-state=shared]{color:var(--accent)}
+.login-result[data-state=failed]{color:var(--danger)}
+.login-app details{margin:6px 0 0 31px;padding:8px 0 0;border:0}
+.login-app summary{margin-bottom:0;color:var(--muted)}
+.login-app .check{margin:10px 0;min-height:32px;align-items:center}
+.login-app .check input{margin:0}
+.login-app .hint{margin:12px 0 0}
+.login-tab{margin:0 0 12px 31px}
+.login-tab label{margin:8px 0}
+.login-help{margin:18px 0 22px}
+#transferStatus{margin:14px 0 0;font-size:13px;min-height:20px}
+#connections article{padding:16px 0;border-top:1px solid var(--edge)}
+#connections article p{margin-bottom:12px}
+@media(max-width:650px){.login-result{max-width:40%}.login-choice strong{font-size:14px}#transfer{flex:1}}

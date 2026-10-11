@@ -1,25 +1,25 @@
 import {digest, exact, fail, random, text, verifyReceipt} from '../shared/protocol.mjs';
 export class Browsers {
-  constructor(storage, now = Date.now) { this.db = storage; this.now = now; }
-  save(item) { return this.db.put('browser:' + item.id, item); }
+  constructor(storage, now = Date.now, {loginSource = false} = {}) { this.db = storage; this.now = now; this.loginSource = loginSource; this.prefix = loginSource ? 'login-source:' : 'browser:'; }
+  save(item) { return this.db.put(this.prefix + item.id, item); }
   async get(id) {
     if (!/^[a-f0-9]{32}$/.test(id)) fail('NOT_FOUND', 'Unknown browser pairing.', 404);
-    const item = await this.db.get('browser:' + id); if (!item) fail('NOT_FOUND', 'Unknown browser pairing.', 404);
+    const item = await this.db.get(this.prefix + id); if (!item) fail('NOT_FOUND', 'Unknown browser pairing.', 404);
     if (item.expires_at <= this.now() && !['expired', 'revoked'].includes(item.status)) { item.status = 'expired'; delete item.envelope; await this.save(item); }
     if (item.envelope && item.pairing_expires_at <= this.now()) { delete item.envelope; await this.save(item); }
     return item;
   }
   async list() {
-    const records = await this.db.list({prefix: 'browser:'}), items = [];
+    const records = await this.db.list({prefix: this.prefix}), items = [];
     for (const value of records.values()) {
       const item = await this.get(value.id);
-      if (item.expires_at + 86400000 < this.now() && ['expired', 'revoked'].includes(item.status)) await this.db.delete('browser:' + item.id);
+      if (item.expires_at + 86400000 < this.now() && ['expired', 'revoked'].includes(item.status)) await this.db.delete(this.prefix + item.id);
       else items.push(item);
     }
     return items;
   }
-  public(item) { return {id: item.id, name: item.name, extension_origin: item.extension_origin, status: item.status, expires_at: item.expires_at, challenge: item.status === 'requested' ? item.challenge : null}; }
-  async create(input, extensionOrigin, coordinator) {
+  public(item) { return {id: item.id, name: item.name, extension_origin: item.extension_origin, status: item.status, expires_at: item.expires_at, ...(this.loginSource ? {role: 'login_source'} : {}), challenge: item.status === 'requested' ? item.challenge : null}; }
+  async create(input, extensionOrigin, coordinator, accountId = 'owner') {
     exact(input, ['name', 'credential_hash']);
     if (!await this.db.get('phone')) fail('NOT_PAIRED', 'Pair your approval phone with this coordinator first.', 409);
     if (!/^chrome-extension:\/\/[a-p]{32}$/.test(extensionOrigin || '') || typeof input.credential_hash !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(input.credential_hash)) fail('INVALID_PAIRING', 'Pair through the Chrome extension.', 403);
@@ -27,6 +27,7 @@ export class Browsers {
     const id = random(), expires_at = this.now() + 300000;
     const item = {id, name: text(input.name, 1, 80), extension_origin: extensionOrigin, credential_hash: input.credential_hash, status: 'requested', expires_at, pairing_expires_at: expires_at};
     item.challenge = {version: 1, stage: 'browser_pairing', browser_id: id, nonce: random(), name: item.name, extension_origin: extensionOrigin, coordinator, credential_hash: input.credential_hash, connection_ttl_seconds: 90 * 86400, replace_existing: true, expires_at};
+    if (this.loginSource) Object.assign(item.challenge, {stage: 'login_source_pairing', account_id: accountId, replace_existing: false});
     await this.save(item); return this.public(item);
   }
   async poll(id, credential, extensionOrigin) {
@@ -47,7 +48,7 @@ export class Browsers {
     if (!['approved', 'active'].includes(item.status) || item.pairing_expires_at <= this.now()) fail('STALE_APPROVAL', 'Scan a fresh browser QR code and approve it on your phone.', 409);
     if (item.status === 'approved') {
       // v1 controls one desktop. A newly approved browser replaces the old credential.
-      for (const other of await this.list()) if (other.status === 'active' && other.id !== id) await this.revoke(other.id);
+      if (!this.loginSource) for (const other of await this.list()) if (other.status === 'active' && other.id !== id) await this.revoke(other.id);
       item.status = 'active'; item.expires_at = this.now() + item.challenge.connection_ttl_seconds * 1000; await this.save(item);
     }
     return this.public(item);

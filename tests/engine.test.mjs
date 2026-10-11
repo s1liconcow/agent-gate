@@ -256,3 +256,41 @@ test('runtime progress accepts only static phases and bounded version numbers',a
  const result=await f.engine.runtime(f.id,{state:'planning',code:null,phase:'text_selection',extension_version:'0.5.3'});assert.equal(result.browser_runtime.phase,'text_selection');assert.equal(result.browser_runtime.extension_version,'0.5.3');
  for(const patch of [{phase:'private page content'},{extension_version:'0.5.3 SECRET'},{phase:'publish arbitrary text'},{extension_version:null}])await assert.rejects(f.engine.runtime(f.id,{state:'planning',code:null,...patch}),e=>e.code==='INVALID_RESULT');
 });
+
+test('browser quota status reports retry timing and accepts no raw provider data', async () => {
+  const f = await fixture(); await f.activate();
+  const browser_limit = {reason: 'daily_time', retry_at: 86400000};
+  const result = await f.engine.runtime(f.id, {state: 'blocked', code: 'BROWSER_RATE_LIMITED', browser_limit});
+  assert.deepEqual(result.browser_runtime.browser_limit, browser_limit);
+  assert.match(result.next_action, /daily browser time quota/);
+  assert.match(result.next_action, /1970-01-02T00:00:00.000Z/);
+  assert.doesNotMatch(result.next_action, /increase|upgrade/);
+  for (const patch of [{reason: 'secret body'}, {retry_at: Infinity}, {retry_at: -1}, {provider_message: 'private provider response'}, {sessionId: 'other-owner'}]) {
+    await assert.rejects(f.engine.runtime(f.id, {state: 'blocked', code: 'BROWSER_RATE_LIMITED', browser_limit: {...browser_limit, ...patch}}));
+  }
+  await assert.rejects(f.engine.runtime(f.id, {state: 'ready', code: null, browser_limit}));
+});
+
+test('a pending granular field read still reports a blocked browser acquisition', async () => {
+  const origin = 'https://mail.example';
+  const f = await fixture({goal: 'Read the approved meeting time.', origins: [origin], permissions: ['read'], disclosure: 'bounded', ttl_seconds: 300,
+    read_grants: [{label: 'Meeting time', origin, xpath: '//p[@id="meeting"]', context: 'Calendar', max_chars: 120, max_offset: 0}]});
+  await f.activate();
+  await f.engine.requestDOM(f.id, {xpath: '//p[@id="meeting"]', need: 'Read the approved meeting time.', idempotency_key: 'quota-pending-read', offset: 0, limit: 1});
+  const result = await f.engine.runtime(f.id, {state: 'blocked', code: 'BROWSER_RATE_LIMITED', browser_limit: {reason: 'concurrency', retry_at: 1200000}});
+  assert.ok(result.dom_request); assert.match(result.next_action, /concurrent browser limit/);
+  assert.doesNotMatch(result.next_action, /Use read_browser_dom/);
+});
+
+test('field reads during acquisition backoff preserve the blocker and consume no read budget', async () => {
+  const origin = 'https://mail.example';
+  const f = await fixture({goal: 'Read the approved meeting time.', origins: [origin], permissions: ['read'], disclosure: 'bounded', ttl_seconds: 300,
+    read_grants: [{label: 'Meeting time', origin, xpath: '//p[@id="meeting"]', context: 'Calendar', max_chars: 120, max_offset: 0}]});
+  await f.activate();
+  await f.engine.runtime(f.id, {state: 'blocked', code: 'BROWSER_RATE_LIMITED', browser_limit: {reason: 'acquisition_rate', retry_at: 1060000}});
+  const read = {xpath: '//p[@id="meeting"]', need: 'Read the approved meeting time.', idempotency_key: 'quota-wait-read', offset: 0, limit: 1};
+  await assert.rejects(f.engine.requestDOM(f.id, read), {code: 'BROWSER_RATE_LIMITED'});
+  const blocked = await f.engine.get(f.id);
+  assert.equal(blocked.dom_reads || 0, 0); assert.equal(blocked.dom_request, undefined); assert.equal(blocked.runtime.code, 'BROWSER_RATE_LIMITED');
+  f.advance(60); const pending = await f.engine.requestDOM(f.id, read); assert.ok(pending.dom_request);
+});

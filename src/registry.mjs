@@ -21,4 +21,16 @@ export class Registry extends DurableObject {
       return {account_id, pairing_token};
     });
   }
+  async activateConnectionAccount(account_id) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      if (!/^[a-f0-9]{32}$/.test(account_id) || await this.hasAccount(account_id)) return {error: 'Account changed. Start the connection again.', status: 409};
+      const configured = Number(this.env.BETA_MAX_USERS ?? 10), limit = Number.isSafeInteger(configured) ? Math.min(100, Math.max(0, configured)) : 10;
+      const count = await this.ctx.storage.get('count') || 0;
+      if (count >= limit) return {error: 'The beta is full.', status: 409};
+      // Only the Worker calls this after browser-bound OAuth consent and signatures pass.
+      await this.env.GATE.getByName('account:' + account_id).initializeAccount(account_id, await digest(b64url(crypto.getRandomValues(new Uint8Array(32)))));
+      await this.ctx.storage.put({count: count + 1, ['account:' + account_id]: true});
+      return {account_id};
+    });
+  }
 }

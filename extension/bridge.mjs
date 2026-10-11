@@ -1,21 +1,33 @@
 import {action, automaticActionAllowed, canonical, checksActionPurpose, digest, exact, coordinator, scope, needsApproval, stagedFields, verifyReceipt} from './protocol.mjs';
+import {verifySessionAuthority} from './engagement.mjs';
 import {openPairing, pairingChallenge} from './browser-pairing.mjs';
 import {AutomaticBrowser} from './automatic.mjs';
-import {localModel} from './model-host.mjs';
 import {inferenceSettings, inferencePresentation, saveInference, testInference} from './inference-settings.mjs';
+import {initializeBrowser} from './browser-setup.mjs';
+import {purposeBrowserModel} from './purpose-browser-model.mjs';
 import {auditActiveSessions, auditConnectionEnded, auditEvent, auditPrune, auditRecording, auditStatuses} from './audit-log.mjs';
 import {SessionRecordings} from './session-recording.mjs';
 import {CheckoutRunner} from './checkout-runner.mjs';
 const ready = Promise.all([chrome.storage.local.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'}), chrome.storage.session.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'}), chrome.storage.session.remove(['source', 'binding', 'snapshot'])]);
-let socket, heartbeat, reconnectTimer, queue = Promise.resolve(), pairingQueue = Promise.resolve();
+let socket, heartbeat, reconnectTimer, setupPromise, setupCredential, queue = Promise.resolve(), pairingQueue = Promise.resolve();
 const leases = new Map();
 const recordings = new SessionRecordings({audit: auditRecording});
 const automatic = new AutomaticBrowser({call, config, verifySession, audit: auditEvent, recordings});
 const checkout = new CheckoutRunner({call, config, verifySession, recordings});
 async function config() { await ready; return (await chrome.storage.local.get('settings')).settings; }
+async function setupBrowser() {
+  const settings = await config();
+  if (!settings) return;
+  if (!setupPromise || setupCredential !== settings.bridge_token) {
+    setupCredential = settings.bridge_token;
+    setupPromise = initializeBrowser(value => call('inference', value), {prepare: settings => settings?.profile.provider === 'purpose_browser' ? purposeBrowserModel(settings).warmup() : undefined}).catch(error => { setupPromise = null; throw error; });
+  }
+  return setupPromise;
+}
 async function forget(settings) {
   if ((await config())?.bridge_token !== settings.bridge_token) return;
   clearTimeout(reconnectTimer); clearInterval(heartbeat);
+  setupPromise = null; setupCredential = null;
   if (socket) { socket.onclose = null; socket.close(); socket = null; }
   await recordings.stopAll();
   await auditConnectionEnded();
@@ -25,7 +37,7 @@ async function forget(settings) {
 async function call(path, value) {
   const settings = await config(); if (!settings) throw new Error('Pair the desktop bridge first.');
   const response = await fetch(settings.url + '/api/bridge/' + path, {method: value === undefined ? 'GET' : 'POST', headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + settings.bridge_token, 'X-AgentGate-Extension': 'chrome-extension://' + chrome.runtime.id}, ...(value !== undefined ? {body: JSON.stringify(value)} : {}), redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(15000)});
-  const result = await response.json(); if (!response.ok) { if (response.status === 403) await forget(settings); throw new Error(result.error?.message || 'The coordinator rejected the request.'); }
+  const result = await response.json(); if (!response.ok) { if (response.status === 403) await forget(settings); const error = new Error(result.error?.message || 'The coordinator rejected the request.'); error.code = result.error?.code; throw error; }
   if (path === 'sessions' && value === undefined) auditActiveSessions(result.sessions);
   const published = path.match(/^sessions\/([a-f0-9]{32})\/(view|dom)$/);
   if (published?.[2] === 'view' && result.view) auditEvent(published[1], {id: 'view:' + result.view_digest + ':' + (result.disclosure_request?.id || Date.now()), type: 'view', view: result.view, view_digest: result.view_digest});
@@ -60,20 +72,19 @@ async function pairingStatus() {
   if (connection.id !== item.id || connection.status !== 'active' || !Number.isSafeInteger(connection.expires_at) || connection.expires_at > Date.now() + pending.item.challenge.connection_ttl_seconds * 1000 || connection.expires_at <= Date.now()) throw new Error('The browser access duration changed.');
   const previous = await config(); if (previous) await forget(previous);
   await chrome.storage.local.set({settings: {url: pending.url, bridge_token: pending.credential, phone_key, browser_id: item.id, name: pending.item.name, expires_at: connection.expires_at}});
-  await call('inference', {inference: (await inferenceSettings())?.profile || null});
-  await chrome.storage.session.remove(['pending_pairing', 'binding', 'snapshot']); await connect();
+  await chrome.storage.session.remove(['pending_pairing', 'binding', 'snapshot']);
+  await setupBrowser(); await connect();
   return {status: 'paired', fingerprint: (await digest(phone_key)).slice(0, 24), name: pending.item.name};
 }
 async function verifySession(packet, publicKey) {
-  const receipt = packet.session_receipt, c = receipt?.challenge;
-  if (!c) throw new Error('No phone session approval.');
-  exact(c, ['version', 'stage', 'session_id', 'nonce', 'scope_digest', 'scope', 'expires_at']);
-  const checked = scope(packet.scope);
-  if (c.version !== 1 || c.stage !== 'session' || c.session_id !== packet.session_id || canonical(c.scope) !== canonical(checked) || c.scope_digest !== await digest(checked) || c.expires_at > Date.now() + checked.ttl_seconds * 1000) throw new Error('Session scope differs from the signed approval.');
-  await verifyReceipt(receipt, publicKey, c);
+  const c = await verifySessionAuthority(packet, publicKey, {expectedCoordinator: (await config())?.url});
   const previous = leases.get(c.session_id);
   if (!previous) leases.set(c.session_id, {at: performance.now(), duration: Math.max(0, c.expires_at - Date.now())});
   else if (performance.now() - previous.at >= previous.duration) throw new Error('The local session lease expired.');
+}
+async function authorizeCurrentCommand(packet) {
+  const current = (await call('sessions')).sessions.find(item => item.id === packet.session_id);
+  if (!current || current.status !== 'executing' || current.last_command?.id !== packet.command.id || canonical(current.scope) !== canonical(packet.scope) || canonical(current.session_receipt) !== canonical(packet.session_receipt)) throw new Error('The account policy or task changed before dispatch.');
 }
 async function execute(packet) {
   const {session_id: id, command} = packet;
@@ -117,10 +128,12 @@ async function execute(packet) {
         const committed = Object.values(dispatches).filter(claim => claim.session_id === id).reduce((total, claim) => total + (claim.payment_cents || 0), 0);
         if (!automaticActionAllowed(packet.scope, command) || committed + command.payment_cents > (packet.scope.action_policy?.payment_limit_cents || 0)) throw new Error('The action exceeds the signed communications or payment allowance.');
       }
+      await authorizeCurrentCommand(packet);
       // Persist the claim BEFORE touching the page. An interrupted claim is never replayed.
       dispatches[command.id] = {at: Date.now(), packet_digest: packetDigest, session_id: id, payment_cents: command.payment_cents || 0};
       for (const [key, value] of Object.entries(dispatches)) if (Date.now() - value.at > 86400000) delete dispatches[key];
       await chrome.storage.local.set({dispatches});
+      await authorizeCurrentCommand(packet);
       if (['navigate', 'open_tab'].includes(approvedAction.type)) {
         const destination = new URL(approvedAction.url).origin;
         if (destination.startsWith('https:') && !await chrome.permissions.contains({origins: [destination + '/*']})) throw new Error('The approved website needs its setup permission.');
@@ -155,6 +168,7 @@ async function connect() {
   try {
     const settings = await config(); if (!settings) return;
     if (settings.expires_at && settings.expires_at <= Date.now()) { await forget(settings); return; }
+    await setupBrowser();
     const {ticket} = await call('ticket', {}), url = new URL(settings.url + '/api/bridge/socket'); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     socket = new WebSocket(url, 'agentgate-' + ticket);
     socket.onopen = () => {
@@ -218,15 +232,13 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     }
     if (message.type === 'connect') { socket?.close(); socket = null; await connect(); return {ok: true}; }
     if (message.type === 'status') return {ok: true, connected: socket?.readyState === WebSocket.OPEN, automation: (await chrome.storage.local.get('automation')).automation || null};
-    if (message.type === 'inference_status') return {ok: true, ...inferencePresentation(await inferenceSettings())};
-    if (message.type === 'save_inference') return {ok: true, ...await saveInference(message, value => call('inference', value))};
+    if (message.type === 'inference_status') { await setupBrowser(); return {ok: true, ...inferencePresentation(await inferenceSettings())}; }
+    if (message.type === 'save_inference') { const presentation = await saveInference(message, value => call('inference', value)); await setupBrowser(); automatic.tick().catch(() => {}); return {ok: true, ...presentation}; }
     if (message.type === 'test_inference') return {ok: true, ...await testInference()};
     if (message.type === 'enable_automation') {
-      if (!await chrome.permissions.contains({origins: ['https://*/*']})) throw new Error('Grant website access once in setup.');
-      const result = await localModel('availability');
-      if (result.availability !== 'available') throw new Error('Enable Chrome’s model or configure a remote provider in setup.');
-      await call('inference', {inference: (await inferenceSettings())?.profile || null});
-      await chrome.storage.local.set({automation: {enabled: true,grants_enabled:true}}); automatic.tick().catch(() => {}); return {ok: true};
+      if (!await chrome.permissions.contains({origins: ['https://*/*']})) throw new Error('Allow AgentGate website access in Chrome extension settings.');
+      await setupBrowser();
+      await chrome.storage.local.set({automation: {enabled: true,grants_enabled:true,setup_version:1}}); automatic.tick().catch(() => {}); return {ok: true};
     }
     if(message.type==='set_granted_reads') {
       if(typeof message.enabled!=='boolean')throw new Error('Choose whether approved field reads may run.');
@@ -235,7 +247,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       await chrome.storage.local.set({automation:{...automation,grants_enabled:message.enabled}});
       automatic.tick().catch(()=>{});return {ok:true};
     }
-    if (message.type === 'disable_automation') { await chrome.storage.local.set({automation: {enabled: false,grants_enabled:false}}); await automatic.activity.pause(); return {ok: true}; }
+    if (message.type === 'disable_automation') { await chrome.storage.local.set({automation: {enabled: false,grants_enabled:false,setup_version:1}}); await automatic.activity.pause(); return {ok: true}; }
     if (message.type === 'sessions') return {ok: true, ...await call('sessions')};
     throw new Error('Unsupported extension operation.');
   })().then(respond).catch(error => respond({ok: false, error: error.message}));

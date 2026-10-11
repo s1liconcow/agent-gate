@@ -1,6 +1,7 @@
 import {OAuthAuthorizationServer, OAuthResourceServer} from '@cloudflare/workers-oauth-provider';
 import {remoteMcp} from './remote-mcp.mjs';
 import {tenantBase, tenantPath, tenantWellKnown} from './tenant.mjs';
+import {beginConnection, inlineConnectionRoute} from './oauth-connection.mjs';
 
 const providers = new Map();
 const json = (value, status = 200) => new Response(JSON.stringify(value), {status, headers: {'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'}});
@@ -47,10 +48,10 @@ export async function tenantOAuthRoute(request, env, ctx) {
       const api = authorization.getOAuthApi(env), auth = await api.parseAuthRequest(request), client = await api.lookupClient(auth.clientId), transaction = await api.beginConsent(auth);
       const answer = await gate.createConnector(auth, client?.clientName, transaction.handle);
       if (answer.error) return json(answer.error, answer.error.status || 400);
-      const headers = new Headers(transaction.headers); headers.set('Location', base + '/connect.html#request=' + answer.result.id); headers.set('Cache-Control', 'no-store');
-      return new Response(null, {status: 302, headers});
+      return beginConnection(request, env, auth, client, transaction, id, answer.result.id, answer.result.expires_at);
     } catch { return json({error: 'invalid_request', error_description: 'Use a registered client, its exact callback, browser:delegate scope and S256 PKCE.'}, 400); }
   }
+  const inline = await inlineConnectionRoute(request, env, authorization.getOAuthApi(env), id); if (inline) return inline;
   const route = tenant?.path.match(/^\/oauth\/(status|complete)\/([a-f0-9]{32})$/);
   if (route?.[1] === 'status' && request.method === 'GET') {
     const answer = await gate.connectorStatus(route[2]); return json(answer.error || answer.result, answer.error ? 404 : 200);

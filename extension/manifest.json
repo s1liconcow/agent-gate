@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AgentGate \u00b7 scoped browser bridge",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "minimum_chrome_version": "138",
   "description": "Filter task-relevant browser data with on-device or approved remote AI and execute phone-approved MCP actions.",
   "permissions": [
@@ -14,11 +14,10 @@
     "tabGroups"
   ],
   "host_permissions": [
-    "http://127.0.0.1/*"
-  ],
-  "optional_host_permissions": [
+    "http://127.0.0.1/*",
     "https://*/*"
   ],
+  "optional_permissions": ["cookies"],
   "background": {
     "service_worker": "bridge.mjs",
     "type": "module"

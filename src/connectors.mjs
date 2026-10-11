@@ -1,4 +1,11 @@
-import {exact, fail, random, text, verifyReceipt} from '../shared/protocol.mjs';
+import {fail, random, text, verifyReceipt} from '../shared/protocol.mjs';
+export function connectorRequest(auth_request, client_name, handle, now, id = random(), expires_at = now + 600000) {
+  if (auth_request.codeChallengeMethod !== 'S256' || !/^[A-Za-z0-9_-]{43}$/.test(auth_request.codeChallenge || '')) fail('PKCE_REQUIRED', 'Use OAuth authorization code with S256 PKCE.');
+  if (!auth_request.scope.includes('browser:delegate') || auth_request.scope.some(s => !['browser:delegate', 'offline_access'].includes(s))) fail('INVALID_SCOPE', 'Only browser:delegate and offline_access are supported.');
+  const item = {id, status: 'requested', client_name: text(client_name || 'Unnamed MCP client', 1, 160), client_id: auth_request.clientId, redirect_uri: auth_request.redirectUri, auth_request, handle, expires_at};
+  item.challenge = {version: 1, stage: 'connector', connector_id: id, nonce: random(), client_name: item.client_name, client_id: item.client_id, redirect_uri: item.redirect_uri, scope: auth_request.scope, resource: auth_request.resource, expires_at};
+  return item;
+}
 export class Connectors {
   constructor(storage, now = Date.now) { this.db = storage; this.now = now; }
   async list() {
@@ -19,9 +26,7 @@ export class Connectors {
     if (open.length >= 8) fail('QUEUE_FULL', 'Too many pending connector requests.', 429);
     if (auth_request.codeChallengeMethod !== 'S256' || !/^[A-Za-z0-9_-]{43}$/.test(auth_request.codeChallenge || '')) fail('PKCE_REQUIRED', 'Use OAuth authorization code with S256 PKCE.');
     if (!auth_request.scope.includes('browser:delegate') || auth_request.scope.some(s => !['browser:delegate', 'offline_access'].includes(s))) fail('INVALID_SCOPE', 'Only browser:delegate and offline_access are supported.');
-    const id = random(), expires_at = this.now() + 600000;
-    const item = {id, status: 'requested', client_name: text(client_name || 'Unnamed MCP client', 1, 160), client_id: auth_request.clientId, redirect_uri: auth_request.redirectUri, auth_request, handle, expires_at};
-    item.challenge = {version: 1, stage: 'connector', connector_id: id, nonce: random(), client_name: item.client_name, client_id: item.client_id, redirect_uri: item.redirect_uri, scope: auth_request.scope, resource: auth_request.resource, expires_at};
+    const item = connectorRequest(auth_request, client_name, handle, this.now());
     await this.save(item); return this.public(item);
   }
   async approve(id, receipt) {

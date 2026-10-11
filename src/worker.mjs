@@ -1,6 +1,8 @@
 import {DurableObject} from 'cloudflare:workers';
 import {buildPushPayload} from '@block65/webcrypto-web-push';
 import {Engine} from './engine.mjs';
+import {Engagement} from './engagement.mjs';
+import {ConnectionSetup} from './connection-setup.mjs';
 import {Connectors} from './connectors.mjs';
 import {Browsers} from './browsers.mjs';
 import {registerInference, configuredInference} from './inference.mjs';
@@ -10,6 +12,14 @@ import {digest, exact, fail, GateError, random} from '../shared/protocol.mjs';
 import {tenantPath, tenantWellKnown} from './tenant.mjs';
 import {Registry} from './registry.mjs';
 import {tenantOAuthRoute} from './tenant-oauth.mjs';
+import {HostedConsent} from './hosted-consent.mjs';
+import {HostedBrowser} from './hosted-browser.mjs';
+import {cloudflareBrowserFactory} from './hosted-cloudflare.mjs';
+import {HostedState} from './hosted-state.mjs';
+import {hostedAsset} from './hosted-assets.mjs';
+import {hostedModel, hostedScripts} from './generated-hosted.mjs';
+import {LoginSync} from './login-sync.mjs';
+import {loginSyncCapabilities} from '../shared/login-sync.mjs';
 
 export {Registry};
 
@@ -34,7 +44,63 @@ async function body(request) {
   try { return JSON.parse(new TextDecoder().decode(raw)); } catch { fail('INVALID_BODY', 'The JSON request is invalid.'); }
 }
 export class Gate extends DurableObject {
-  constructor(ctx, env) { super(ctx, env); this.engine = new Engine(ctx.storage); this.connectors = new Connectors(ctx.storage); this.browsers = new Browsers(ctx.storage); this.tickets = new Map(); }
+  constructor(ctx, env) {
+    super(ctx, env); this.engine = new Engine(ctx.storage); this.engagement = new Engagement(ctx.storage); this.connectors = new Connectors(ctx.storage); this.browsers = new Browsers(ctx.storage); this.tickets = new Map();
+    this.hostedConsent = new HostedConsent(ctx.storage, {model: hostedModel, available: Boolean(env.BROWSER && env.HOSTED_MODELS && hostedModel)});
+    this.connectionSetup = new ConnectionSetup(ctx.storage, {model: hostedModel, available: Boolean(env.BROWSER && env.HOSTED_MODELS && hostedModel)});
+    this.loginSources = new Browsers(ctx.storage, Date.now, {loginSource: true});
+    this.loginSync = new LoginSync(ctx.storage, this.hostedConsent, this.loginSources);
+    this.hosted = new HostedBrowser({storage: ctx.storage, consent: this.hostedConsent, factory: cloudflareBrowserFactory(env.BROWSER), scripts: hostedScripts,
+      call: (path, data) => this.hostedCall(path, data), snapshot: () => this.hostedSnapshot(), reset: () => this.hostedLock(async () => {
+        for (const item of await this.engine.list()) if (item.status === 'active') {
+          if (Object.keys(item.fills).length) { await this.engine.end(item.id); continue; }
+          delete item.view; delete item.view_digest; delete item.dom_access;
+          item.runtime = {state: 'starting', code: null, updated_at: Date.now()}; await this.engine.save(item);
+        }
+      })});
+  }
+  async hostedLock(operation) {
+    const answer = await this.locked(operation);
+    if (answer.error) throw new GateError(answer.error.code, answer.error.message, answer.error.status);
+    return answer.result;
+  }
+  hostedSnapshot() { return this.hostedLock(async () => ({
+    sessions: (await this.engine.list()).map(item => ({...this.engine.public(item), scope: item.task, session_receipt: item.session_receipt})),
+    commands: await this.engine.commands(), checks: await this.engine.checks(), checkouts: await this.engine.checkouts()
+  })); }
+  hostedCall(path, data) { return this.hostedLock(async () => {
+    if (!await this.hostedConsent.current()) fail('INFERENCE_NOT_APPROVED', 'Hosted browser access ended.', 403);
+    await this.engine.sweep();
+    if (path === 'sessions' && data === undefined) return {sessions: (await this.engine.list()).map(item => ({...this.engine.public(item), scope: item.task, session_receipt: item.session_receipt}))};
+    const route = path.match(/^sessions\/([a-f0-9]{32})\/(view|dom|runtime|check|result|checkout-prepare|checkout-result)$/);
+    if (!route || data === undefined) fail('NOT_FOUND', 'Unknown hosted browser operation.', 404);
+    const methods = {view: 'publishView', dom: 'publishDOM', runtime: 'runtime', check: 'checkAction', result: 'result', 'checkout-prepare': 'prepareCheckout', 'checkout-result': 'checkoutResult'};
+    const answer = await this.engine[methods[route[2]]](route[1], data);
+    if (['awaiting_action', 'awaiting_checkout', 'awaiting_read'].includes(answer.status)) this.ctx.waitUntil(this.notify());
+    return answer;
+  }); }
+  kickHosted() {
+    if (!this.env.BROWSER) return;
+    if (this.hostedWork) { this.hostedAgain = true; return; }
+    this.hostedWork = (async () => {
+      do {
+        this.hostedAgain = false;
+        try { await this.hosted.tick(); }
+        catch (error) {
+          const code = ['MODEL_TIMEOUT', 'BROWSER_RATE_LIMITED'].includes(error.code) ? error.code : 'BROWSER_UNRESPONSIVE';
+          if (await this.hostedConsent.current()) await this.hostedLock(async () => {
+            for (const item of await this.engine.list()) if (item.status === 'active') await this.engine.runtime(item.id, {state: 'blocked', code, ...(error.browser_limit ? {browser_limit: error.browser_limit} : {})});
+          });
+        }
+      } while (this.hostedAgain);
+    })().finally(() => { this.hostedWork = null; });
+    this.ctx.waitUntil(this.hostedWork);
+  }
+  async endHostedTasks() {
+    for (const item of await this.engine.list()) if (!['expired', 'revoked', 'closed'].includes(item.status)) await this.engine.end(item.id);
+  }
+  stopHosted(item) { if (item) this.ctx.waitUntil(this.hosted.stop(item)); }
+
   async initializeAccount(id, pairingHash) {
     if (!/^[a-f0-9]{32}$/.test(id) || !/^[A-Za-z0-9_-]{43}$/.test(pairingHash)) throw new Error('Invalid account enrollment.');
     await this.ctx.blockConcurrencyWhile(async () => {
@@ -51,6 +117,23 @@ export class Gate extends DurableObject {
   claimConnector(id) { return this.locked(() => this.connectors.claim(id)); }
   finishConnector(id) { return this.locked(() => this.connectors.connected(id)); }
   checkConnector(id) { return this.locked(async () => { await this.connectors.allowed(id); return {allowed: true}; }); }
+  prepareConnectionSetup(input) { return this.locked(() => this.connectionSetup.prepare(input)); }
+  validateConnectionSetup(id, receipts) { return this.locked(async () => { await this.connectionSetup.verify(id, receipts); return {valid: true}; }); }
+  completeConnectionSetup(id, receipts) { return this.locked(async () => {
+    const result = await this.connectionSetup.complete(id, receipts);
+    await this.endHostedTasks();
+    if (result.hosted) await this.activateHosted(result.hosted);
+    await this.ctx.storage.setAlarm(Date.now() + 30000);
+    return {coordinator: result.coordinator};
+  }); }
+  async activateHosted(item, old) {
+    this.stopHosted(old);
+    for (const browser of await this.browsers.list()) if (browser.status === 'active' && browser.id !== item.browser_id) await this.browsers.revoke(browser.id);
+    for (const ws of this.ctx.getWebSockets()) ws.close(4001, 'Cloud browser enabled');
+    await this.ctx.storage.put('browser:' + item.browser_id, {id: item.browser_id, kind: 'hosted', name: 'Cloud browser', extension_origin: null, credential_hash: null, status: 'active', expires_at: item.expires_at});
+    await this.ctx.storage.put('legacy_bridge_retired', true);
+    await registerInference(this.ctx.storage, item.browser_id, {inference: item.inference});
+  }
   async remoteCall(connectorId, path, data) {
     const answer = await this.locked(async () => { await this.connectors.allowed(connectorId); await this.engine.sweep(); return this.agentCall(path, data, 'remote:' + connectorId); });
     // Read-only MCP status polls must not generate new browser work. A short
@@ -58,7 +141,7 @@ export class Gate extends DurableObject {
     if(data!==undefined)await this.dispatch(); return answer;
   }
   async agentCall(path, data, principal = 'cli') {
-    if (path === 'sessions' && data !== undefined) { const result = await this.engine.create(data, principal, await configuredInference(this.ctx.storage)); this.ctx.waitUntil(this.notify()); return result; }
+    if (path === 'sessions' && data !== undefined) { const result = await this.engine.create(data, principal, await configuredInference(this.ctx.storage)); if (result.status === 'requested') this.ctx.waitUntil(this.notify()); return result; }
     const match = path.match(/^sessions\/([a-f0-9]{32})(?:\/(actions|close|revoke|disclosure|dom|checkout))?$/);
     if (!match) fail('NOT_FOUND', 'Unknown assistant endpoint.', 404);
     const [, id, operation] = match, item = await this.engine.get(id);
@@ -89,16 +172,82 @@ export class Gate extends DurableObject {
       const account = request.headers.get('X-AgentGate-Account');
       if (account && account !== await this.ctx.storage.get('account_id')) fail('NOT_FOUND', 'Unknown account.', 404);
       const path = new URL(request.url).pathname;
+      // Browser work must acquire the hosted queue before the short Gate lock.
+      // Waiting for that queue while holding blockConcurrencyWhile deadlocks ticks.
+      const loginOperation = path.match(/^\/api\/(login-source\/transfers\/([a-f0-9]{32})\/import|owner\/login-connections\/([a-f0-9]{32})\/(disconnect|live-view))$/);
+      if (loginOperation && request.method === 'POST') {
+        const sourceId = await this.hostedLock(() => loginOperation[2] ? this.loginSources.authorize(request.headers.get('Authorization')?.replace(/^Bearer /, ''), browserOrigin(request)) : this.auth(request, 'owner'));
+        exact(await body(request), []);
+        if (loginOperation[4] === 'live-view') return json(await this.hosted.loginView(loginOperation[3]));
+        let transfer;
+        const result = await this.hosted.replaceLogin(
+          config => this.hostedLock(async () => {
+            if (loginOperation[2]) {
+              transfer = await this.loginSync.payload(loginOperation[2], sourceId);
+              if (transfer.config.browser_id !== config.browser_id) fail('STALE_APPROVAL', 'Cloud browser changed.', 409);
+              return this.loginSync.prepare(config, transfer.profile, transfer.item.challenge.selection);
+            }
+            const connection = (await this.loginSync.connections(config)).find(item => item.id === loginOperation[3]);
+            if (!connection) fail('NOT_FOUND', 'Unknown app connection.', 404);
+            return this.loginSync.prepare(config, null, connection.selection, connection.id);
+          }),
+          (config, prepared, connection, cleanup) => this.hostedLock(async () => {
+            if ((await this.hostedConsent.current())?.browser_id !== config.browser_id) fail('STALE_APPROVAL', 'Cloud browser changed.', 409);
+            if (!transfer) await this.auth(request, 'owner');
+            await this.endHostedTasks();
+            if (transfer) return this.loginSync.activate(transfer.item.id, sourceId, prepared, connection, cleanup);
+            await this.loginSync.save(config, prepared, connection, undefined, cleanup); return {status: 'disconnected'};
+          })
+        );
+        return json(result);
+      }
       if (path === '/api/bridge/socket') return await this.socket(request);
+      if (path === '/api/owner/hosted-browser/live-view' && request.method === 'POST') {
+        await this.hostedLock(() => this.auth(request, 'owner'));
+        const input = await body(request); exact(input, ['session_id']);
+        if (!/^[a-f0-9]{32}$/.test(input.session_id || '')) fail('NOT_FOUND', 'Unknown task.', 404);
+        return json(await this.hosted.liveView(input.session_id));
+      }
       // Handle expected policy failures inside the lock: an uncaught exception here resets a DO.
       const result = await this.ctx.blockConcurrencyWhile(async () => { try { return await this.route(request); } catch (error) { return errorResponse(error); } });
-      if (path.endsWith('/actions') || path.endsWith('/approve') || path.endsWith('/check') || path.endsWith('/revoke') || path.endsWith('/close') || path.endsWith('/checkout') || path.endsWith('/checkout-prepare') || path.endsWith('/checkout-result') || request.method==='POST'&&/^\/api\/agent\/sessions\/[a-f0-9]{32}\/(?:dom|disclosure)$/.test(path)) await this.dispatch();
+      if (path.endsWith('/actions') || path.endsWith('/approve') || path.endsWith('/check') || path.endsWith('/revoke') || path.endsWith('/close') || path.endsWith('/checkout') || path.endsWith('/checkout-prepare') || path.endsWith('/checkout-result') || request.method==='POST'&&(/^\/api\/agent\/sessions\/[a-f0-9]{32}\/(?:dom|disclosure)$/.test(path)||path==='/api/agent/sessions')) await this.dispatch();
       return result;
     } catch (error) { return errorResponse(error); }
   }
   async route(request) {
     const url = new URL(request.url), path = url.pathname, method = request.method;
-    if (path === '/api/health' && method === 'GET') return json({version: '0.7.0', paired: Boolean(await this.ctx.storage.get('phone'))});
+    if (path === '/api/health' && method === 'GET') return json({version: '0.7.1', paired: Boolean(await this.ctx.storage.get('phone'))});
+    if (path.startsWith('/api/login-source/')) {
+      const extensionOrigin = browserOrigin(request);
+      if (!/^chrome-extension:\/\/[a-p]{32}$/.test(extensionOrigin || '')) fail('UNAUTHORIZED', 'Use the login-sync extension.', 403);
+      const credential = request.headers.get('Authorization')?.replace(/^Bearer /, '');
+      const pairing = path.match(/^\/api\/login-source\/pairings(?:\/([a-f0-9]{32})(?:\/(claim))?)?$/);
+      if (pairing) {
+        if (!pairing[1] && method === 'POST') {
+          const account = await this.ctx.storage.get('account_id') || 'owner';
+          return json(await this.loginSources.create(await body(request), extensionOrigin, url.origin + (account === 'owner' ? '' : '/u/' + account), account), 201);
+        }
+        if (pairing[1] && !pairing[2] && method === 'GET') return json(await this.loginSources.poll(pairing[1], credential, extensionOrigin));
+        if (pairing[2] === 'claim' && method === 'POST') { exact(await body(request), []); return json(await this.loginSources.claim(pairing[1], credential, extensionOrigin)); }
+        fail('NOT_FOUND', 'Unknown login source operation.', 404);
+      }
+      const sourceId = await this.loginSources.authorize(credential, extensionOrigin);
+      if (path === '/api/login-source/status' && method === 'GET') {
+        const hosted = await this.hostedConsent.current();
+        return json({source_id: sourceId, account_id: hosted?.account_id || await this.ctx.storage.get('account_id') || 'owner', browser_id: hosted?.browser_id || null, login_sync: loginSyncCapabilities, connections: hosted ? await this.loginSync.connections(hosted) : []});
+      }
+      if (path === '/api/login-source/transfers' && method === 'POST') {
+        const result = await this.loginSync.request(sourceId, await body(request)); await this.ctx.storage.setAlarm(Date.now() + 30000); return json(result, 201);
+      }
+      const transfer = path.match(/^\/api\/login-source\/transfers\/([a-f0-9]{32})(?:\/(chunk|cancel))?$/);
+      if (transfer && method === 'GET' && !transfer[2]) {
+        const {item} = await this.loginSync.get(transfer[1], sourceId);
+        return json({...this.loginSync.public(item), ...(item.status === 'approved' ? {receipt: item.receipt} : {})});
+      }
+      if (transfer && method === 'POST' && transfer[2] === 'chunk') return json(await this.loginSync.chunk(transfer[1], sourceId, await body(request)));
+      if (transfer && method === 'POST' && transfer[2] === 'cancel') { exact(await body(request), []); return json(await this.loginSync.cancel(transfer[1], sourceId)); }
+      fail('NOT_FOUND', 'Unknown login source endpoint.', 404);
+    }
     if (path === '/api/pair' && method === 'POST') {
       if (request.headers.get('Origin') !== url.origin) fail('UNAUTHORIZED', 'Pair through the approval app.', 403);
       const input = await body(request); exact(input, ['pairing_token', 'public_key']);
@@ -126,6 +275,9 @@ export class Gate extends DurableObject {
         exact(await body(request), []); const before = await this.browsers.get(pairing[1]);
         const replacesBrowser = before.status === 'approved' && ((await this.browsers.list()).some(i => i.status === 'active' && i.id !== before.id) || this.ctx.getWebSockets().some(ws => ws.readyState === 1 && !this.ctx.getTags(ws).includes('browser:' + before.id)));
         const result = await this.browsers.claim(pairing[1], credential, extensionOrigin);
+        const oldHosted = await this.hostedConsent.disable();
+        if (oldHosted) await this.endHostedTasks();
+        this.stopHosted(oldHosted);
         if (replacesBrowser) for (const item of await this.engine.list()) if (!['expired', 'revoked', 'closed'].includes(item.status)) await this.engine.end(item.id);
         await this.ctx.storage.put('legacy_bridge_retired', true);
         for (const ws of this.ctx.getWebSockets()) if (!this.ctx.getTags(ws).includes('browser:' + before.id)) ws.close(4001, 'Browser replaced through phone-approved QR pairing');
@@ -140,11 +292,72 @@ export class Gate extends DurableObject {
       if (['GET', 'POST'].includes(method)) return json(await this.agentCall(path.slice('/api/agent/'.length), method === 'POST' ? await body(request) : undefined), method === 'POST' ? 202 : 200);
     }
     if (role === 'owner') {
-      if (path === '/api/owner/browsers' && method === 'GET') return json({browsers: (await this.browsers.list()).map(item => this.browsers.public(item))});
+      if (path === '/api/owner/login-sources' && method === 'GET') return json({sources: (await this.loginSources.list()).map(item => this.loginSources.public(item))});
+      const source = path.match(/^\/api\/owner\/login-sources\/([a-f0-9]{32})\/(approve|revoke)$/);
+      if (source && method === 'POST') {
+        if (source[2] === 'approve') return json(await this.loginSources.approve(source[1], await body(request)));
+        exact(await body(request), []); const result = await this.loginSources.revoke(source[1]); await this.loginSync.sweep(); return json(result);
+      }
+      if (path === '/api/owner/login-transfers' && method === 'GET') return json({transfers: await this.loginSync.pending()});
+      const transfer = path.match(/^\/api\/owner\/login-transfers\/([a-f0-9]{32})\/(approve|cancel)$/);
+      if (transfer && method === 'POST') {
+        if (transfer[2] === 'approve') return json(await this.loginSync.approve(transfer[1], await body(request)));
+        exact(await body(request), []); return json(await this.loginSync.cancel(transfer[1]));
+      }
+      if (path === '/api/owner/login-connections' && method === 'GET') return json({connections: await this.hostedConsent.current() ? await this.loginSync.connections() : []});
+      const confirmation = path.match(/^\/api\/owner\/login-connections\/([a-f0-9]{32})\/confirm$/);
+      if (confirmation && method === 'POST') {
+        exact(await body(request), []); const config = await this.loginSync.config(), connections = await this.loginSync.connections(config), item = connections.find(item => item.id === confirmation[1]);
+        if (!item) fail('NOT_FOUND', 'Unknown app connection.', 404);
+        item.status = 'connected'; await this.loginSync.store(config).put('login-connections', connections); return json({connection: item});
+      }
+      if (path === '/api/owner/engagement' && method === 'GET') return json(await this.engagement.public());
+      if (path === '/api/owner/engagement' && method === 'POST') {
+        const account = await this.ctx.storage.get('account_id');
+        return json(await this.engagement.request(await body(request), url.origin + (account ? '/u/' + account : '')));
+      }
+      if (path === '/api/owner/engagement/approve' && method === 'POST') {
+        const result = await this.engagement.approve(await body(request));
+        await this.endHostedTasks();
+        return json(result);
+      }
+      if (path === '/api/owner/hosted-browser' && method === 'GET') return json(await this.hostedConsent.status());
+      if (path === '/api/owner/hosted-browser/diagnostics' && method === 'GET') {
+        const sessionId = url.searchParams.get('session_id');
+        if (sessionId && !/^[a-f0-9]{32}$/.test(sessionId)) fail('INVALID_SESSION', 'Use the exact task session ID.');
+        return json(await this.hosted.diagnostics({accountId: await this.ctx.storage.get('account_id') || 'owner',
+          sessionId, refreshLimits: url.searchParams.get('refresh_limits') === '1'}));
+      }
+      if (path === '/api/owner/hosted-browser/request' && method === 'POST') {
+        exact(await body(request), []); const account = await this.ctx.storage.get('account_id') || 'owner';
+        return json(await this.hostedConsent.request(account, account === 'owner' ? url.origin : url.origin + '/u/' + account));
+      }
+      if (path === '/api/owner/hosted-browser/approve' && method === 'POST') {
+        const old = await this.hostedConsent.current(), account = await this.ctx.storage.get('account_id') || 'owner';
+        const item = await this.hostedConsent.approve(await body(request), account, account === 'owner' ? url.origin : url.origin + '/u/' + account);
+        await this.endHostedTasks(); await this.activateHosted(item, old);
+        await this.ctx.storage.setAlarm(Date.now() + 30000);
+        return json(await this.hostedConsent.status());
+      }
+      if (path === '/api/owner/hosted-browser/inference' && method === 'POST') {
+        const {item, settings} = await this.hostedConsent.configure(await body(request));
+        const store = new HostedState(this.ctx.storage, item.account_id, item.browser_id);
+        await store.put('local:inference_settings', settings);
+        await registerInference(this.ctx.storage, item.browser_id, {inference: item.inference});
+        return json({inference: item.inference});
+      }
+      if (path === '/api/owner/hosted-browser/disable' && method === 'POST') {
+        exact(await body(request), []); const item = await this.hostedConsent.disable();
+        if (item) { await this.browsers.revoke(item.browser_id); await this.endHostedTasks(); this.stopHosted(item); }
+        return json(await this.hostedConsent.status());
+      }
+      if (path === '/api/owner/browsers' && method === 'GET') return json({browsers: (await this.browsers.list()).filter(item => item.kind !== 'hosted').map(item => this.browsers.public(item))});
       const browser = path.match(/^\/api\/owner\/browsers\/([a-f0-9]{32})\/(approve|revoke)$/);
       if (browser && method === 'POST') {
         if (browser[2] === 'approve') return json(await this.browsers.approve(browser[1], await body(request)));
         exact(await body(request), []); const sockets = this.ctx.getWebSockets('browser:' + browser[1]), result = await this.browsers.revoke(browser[1]);
+        const hosted = await this.hostedConsent.current();
+        if (hosted?.browser_id === browser[1]) { await this.hostedConsent.disable(); await this.endHostedTasks(); this.stopHosted(hosted); }
         if (sockets.some(ws => ws.readyState === 1)) for (const item of await this.engine.list()) if (!['expired', 'revoked', 'closed'].includes(item.status)) await this.engine.end(item.id);
         for (const ws of sockets) ws.close(4001, 'Browser revoked');
         return json(result);
@@ -158,8 +371,8 @@ export class Gate extends DurableObject {
         return json(result);
       }
       if (path === '/api/owner/sessions' && method === 'GET') {
-        const items = await this.engine.list();
-        return json({sessions: items.map(item => ({...this.engine.public(item), scope: item.task, challenge: item.status === 'requested' ? item.challenge : item.status === 'awaiting_action' ? item.action_challenge : item.status === 'awaiting_checkout' ? item.checkout.challenge : null}))});
+        const items = await this.engine.list(), hosted = Boolean(await this.hostedConsent.current());
+        return json({sessions: items.map(item => ({...this.engine.public(item), scope: item.task, hosted, audit: item.history.filter(event => ['session', 'action_check', 'read_check', 'read_approval'].includes(event.type)), read_preview: item.status === 'awaiting_read' ? item.pending_read?.items : undefined, challenge: item.status === 'requested' ? item.challenge : item.status === 'awaiting_action' ? item.action_challenge : item.status === 'awaiting_read' ? item.read_challenge : item.status === 'awaiting_checkout' ? item.checkout.challenge : null}))});
       }
       if (path === '/api/owner/push-key' && method === 'GET') return json({public_key: this.env.VAPID_PUBLIC_KEY || null});
       if (path === '/api/owner/push' && method === 'POST') {
@@ -173,7 +386,7 @@ export class Gate extends DurableObject {
         if (route[2] === 'policy') return json(await this.engine.chooseActionPolicy(route[1], await body(request)));
         if (route[2] === 'revoke') { exact(await body(request), []); return json(await this.engine.end(route[1])); }
         const item = await this.engine.get(route[1]), receipt = await body(request);
-        return json(item.status === 'requested' ? await this.engine.approveSession(item.id, receipt) : item.status === 'awaiting_checkout' ? await this.engine.approveCheckout(item.id, receipt) : await this.engine.approveAction(item.id, receipt));
+        return json(item.status === 'requested' ? await this.engine.approveSession(item.id, receipt) : item.status === 'awaiting_read' ? await this.engine.approveRead(item.id, receipt) : item.status === 'awaiting_checkout' ? await this.engine.approveCheckout(item.id, receipt) : await this.engine.approveAction(item.id, receipt));
       }
     }
     if (role === 'bridge') {
@@ -184,12 +397,12 @@ export class Gate extends DurableObject {
         if (this.tickets.size >= 16) fail('TOO_MANY_CONNECTIONS', 'Too many bridge connection requests.', 429);
         this.tickets.set(ticket, {expires_at: Date.now() + 30000, browser_id: browserId, extension_origin: browserOrigin(request)}); return json({ticket});
       }
-      if (path === '/api/bridge/sessions' && method === 'GET') return json({sessions: (await this.engine.list()).filter(i => ['active', 'checking_action', 'awaiting_action', 'executing', 'checkout_preparing', 'awaiting_checkout', 'checkout_executing'].includes(i.status)).map(i => ({...this.engine.public(i), scope: i.task, session_receipt: i.session_receipt}))});
+      if (path === '/api/bridge/sessions' && method === 'GET') return json({sessions: (await this.engine.list()).filter(i => ['active', 'checking_action', 'awaiting_action', 'awaiting_read', 'executing', 'checkout_preparing', 'awaiting_checkout', 'checkout_executing'].includes(i.status)).map(i => ({...this.engine.public(i), scope: i.task, session_receipt: i.session_receipt}))});
       const route = path.match(/^\/api\/bridge\/sessions\/([a-f0-9]{32})\/(view|check|runtime|dom|checkout-prepare|checkout-result)$/);
       if (route && method === 'POST') {
         const input = await body(request);
         if (route[2] === 'view') return json(await this.engine.publishView(route[1], input));
-        if (route[2] === 'dom') return json(await this.engine.publishDOM(route[1], input));
+        if (route[2] === 'dom') { const result = await this.engine.publishDOM(route[1], input); if (result.status === 'awaiting_read') this.ctx.waitUntil(this.notify()); return json(result); }
         if (route[2] === 'runtime') return json(await this.engine.runtime(route[1], input));
         if (route[2] === 'checkout-result') return json(await this.engine.checkoutResult(route[1], input));
         if (route[2] === 'checkout-prepare') { const result = await this.engine.prepareCheckout(route[1], input); this.ctx.waitUntil(this.notify()); return json(result); }
@@ -225,6 +438,7 @@ export class Gate extends DurableObject {
     } catch { ws.send(JSON.stringify({error: 'RESULT_REJECTED'})); }
   }
   async dispatch() {
+    this.kickHosted();
     const sockets = [];
     for (const ws of this.ctx.getWebSockets()) if (ws.readyState === 1) { if (await this.socketAllowed(ws)) sockets.push(ws); else ws.close(4001, 'Browser connection ended'); }
     if (!sockets.length) return;
@@ -248,12 +462,24 @@ export class Gate extends DurableObject {
       if ([404, 410].includes(response.status)) await this.ctx.storage.delete('push');
     } catch { /* Notification delivery never grants access; foreground inbox remains available. */ }
   }
-  async alarm() { await this.ctx.blockConcurrencyWhile(() => this.engine.sweep()); await this.dispatch(); await this.ctx.storage.setAlarm(Date.now() + 30000); }
+  async alarm() {
+    await this.ctx.blockConcurrencyWhile(async () => {
+      await this.engine.sweep();
+      await this.loginSync.sweep();
+      const item = await this.ctx.storage.get('hosted:consent');
+      if (item && item.expires_at <= Date.now()) {
+        await this.hostedConsent.disable(); await this.browsers.revoke(item.browser_id);
+        await this.endHostedTasks(); this.stopHosted(item);
+      }
+    });
+    await this.dispatch(); await this.ctx.storage.setAlarm(Date.now() + 30000);
+  }
 }
 
 const app = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    if (url.pathname.startsWith('/api/hosted-model/')) return hostedAsset(request, env.HOSTED_MODELS, hostedModel);
     if (url.pathname === '/api/signup' && request.method === 'POST') {
       if (request.headers.get('Origin') !== url.origin) return json({error: 'Enroll from the beta invitation page.'}, 403);
       let input;
@@ -287,7 +513,7 @@ const app = {
     if (url.pathname.startsWith('/api/')) return env.GATE.getByName('single-owner-v1').fetch(request);
     let assetRequest = request;
     if (tenant) {
-      if (!['/', '/index.html', '/try.html', '/connect.html'].includes(tenant.path)) return new Response('Not found', {status: 404});
+      if (!['/', '/index.html', '/try.html', '/connect.html', '/browser-diagnostics.html'].includes(tenant.path)) return new Response('Not found', {status: 404});
       url.pathname = tenant.path === '/' ? '/index.html' : tenant.path;
       assetRequest = new Request(url, request);
     } else if (url.pathname === '/') {
@@ -297,6 +523,7 @@ const app = {
     const response = env.ASSETS ? await env.ASSETS.fetch(assetRequest) : assetResponse(assetRequest);
     const h = new Headers(response.headers);
     h.set('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
+    if (url.pathname === '/hosted-inference.html') h.set('Content-Security-Policy', "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
     h.set('Referrer-Policy', 'no-referrer'); h.set('X-Content-Type-Options', 'nosniff'); h.set('Cache-Control', 'no-cache');
     if (tenant?.path === '/' && response.ok) {
       h.delete('Content-Length');

@@ -7,3 +7,7 @@ Use a single-column approval inbox on mobile. A selected request expands inline 
 Semantic colors: mint for approval and connected state, amber for pending approval, red for denial and revocation. Keep private previews separate from published views with explicit button labels and local-only copy. Use authored SVG icons and the system sans font for this operational surface. Motion only highlights a changed approval stage and honors reduced motion.
 
 Checkout approval shows the prepared order, merchant and exact USD total, followed by only missing fields. Use **Approve and place order** for the final action. Keep entered values in phone memory until submission or expiry; encrypt them to the task browser. The assistant waits while AgentGate fills and submits the existing cart.
+
+Use **Share logins**, **Connect**, **Allow task**, **Open** and **Stop task** for everyday actions. Put connection identifiers, model settings and diagnostic data behind details. Settings use **Record only**, **Balanced** and **Careful** while retaining the existing policy behavior. Show shared apps by name and running tasks above past tasks.
+
+The browser page uses one column: connection and task controls first, Advanced settings last.

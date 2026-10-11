@@ -25,17 +25,22 @@ export async function adjudicatePurposeRead(task,request,origin,{capture,classif
     const snapshot=await abortable(capture,signal);
     if(snapshot.origin!==origin||!snapshot.capture_id||!snapshot.version||!snapshot.paths||!Array.isArray(snapshot.blocks)||snapshot.blocks.length>1||!Array.isArray(snapshot.controls)||snapshot.controls.length)throw new Error('Invalid purpose field capture.');
     const browser = task.inference?.provider === 'purpose_browser';
-    const blocks=snapshot.blocks.filter(b=>(browser ? ['inbox_subject','inbox_snippet','semantic_text'].includes(b.source_kind) : ['inbox_subject','inbox_snippet'].includes(b.source_kind))&&typeof b.text==='string'&&b.text.length>0&&b.text.length<=450&&typeof b.context==='string'&&b.context.length<=180&&(browser ? b.context.trim().length > 0 : inboxContext(b.context.normalize('NFKC')))&&!sensitiveInbox.test(b.text.normalize('NFKC'))&&!sensitiveInbox.test(b.context.normalize('NFKC')));
+    const blocks=snapshot.blocks.filter(b=>(browser ? ['inbox_subject','inbox_snippet','semantic_text'].includes(b.source_kind) : ['inbox_subject','inbox_snippet'].includes(b.source_kind))&&typeof b.text==='string'&&b.text.length>0&&b.text.length<=450&&typeof b.context==='string'&&b.context.length<=180&&(browser ? b.context.trim().length > 0 : inboxContext(b.context.normalize('NFKC')))&&(task.engagement || !sensitiveInbox.test(b.text.normalize('NFKC'))&&!sensitiveInbox.test(b.context.normalize('NFKC'))));
     const prepared=prepareSnapshot({...snapshot,blocks},task).entries.filter(e=>e.kind==='text'&&e.text.length<=450);
     const entries=blocks.map(block=>financialEntry(block,task,financialPolicy,request.need)||prepared.find(entry=>entry.id===block.ref)).filter(Boolean);
-    const items=[];
+    const items=[], assessments=[];
     for(const entry of entries) {
       const sender=blocks.find(b=>b.ref===entry.id)?.sender;
       const compiled=enforceSender(task,request,sender);
-      if(!compiled)continue;
-      const probability=await abortable(()=>classify({...compiled,text:entry.text,context:sourceContext(entry.context,sender)},signal),signal);
-      if(typeof probability!=='number'||!Number.isFinite(probability)||probability<0||probability>1)throw new Error('Invalid classifier probability.');
-      if(probability>=.98) {
+      if(!compiled&&!task.engagement)continue;
+      let probability;
+      try {
+        const infer = () => classify({...compiled,text:entry.text,context:sourceContext(entry.context,sender)},signal);
+        probability = compiled ? await (task.engagement ? deadline(infer, Math.min(700, milliseconds - 100)) : abortable(infer,signal)) : 0;
+        if(typeof probability!=='number'||!Number.isFinite(probability)||probability<0||probability>1)throw new Error('Invalid classifier probability.');
+      } catch (error) { if (!task.engagement || signal.aborted) throw error; probability = null; }
+      if (task.engagement) assessments.push({decision: probability === null ? 'unavailable' : probability >= .5 ? 'allow' : probability <= .02 ? 'deny' : 'confirm', confidence: probability === null ? null : Math.max(probability, 1 - probability), sensitive: sensitiveInbox.test(entry.text + ' ' + entry.context) || /\b(?:one.time|verification|sign.in|security)\s+(?:code|password)\b/i.test(entry.text)});
+      if(task.engagement||probability>=.98) {
         const xpath=snapshot.paths[entry.id];
         if(typeof xpath!=='string'||!xpath.startsWith('/html[1]/')||parseXPath(xpath).some(s=>s.axis!=='child'||s.tag==='*'||s.predicates.length!==1||!s.predicates[0].index))throw new Error('Invalid source path.');
         items.push({ref:entry.id,xpath,text:entry.text});
@@ -46,6 +51,7 @@ export async function adjudicatePurposeRead(task,request,origin,{capture,classif
       if(!proof?.current||proof.capture_id!==snapshot.capture_id||proof.version!==snapshot.version)throw new Error('Purpose-selected source changed.');
     }
     signal.throwIfAborted();
-    return {items,milliseconds:performance.now()-started};
+    const assessment = task.engagement ? {decision: assessments.some(a=>a.decision==='deny') ? 'deny' : assessments.some(a=>a.decision==='unavailable') || !assessments.length ? 'unavailable' : assessments.some(a=>a.decision==='confirm') ? 'confirm' : 'allow', confidence: assessments.length && assessments.every(a=>a.confidence!==null) ? Math.min(...assessments.map(a=>a.confidence)) : null, sensitive: assessments.some(a=>a.sensitive)} : undefined;
+    return {items,milliseconds:performance.now()-started, ...(assessment ? {assessment} : {})};
   },milliseconds);
 }

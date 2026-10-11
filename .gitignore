@@ -74,3 +74,14 @@ outputs/
 /public/read-grants.mjs
 /extension/read-grants.mjs
 /dist/pages/
+
+# Generated browser and login-sharing assets.
+/src/generated-hosted.mjs
+/public/hosted-browser.mjs
+/public/engagement.mjs
+/extension/engagement.mjs
+/public/login-sync-protocol.mjs
+/extension/login-sync-protocol.mjs
+/extension/login-storage.js
+/extension/purpose-runtime.mjs
+/extension/purpose-vendor/

@@ -1,10 +1,25 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0d1117"><title>AgentGate · approvals</title><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg"><link rel="stylesheet" href="/style.css"><script type="module" src="/app.mjs"></script></head><body>
-<header><a class="brand" href="/" aria-label="AgentGate home"><img src="/icon.svg" alt="" width="34" height="34">AgentGate</a><span id="connection" class="status">Connecting</span></header>
-<main class="phone"><div class="intro"><h1>Your browser.<br>Your say.</h1><p>Approve a purpose. Keep control of what your assistant can see and do.</p></div>
-<div id="message" role="status" class="message" hidden></div>
-<section id="pairing" hidden><h2>Pair this phone</h2><p>A private signing key will stay on this device. Enter the one-time code from your desktop setup.</p><form id="pairForm"><label>Pairing code<input id="pairCode" type="password" required autocomplete="off"></label><button>Pair this phone</button></form><p class="hint">Use your phone as the approval device. The browser bridge has a different credential.</p></section>
-<section id="inbox" hidden><div class="section-heading"><h2>Approvals <span id="count" class="count">0</span></h2><button id="refresh" class="secondary compact">Refresh</button></div><div id="requests"></div><details id="sessionHistory" hidden><summary>Approved and past sessions <span id="pastCount" class="count">0</span></summary><div id="pastRequests"></div></details></section>
-<section id="connectorSection" hidden><h2>Assistant connections</h2><div id="connectors"></div></section>
-<section id="browserSection" hidden><h2>Browser connections</h2><div id="browsers"></div></section>
-<details id="device" hidden><summary>Device settings</summary><p id="fingerprint" class="hint"></p><div class="actions"><button id="notifications" class="secondary">Enable notifications</button></div><p class="hint">Connect your desktop by scanning the extension's QR code. Your signing key stays on this phone. Notifications contain no task details.</p></details>
-<footer>Personal assistant gateway · prototype 0.5<br>Website login and MFA stay with you.<br><a href="/landing.html">What is AgentGate?</a></footer></main></body></html>
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0d1117"><title>AgentGate</title><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg"><link rel="stylesheet" href="/style.css"><script type="module" src="/app.mjs"></script></head>
+<body>
+<header class="approval-header"><a class="brand" href="/" aria-label="AgentGate home"><img src="/icon.svg" alt="" width="34" height="34">AgentGate</a><div class="app-status"><span id="connection" class="status">Connecting</span><a id="approvalShortcut" class="pending-shortcut" href="#inbox" hidden><span id="pendingLabel" role="status" aria-live="polite"></span><span>Review</span></a></div></header>
+<main class="phone">
+  <div id="message" role="status" class="message" hidden></div>
+  <section id="inbox" aria-labelledby="inboxHeading" hidden><div class="section-heading"><h1 id="inboxHeading" tabindex="-1">Needs you <span id="count" class="count">0</span></h1><button id="refresh" class="secondary compact">Refresh</button></div><div id="approvalNavigation" class="approval-navigation" hidden><button id="previousApproval" type="button" class="secondary" aria-label="Previous pending approval" aria-controls="requests">Previous</button><span id="approvalPosition" aria-live="polite"></span><button id="nextApproval" type="button" class="secondary" aria-label="Next pending approval" aria-controls="requests">Next</button></div><div id="requests"></div><p id="approvalEmpty" class="empty" hidden>You’re all caught up.</p></section>
+  <div id="intro" class="intro"><h1>Connect your phone</h1><p>Manage your assistant’s access here.</p></div>
+  <section id="pairing" hidden><form id="pairForm"><label>Setup code<input id="pairCode" type="password" required autocomplete="off"></label><button>Connect</button></form></section>
+  <section id="activeTasks" hidden><h2>Running</h2><div id="activeRequests"></div></section>
+  <section id="loginTransferSection" hidden><h2>Your apps</h2><div id="loginTransfers"></div></section>
+  <section id="hostedSection" hidden><h2>Cloud browser</h2><div id="hostedBrowser"></div></section>
+  <details id="sessionHistory" hidden><summary>Past tasks <span id="pastCount" class="count">0</span></summary><div id="pastRequests"></div></details>
+  <details id="device" hidden><summary>Settings</summary>
+    <details id="engagementSection" hidden><summary>When to ask</summary><form id="engagementForm"><label for="engagementSlider">Confirmation level <output id="engagementLabel" for="engagementSlider">Record only</output></label><input id="engagementSlider" type="range" min="0" max="2" step="1" value="0" aria-describedby="engagementDescription engagementImpact" aria-valuetext="Record only"><div class="engagement-stops" aria-hidden="true"><span>Record only</span><span>Balanced</span><span>Careful</span></div><p id="engagementDescription">Record activity without stopping actions.</p><p id="engagementImpact" class="hint">Saving stops running tasks.</p><button id="saveEngagement">Save</button><span id="engagementSaved" class="hint" role="status"></span></form></details>
+    <section id="connectorSection" hidden><h2>Assistants</h2><div id="connectors"></div></section>
+    <section id="browserSection" hidden><h2>Browsers</h2><div id="browsers"></div></section>
+    <section id="loginSourceSection" hidden><h2>Login sharing</h2><div id="loginSources"></div></section>
+    <div class="actions"><button id="notifications" class="secondary">Enable notifications</button></div>
+    <details><summary>Device details</summary><p id="fingerprint" class="hint"></p></details>
+  </details>
+  <footer><a href="/landing.html">About AgentGate</a></footer>
+</main>
+</body></html>

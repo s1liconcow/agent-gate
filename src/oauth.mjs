@@ -1,6 +1,7 @@
 import OAuthProvider from '@cloudflare/workers-oauth-provider';
 import {remoteMcp} from './remote-mcp.mjs';
 import {publicOrigin} from './origin.mjs';
+import {beginConnection, inlineConnectionRoute} from './oauth-connection.mjs';
 const json = (value, status = 200) => new Response(JSON.stringify(value), {status, headers: {'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'}});
 export function withOAuth(defaultHandler) {
   const providers = new Map();
@@ -27,13 +28,10 @@ export async function oauthRoute(request, env) {
       const client = await env.OAUTH_PROVIDER.lookupClient(auth.clientId);
       stage = 'consent';
       const transaction = await env.OAUTH_PROVIDER.beginConsent(auth);
-      stage = 'phone';
-      const answer = await gate.createConnector(auth, client?.clientName, transaction.handle);
-      if (answer.error) return json(answer.error, answer.error.status || 400);
-      const headers = new Headers(transaction.headers); headers.set('Location', '/connect.html#request=' + answer.result.id); headers.set('Cache-Control', 'no-store');
-      return new Response(null, {status: 302, headers});
+      return beginConnection(request, env, auth, client, transaction);
     } catch { return json({error: 'invalid_request', stage, error_description: 'Invalid OAuth request. Use a registered client, its exact callback, browser:delegate scope and S256 PKCE.'}, 400); }
   }
+  const inline = await inlineConnectionRoute(request, env, env.OAUTH_PROVIDER); if (inline) return inline;
   const route = url.pathname.match(/^\/oauth\/(status|complete)\/([a-f0-9]{32})$/);
   if (!route) return null;
   if (route[1] === 'status' && request.method === 'GET') {

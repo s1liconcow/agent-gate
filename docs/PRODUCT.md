@@ -16,7 +16,7 @@ Allow an assistant to use a signed-in browser for an explicitly approved purpose
 
 ## Operating Context
 
-The user approves a high-level purpose once on their phone and handles website login and MFA themselves. Automatic mode runs actions within the approved purpose. Communications and payments are optional, with a total USD session limit for payments. Uncertain or unrelated actions stop. The assistant runs in an isolated environment with only the agent-facing MCP interface. Cloudflare hosts coordination and a mobile approval PWA; browser credentials and unapproved content remain local.
+The user approves a high-level purpose once on their phone and handles website login and MFA themselves. Automatic mode runs actions within the approved purpose. Communications and payments are optional, with a total USD session limit for payments. Uncertain or unrelated actions stop. The assistant runs in an isolated environment with only the agent-facing MCP interface. Cloudflare hosts coordination and a mobile approval PWA; unshared credentials and unapproved content remain local. Owners can share selected website logins with their cloud browser from the paired extension.
 
 ## Capabilities and Constraints
 
@@ -38,3 +38,10 @@ AgentGate is a provisional working name inherited from the prototype. Preserve i
 ## Open Decisions
 
 Single-owner operation and Cloudflare visibility into approved task metadata remain assumptions. Production multi-user identity, end-to-end encrypted coordination and native Android packaging remain open. Genuine Chrome local inference passed a synthetic payment disclosure check in a separate test profile. Broader relevance accuracy, integrated native-model workflows and actual ChatGPT/Claude account setup require verification on supported owner devices.
+
+## Interface language
+
+Keep the common path short: choose apps, share logins; review a task, allow it.
+Pair once. Sharing needs only the browser click. Use plain labels, hide technical
+details in Settings, and keep running tasks visible. Every sentence must earn
+its place.

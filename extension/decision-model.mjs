@@ -51,8 +51,10 @@ export function decisionModel(settings, {fetcher = globalThis.fetch, authorize =
             response.body?.cancel().catch(() => {});
             throw inferenceError([401,403].includes(response.status) ? 'INFERENCE_AUTH_FAILED' : response.status === 429 ? 'INFERENCE_RATE_LIMITED' : 'INFERENCE_UNAVAILABLE');
           }
-          const approved = validateDecisionResponse(await boundedJson(response, signal), payload);
-          return {allow: entries.length ? undefined : approved.access, ids: entries.filter((_,i) => approved[`e${i}_purpose`] && approved[`e${i}_privacy`]).map(e => e.id), milliseconds: Math.round(performance.now() - start)};
+          const raw = await boundedJson(response, signal), approved = validateDecisionResponse(raw, payload);
+          const answers = Object.values(raw.answers);
+          const assessment = task.engagement ? {decision: answers.some(a=>a.choice==='deny') ? 'deny' : answers.some(a=>a.choice==='uncertain') ? 'confirm' : 'allow', confidence: Math.min(...answers.map(a=>Math.min(a.confidence,a.probabilities[a.choice]))), sensitive: Object.entries(raw.answers).some(([key,a])=>key.endsWith('_privacy') && a.choice!=='allow')} : undefined;
+          return {allow: entries.length ? undefined : approved.access, ids: entries.filter((_,i) => task.engagement || approved[`e${i}_purpose`] && approved[`e${i}_privacy`]).map(e => e.id), milliseconds: Math.round(performance.now() - start), ...(assessment ? {assessment} : {})};
         } catch (error) {
           if (signal.aborted) throw signal.reason;
           if (remoteCodes.includes(error.code)) throw error;

@@ -27,6 +27,10 @@ test('pending MCP requests link directly to the matching phone approval', async 
     const action = await client.callTool({name: 'perform_browser_action', arguments: {session_id: id, action: {type: 'navigate', url: 'https://mail.example/inbox'}, view_digest: null, idempotency_key: 'open-inbox'}});
     assert.equal(action.structuredContent.approval_url, url);
 
+    status = 'awaiting_read';
+    const read = await client.callTool({name: 'get_browser_session', arguments: {session_id: id}});
+    assert.equal(read.structuredContent.approval_url, url);
+
     status = 'active';
     const active = await client.callTool({name: 'get_browser_session', arguments: {session_id: id}});
     assert.equal(active.structuredContent.approval_url, undefined);

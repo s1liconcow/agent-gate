@@ -1,6 +1,6 @@
 import {deadline} from './deadline.mjs';
 
-const live = new Set(['active', 'checking_action', 'awaiting_action', 'executing']);
+const live = new Set(['active', 'checking_action', 'awaiting_action', 'awaiting_read', 'executing']);
 const styles = {
   active: {title: 'AgentGate · Active', color: 'green', badge: 'AI', ink: '#8ce5c1'},
   working: {title: 'AgentGate · Working', color: 'green', badge: 'AI', ink: '#8ce5c1'},
@@ -10,7 +10,7 @@ const styles = {
 };
 export function activityState(item, enabled = true) {
   if (!enabled) return 'paused';
-  if (item.status === 'awaiting_action') return 'waiting';
+  if (['awaiting_action', 'awaiting_read'].includes(item.status)) return 'waiting';
   if (item.browser_runtime?.state === 'blocked') return 'blocked';
   return ['checking_action', 'executing'].includes(item.status) || ['starting', 'planning'].includes(item.browser_runtime?.state) ? 'working' : 'active';
 }
@@ -108,7 +108,7 @@ export class TabActivity {
       for (const item of items) {
         const record = records[item.id]; if (!record) continue;
         if (!live.has(item.status) || record.expires_at <= Date.now()) { await this.remove(record); delete records[item.id]; }
-        else if (['awaiting_action', 'checking_action', 'executing'].includes(item.status)) { record.state = activityState(item, Boolean(automation?.enabled) && !record.suspended); await this.render(record); }
+        else if (['awaiting_action', 'awaiting_read', 'checking_action', 'executing'].includes(item.status)) { record.state = activityState(item, Boolean(automation?.enabled) && !record.suspended); await this.render(record); }
       }
       await this.save(records);
     });

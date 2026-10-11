@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AgentGate · Share logins</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="login-sync.css">
+  <script type="module" src="login-sync.mjs"></script>
+</head>
+<body>
+<header><a class="brand" href="review.html"><img src="icon.svg" width="34" height="34" alt="">AgentGate</a><span id="connection" class="status">Not connected</span></header>
+<main class="phone">
+  <h1>Share logins</h1>
+  <p>Use your signed-in apps in the cloud browser.</p>
+  <div id="message" class="message" role="status" hidden></div>
+  <section id="sync" hidden>
+    <fieldset id="apps"><legend>Choose apps <button id="reloadTabs" class="secondary compact">Refresh tabs</button></legend></fieldset>
+    <p class="hint login-help">Replaces these logins. Stops cloud tasks.</p>
+    <div class="actions"><button id="transfer" disabled>Share logins</button><button id="cancel" class="secondary" hidden>Cancel</button></div>
+    <p id="transferStatus" role="status"></p>
+  </section>
+  <section id="sharedApps" hidden><h2>Shared apps</h2><div id="connections"></div><p id="noConnections" class="hint" hidden></p></section>
+  <details id="pairing">
+    <summary id="pairingLabel">Connect this browser</summary>
+    <div>
+      <label>Account link<input id="url" type="url" value="https://agentgate-control.dchalloner.workers.dev"></label>
+      <label>Browser name<input id="name" value="My Chrome" maxlength="80"></label>
+    </div>
+    <button id="pair">Connect</button>
+    <div id="pairingQR" hidden><canvas id="qr" aria-label="Scan to connect this browser"></canvas><p>Scan with your paired phone. Connect once.</p></div>
+  </details>
+</main>
+</body>
+</html>
