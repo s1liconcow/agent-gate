@@ -48,6 +48,7 @@ export class Gate extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env); this.engine = new Engine(ctx.storage); this.engagement = new Engagement(ctx.storage); this.connectors = new Connectors(ctx.storage); this.browsers = new Browsers(ctx.storage); this.tickets = new Map();
     this.browserRouting = new BrowserRouting(ctx.storage);
+    this.cloudDeployment = {browser_binding: Boolean(env.BROWSER), assets_binding: Boolean(env.HOSTED_MODELS), model_installed: Boolean(hostedModel)};
     this.hostedConsent = new HostedConsent(ctx.storage, {model: hostedModel, available: Boolean(env.BROWSER && env.HOSTED_MODELS && hostedModel)});
     this.connectionSetup = new ConnectionSetup(ctx.storage, {model: hostedModel, available: Boolean(env.BROWSER && env.HOSTED_MODELS && hostedModel)});
     this.loginSources = new Browsers(ctx.storage, Date.now, {loginSource: true});
@@ -256,7 +257,8 @@ export class Gate extends DurableObject {
   }
   async route(request) {
     const url = new URL(request.url), path = url.pathname, method = request.method;
-    if (path === '/api/health' && method === 'GET') return json({version: '0.7.1', paired: Boolean(await this.ctx.storage.get('phone'))});
+    if (path === '/api/health' && method === 'GET') return json({version: '0.7.1', paired: Boolean(await this.ctx.storage.get('phone')),
+      cloud_browser: {...this.cloudDeployment, available: this.hostedConsent.available, configured: Boolean(await this.hostedConsent.current())}});
     if (path.startsWith('/api/login-source/')) {
       const extensionOrigin = browserOrigin(request);
       if (!/^chrome-extension:\/\/[a-p]{32}$/.test(extensionOrigin || '')) fail('UNAUTHORIZED', 'Use the login-sync extension.', 403);

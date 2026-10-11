@@ -25,6 +25,12 @@ npm run deploy
 ```
 
 Keep the deployment's existing secrets, Durable Objects and OAuth KV binding.
+Apply Durable Object code updates immediately. API uploads use
+`coordinatorDeploymentMetadata` from `scripts/coordinator-deployment.mjs` to
+declare the account classes and preserve the existing infrastructure. After
+publishing, run `node scripts/verify-coordinator.mjs COORDINATOR_URL`. The check
+requires the account backend to report cloud readiness; a successful website
+response alone does not verify a backend update.
 The new bindings are `BROWSER` and the `HOSTED_MODELS` R2 bucket. Upload the
 verified model into R2 before deploying the Worker. The uploader splits weights
 into 24 MiB objects and publishes the index and manifest after uploading them.

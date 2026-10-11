@@ -40,6 +40,8 @@ try {
   const sign = async challenge => ({challenge, signature: b64url(await crypto.subtle.sign({name: 'ECDSA', hash: 'SHA-256'}, keys.privateKey, new TextEncoder().encode(canonical(challenge))))});
   const cloud = await ok(await owner('hosted-browser'));
   assert.equal(cloud.enabled, true); assert.equal(cloud.challenge, null);
+  assert.deepEqual((await ok(await request(site + '/api/health'))).cloud_browser,
+    {browser_binding: true, assets_binding: true, model_installed: true, available: true, configured: true});
   assert.equal((await ok(await owner('browsers'))).default_browser_id, cloud.browser_id);
   // Agent requests have no browser Origin header.
   const agentRequest = (path, data) => fetch(site + '/api/agent/' + path, {method: data === undefined ? 'GET' : 'POST', headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + 'g'.repeat(64)}, ...(data === undefined ? {} : {body: JSON.stringify(data)})});
