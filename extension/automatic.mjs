@@ -39,8 +39,13 @@ export class AutomaticBrowser {
     await this.api.storage.session.set({capture_diagnostics: Object.fromEntries(Object.entries(capture_diagnostics).slice(-8))});
   }
   async stop(items) {
-    await this.recordings?.statuses(items);
     const {bindings = {}, agent_tabs = {}, capture_diagnostics = {}} = await this.api.storage.session.get(['bindings', 'agent_tabs', 'capture_diagnostics']);
+    const assigned = new Set((items || []).map(item => item.id));
+    const moved = [...new Set([...Object.keys(bindings), ...Object.keys(agent_tabs), ...Object.keys(capture_diagnostics)])].filter(id => !assigned.has(id));
+    await this.recordings?.statuses([...(items || []), ...moved.map(id => ({id, status: 'revoked'}))]);
+    for (const id of moved) {
+      delete bindings[id]; delete agent_tabs[id]; delete capture_diagnostics[id]; this.attempts.delete(id);
+    }
     for (const item of items || []) if (['closed', 'expired', 'revoked'].includes(item.status)) {
       this.ended.add(item.id); delete bindings[item.id]; delete agent_tabs[item.id]; delete capture_diagnostics[item.id];
       this.attempts.delete(item.id);

@@ -14,6 +14,15 @@ function fixture({toolbar=false,changed=false,loading=false,unrelated=false}={})
 test('automatic inbox publication contains source evidence and local count-only diagnostics',async()=>{
   const f=fixture();await f.browser.tick();assert.equal(f.calls.filter(c=>c.path.endsWith('/view')).length,1);assert.match(f.data.bindings[id].view.text,/Friday/);assert.equal(f.data.capture_diagnostics[id].shared_text_chars,30);assert.ok(!JSON.stringify(f.data.capture_diagnostics).includes('Ali'));assert.deepEqual(f.calls.at(-1).input,{state:'ready',code:null,phase:'ready'});
 });
+test('moving a task to another browser stops recording and clears local task bindings', async () => {
+  const f = fixture(), statuses = [];
+  f.data.bindings = {[id]: {tab_id: 1}}; f.data.capture_diagnostics = {[id]: {shared_text_chars: 30}};
+  f.browser.recordings = {statuses: async items => statuses.push(...items)};
+  await f.browser.stop([]);
+  assert.deepEqual(statuses, [{id, status: 'revoked'}]);
+  for (const key of ['bindings', 'agent_tabs', 'capture_diagnostics']) assert.deepEqual(f.data[key], {});
+  assert.equal(f.browser.ended.has(id), false, 'An owner can select this browser again with fresh approval.');
+});
 test('toolbar-only selections never freeze as a ready view and are retried automatically',async()=>{
   const f=fixture({toolbar:true});await f.browser.tick();await f.browser.tick();assert.equal(f.calls.filter(c=>c.path.endsWith('/view')).length,0);assert.equal(f.calls.filter(c=>c.input?.code==='CONTENT_NOT_READY').length,2);
 });
