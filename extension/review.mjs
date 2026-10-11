@@ -1,5 +1,6 @@
 import {digest, origin, coordinator, inferenceDefaults} from './protocol.mjs';
 import QRCode from './qr.mjs';
+import {prepareChromeAI} from './chrome-ai-setup.mjs';
 const $ = id => document.getElementById(id);
 let sessions = [];
 let pairingPoll = false, qrUrl = '';
@@ -35,6 +36,7 @@ function providerFields() {
   const provider = $('provider').value, remote = !['local', 'purpose_browser'].includes(provider);
   const browser = provider === 'purpose_browser', purpose=browser||provider==='purpose_encoder';
   $('remoteSettings').hidden = !remote;
+  $('chromeAISettings').hidden = provider !== 'local';
   $('formatLabel').hidden = provider !== 'openai_compatible'; $('endpoint').readOnly = !['openai_compatible', 'cloudflare', 'openjev','purpose_encoder'].includes(provider); $('model').readOnly = browser || provider === 'cloudflare'; $('decisionHint').hidden = provider !== 'openjev'; $('cloudflareHint').hidden = provider !== 'cloudflare';
   $('remoteTerms').hidden=purpose;$('purposeHint').hidden=provider!=='purpose_encoder';$('browserPurposeHint').hidden=!browser;
   $('apiKey').closest('label').hidden=browser;$('keyStatus').hidden=browser;
@@ -62,13 +64,21 @@ async function providerStatus() {
 }
 async function saveProvider() {
   const provider = $('provider').value;
-  const payload = ['local', 'purpose_browser'].includes(provider)
-    ? {type: 'save_inference', provider, ...inferenceDefaults[provider]}
-    : {type: 'save_inference', provider, endpoint: $('endpoint').value.trim(), model: $('model').value.trim(), format: $('format').value, api_key: $('apiKey').value.trim()};
-  // Never leave an entered secret in the document after sending it to the worker.
-  $('apiKey').value = '';
-  await bridge(payload); await providerStatus();
-  message('Saved. Applies to new tasks.');
+  const disabled = $('provider').disabled;
+  $('provider').disabled = true; $('prepareChromeAI').disabled = true;
+  try {
+    if (provider === 'local') {
+      message('Preparing Chrome AI for reads, fills and clicks…');
+      await prepareChromeAI({progress: value => message('Preparing Chrome AI… ' + Math.round(value * 100) + '%')});
+    }
+    const payload = ['local', 'purpose_browser'].includes(provider)
+      ? {type: 'save_inference', provider, ...inferenceDefaults[provider]}
+      : {type: 'save_inference', provider, endpoint: $('endpoint').value.trim(), model: $('model').value.trim(), format: $('format').value, api_key: $('apiKey').value.trim()};
+    // Never leave an entered secret in the document after sending it to the worker.
+    $('apiKey').value = '';
+    await bridge(payload); await providerStatus();
+    message('Saved. Applies to new tasks.');
+  } finally { $('provider').disabled = disabled; $('prepareChromeAI').disabled = false; }
 }
 async function pair() {
   const url = coordinator($('url').value.trim());
@@ -95,8 +105,8 @@ async function pollPairing() {
   } catch (error) { $('pairingQR').hidden = true; message(error.message, true); }
   finally { pairingPoll = false; }
 }
-for (const [id, handler] of [['pair', pair], ['refresh', refresh], ['saveProvider', saveProvider]]) $(id).addEventListener('click', async () => { if (id === 'pair') pairingRequest = true; $(id).disabled = true; try { await handler(); } catch (error) { message(error.message, true); } finally { if (id === 'pair') pairingRequest = false; $(id).disabled = id === 'pair' && connected; } });
-$('provider').addEventListener('change', async () => { providerFields(); if (['local', 'purpose_browser'].includes($('provider').value)) { $('provider').disabled = true; try { await saveProvider(); } catch (error) { message(error.message, true); } finally { $('provider').disabled = false; } } });
+for (const [id, handler] of [['pair', pair], ['refresh', refresh], ['saveProvider', saveProvider], ['prepareChromeAI', saveProvider]]) $(id).addEventListener('click', async () => { if (id === 'pair') pairingRequest = true; $(id).disabled = true; try { await handler(); } catch (error) { message(error.message, true); } finally { if (id === 'pair') pairingRequest = false; $(id).disabled = id === 'pair' && connected; } });
+$('provider').addEventListener('change', async () => { providerFields(); if (['local', 'purpose_browser'].includes($('provider').value)) { $('provider').disabled = true; try { await saveProvider(); } catch (error) { await providerStatus().catch(() => {}); message(error.message, true); } finally { $('provider').disabled = false; } } });
 $('session').addEventListener('change', showGoal);
 const {settings} = await chrome.storage.local.get('settings');
 if (settings) { $('url').value = settings.url; if (settings.name) $('browserName').value = settings.name; $('fingerprint').textContent = 'Device key: ' + (await digest(settings.phone_key)).slice(0, 24); try { await refresh(); } catch (error) { $('browserPairing').open = true; message(error.message, true); } } else $('browserPairing').open = true;

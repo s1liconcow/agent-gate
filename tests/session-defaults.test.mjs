@@ -16,3 +16,11 @@ test('classifier defaults cannot authorize fill or click and explicit modes stay
   assert.deepEqual(sessionDefaults({...input, disclosure: 'local_planner', interaction: 'local_gate'}, null), {...input, disclosure: 'local_planner', interaction: 'local_gate'});
   assert.deepEqual(sessionDefaults({...input, disclosure: 'granular'}, {provider: 'purpose_encoder'}), {...input, disclosure: 'granular', interaction: 'automatic'});
 });
+
+test('Chrome AI defaults accept writable sessions without inheriting classifier restrictions', () => {
+  const writable = {...input, goal: 'Fill the contact form and submit it.', permissions: ['read', 'fill', 'click', 'navigate']};
+  assert.deepEqual(sessionDefaults(writable, null), {...writable, disclosure: 'local_planner', interaction: 'automatic', action_policy: defaultActionPolicy});
+  for (const provider of ['purpose_browser', 'purpose_encoder', 'openjev']) {
+    assert.throws(() => sessionDefaults(writable, {provider}), {code: 'INVALID_SCOPE'});
+  }
+});

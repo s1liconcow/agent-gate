@@ -35,7 +35,7 @@ try {
   const report=JSON.parse(await page.locator('#result').textContent());
   report.runtime=branded?'isolated installed Chrome; shared planner through native web Prompt API':'isolated Chromium extension';
   if(branded&&report.availability==='unavailable') {for(let i=0;i<12;i++){await page.waitForTimeout(5000);report.availability=await page.evaluate(()=>LanguageModel.availability({expectedInputs:[{type:'text',languages:['en']}],expectedOutputs:[{type:'text',languages:['en']}]}));if(report.availability!=='unavailable')break;}}
-  if(report.availability==='available'||(branded&&!draft&&['downloadable','downloading'].includes(report.availability))) {
+  if(report.availability==='available'||(branded&&['downloadable','downloading'].includes(report.availability))) {
     attempted = true;
     console.log(JSON.stringify({runtime:report.runtime,availability:report.availability,check:'initializing native model'}));await page.locator('#start').click();
     let finished=false;
