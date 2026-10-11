@@ -30,13 +30,13 @@ try {
   const sign = async challenge => ({challenge, signature: b64url(await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},keys.privateKey,new TextEncoder().encode(canonical(challenge))))});
   const config = {account_id:'owner',browser_id:cloud,coordinator,model:'agentgate-purpose-browser-'+ 'f'.repeat(16),phone_key};
   const broker = new LocalClassifier(db,{engine,allowed:async id=>id===device});
-  let classifications=0;
+  let classifications=0, advisoryDeny=false;
   const processor = new PairedLocalClassifier({config:async()=>({browser_id:device,url:coordinator,phone_key}),api:{storage:{local:{get:async()=>({automation:{enabled:true}})}}},call:async(path,data)=>path==='classifier/requests'?{requests:await broker.pending(device)}:broker.submit(device,data),model:async(type,input)=>{
     classifications++;
     if(type==='plan')return {ok:true,ids:prepareSnapshot(input.snapshot,input.task).entries.map(e=>e.id).slice(0,24)};
     const purchase=type==='check_purchase',allowed=!purchase||input.review.items.every(i=>i.id==='BLUE-MUG-12'&&i.quantity===2)&&[2500,1500].includes(input.review.total_cents);
-    const result={within_purpose:allowed,decision:allowed?'allow':'deny',effect:purchase?'payment':'other',payment_cents:purchase?input.review.total_cents:0,confidence:.99};
-    return {ok:true,...checkedActionAssessment(input.task,input.view,input.action,result,result,input.submit,purchase?input.review:null),...(!purchase&&input.task.purpose_guard.model==='onnx'?{decision:'confirm'}:{})};
+    const result={within_purpose:allowed&&!advisoryDeny,decision:allowed&&!advisoryDeny?'allow':'deny',effect:purchase?'payment':'other',payment_cents:purchase?input.review.total_cents:0,confidence:advisoryDeny?.9:.99};
+    return {ok:true,...checkedActionAssessment(input.task,input.view,input.action,result,result,input.submit,purchase?input.review:null),...(!purchase&&input.task.purpose_guard.model==='onnx'&&!advisoryDeny?{decision:'confirm'}:{})};
   }});
   const snapshot=async()=>({sessions:(await engine.list()).map(i=>({...engine.public(i),scope:i.task,session_receipt:i.session_receipt})),commands:await engine.commands(),checks:await engine.checks(),checkouts:await engine.checkouts()});
   const call=async(path,data)=>{
@@ -65,7 +65,7 @@ try {
   const completed=engine.public(await engine.get(id));assert.equal(completed.checkout.site_outcome,'merchant_confirmed',JSON.stringify(completed));assert.equal(completed.checkout.confirmation.order_id,'SYNTHETIC-123');
   const page=context.pages().find(p=>p.url().startsWith(origin));assert.equal(await page.evaluate(()=>window.orders),1);await hosted.tick();assert.equal(await page.evaluate(()=>window.orders),1);
   assert.equal((await engine.requestCheckout(id,request)).checkout.status,'dispatched');assert.equal(acquisitions,1);assert.ok(classifications>=10);
-  policyFlow = true;
+  policyFlow = true; advisoryDeny=true;
   for (const backend of ['chrome_ai','onnx']) {
     const next = await engine.create({goal:'Buy two blue ceramic coffee mugs for at most $25.00 including shipping.',origins:[origin],permissions:['read','fill','click','navigate'],ttl_seconds:600,disclosure:'local_planner',interaction:'automatic',start_url:origin+'/search'},'cli',null,cloud,{guard:{version:1,browser_id:device,model:backend,...(backend==='onnx'?{model_id:'agentgate-purpose-browser-'+ 'f'.repeat(16)}:{})},execution:'cloud'});
     id=next.id; await engine.approveSession(id,await sign((await engine.get(id)).challenge));
@@ -75,7 +75,8 @@ try {
     await policyPage.locator('[name=card]').fill('4242424242424242');await policyPage.locator('[name=cvc]').fill('123');await policyPage.locator('[name=address]').fill('1 Synthetic Street');
     const current=await view(),button=current.view.controls.find(c=>c.label==='Place order');
     await engine.requestCheckout(id,{submit_ref:button.ref,view_digest:current.view_digest,total_cents:1500,currency:'USD',idempotency_key:'policy-'+backend}); await hosted.tick();await hosted.tick();
-    const result=engine.public(await engine.get(id)); assert.equal(result.checkout.authorization,'purchase_policy'); assert.equal(result.checkout.site_outcome,'merchant_confirmed',JSON.stringify(result)); assert.equal(await policyPage.evaluate(()=>window.orders),1);
+    const raw=await engine.get(id); assert.ok(raw.history.some(event=>event.type==='action_check'&&event.decision==='deny'&&event.applied==='allow'));
+    const result=engine.public(raw); assert.equal(result.checkout.authorization,'purchase_policy'); assert.equal(result.checkout.site_outcome,'merchant_confirmed',JSON.stringify(result)); assert.equal(await policyPage.evaluate(()=>window.orders),1);
     await hosted.tick();assert.equal(await policyPage.evaluate(()=>window.orders),1);
     const record=(await engine.purchasePolicies.list()).policies.find(row=>row.policy.id===proposal.id);assert.equal(record.purchases,1);assert.equal(record.spent_cents,1500);
   }

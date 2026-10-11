@@ -62,12 +62,12 @@ export function scope(value) {
   }
   if (value.purpose_guard !== undefined) {
     exact(value.purpose_guard, ['version', 'browser_id', 'model', ...(value.purpose_guard.model === 'onnx' ? ['model_id'] : [])]);
-    if (value.purpose_guard.version !== 1 || !/^[a-f0-9]{32}$/.test(value.purpose_guard.browser_id) || !['chrome_ai', 'onnx'].includes(value.purpose_guard.model) || value.purpose_guard.model === 'onnx' && !/^agentgate-purpose-browser-[a-f0-9]{16}$/.test(value.purpose_guard.model_id) || !task.browser_id || !['local', 'cloud'].includes(value.execution_browser) || disclosure !== 'local_planner' || value.interaction !== 'automatic' || value.inference || value.engagement || value.action_policy?.communications || value.action_policy?.payments) fail('INVALID_SCOPE', 'Purpose-bound tasks require a pinned browser and explicit local classifier backend.');
+    if (value.purpose_guard.version !== 1 || !/^[a-f0-9]{32}$/.test(value.purpose_guard.browser_id) || !['chrome_ai', 'onnx'].includes(value.purpose_guard.model) || value.purpose_guard.model === 'onnx' && !/^agentgate-purpose-browser-[a-f0-9]{16}$/.test(value.purpose_guard.model_id) || !task.browser_id || !['local', 'cloud'].includes(value.execution_browser) || disclosure !== 'local_planner' || value.interaction !== 'automatic' || value.inference || value.action_policy?.communications || value.action_policy?.payments) fail('INVALID_SCOPE', 'Purpose-bound tasks require a pinned browser and explicit local classifier backend.');
     task.purpose_guard = {...value.purpose_guard}; task.execution_browser = value.execution_browser;
     if (task.execution_browser === 'local' && task.purpose_guard.browser_id !== task.browser_id) fail('INVALID_SCOPE', 'Local execution uses the selected local classifier browser.');
   } else if (value.execution_browser !== undefined) fail('INVALID_SCOPE', 'Execution metadata requires a purpose guard.');
   if (value.engagement !== undefined) {
-    if (!['AUDIT_ONLY', 'AUTO_APPROVE', 'AGGRESSIVE'].includes(value.engagement) || value.action_policy || disclosure === 'bounded' || value.interaction !== (disclosure === 'local_planner' ? 'local_gate' : 'automatic')) fail('INVALID_SCOPE', 'Engagement is selected by the owner for model-classified sessions.');
+    if (!['AUDIT_ONLY', 'AUTO_APPROVE', 'AGGRESSIVE'].includes(value.engagement) || value.action_policy || disclosure === 'bounded' || value.interaction !== (value.purpose_guard ? 'automatic' : disclosure === 'local_planner' ? 'local_gate' : 'automatic')) fail('INVALID_SCOPE', 'Engagement is selected by the owner for model-classified sessions.');
     task.engagement = value.engagement;
   }
   if (value.action_policy !== undefined) {

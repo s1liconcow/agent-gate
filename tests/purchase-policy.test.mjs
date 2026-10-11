@@ -4,6 +4,7 @@ import {b64url, canonical, digest, scope, verifyReceipt} from '../shared/protoco
 import {evaluatePurchasePolicy} from '../shared/purchase-policy.mjs';
 import {PurchasePolicies} from '../src/purchase-policies.mjs';
 import {Engine} from '../src/engine.mjs';
+import {Engagement} from '../src/engagement.mjs';
 import {checkoutKey} from '../shared/checkout.mjs';
 import {CheckoutRunner} from '../extension/checkout-runner.mjs';
 import {AutomaticBrowser} from '../extension/automatic.mjs';
@@ -84,7 +85,9 @@ test('engine policy handoff preserves exact capture binding and final claim; mis
   }
 });
 test('uncertain staging requires exact owner approval and remains locally bound', async () => {
-  const f = await fixture(), c = context('onnx'), {purpose_guard, execution_browser, browser_id, ...input} = c.task;
+  const f = await fixture(), setting = new Engagement(f.db);
+  await setting.approve(await f.sign((await setting.request({mode: 'AGGRESSIVE'}, 'https://gate.example')).challenge));
+  const c = context('onnx'), {purpose_guard, execution_browser, browser_id, ...input} = c.task;
   const session = await f.engine.create(input, 'cli', null, browser_id, {guard: purpose_guard, execution: execution_browser});
   await f.engine.approveSession(session.id, await f.sign((await f.engine.get(session.id)).challenge));
   await f.engine.publishView(session.id, {origin, text: 'Blue ceramic coffee mug.', controls: [{ref, role: 'button', label: 'Add blue mug to cart', approval: 'per_action'}]});

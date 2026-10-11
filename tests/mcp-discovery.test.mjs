@@ -69,3 +69,19 @@ test('existing status tool returns an account-specific diagnostic link on a bloc
     } finally {await client.close(); await server.close();}
   }
 });
+
+test('existing status tool exposes live registered inputs and current owner engagement without opening a browser', async () => {
+  const engagement = {mode: 'AUDIT_ONLY', enabled: true, expires_at: Date.now() + 100000};
+  const calls = [], server = createServer({call: async path => {calls.push(path); if (path === 'browsers') return {engagement}; throw Object.assign(new Error('Unknown session'), {code: 'NOT_FOUND'});}}, true, 'https://gate.example');
+  const client = new Client({name: 'status-metadata-test', version: '1.0.0'}), [a,b] = InMemoryTransport.createLinkedPair(); await Promise.all([server.connect(a), client.connect(b)]);
+  try {
+    const result = await client.callTool({name: 'get_browser_session', arguments: {session_id: 'c'.repeat(32)}});
+    const metadata = JSON.parse(result.content[0].text).server_metadata;
+    assert.equal(metadata.version, '0.9.1'); assert.deepEqual(metadata.engagement, engagement);
+    assert.deepEqual(Object.keys(metadata.tool_inputs).sort(), names);
+    assert.deepEqual(metadata.tool_inputs.request_browser_session.classifier_backends, ['chrome_ai','onnx']);
+    assert.deepEqual(metadata.tool_inputs.request_browser_session.browsers, ['local','cloud']);
+    assert.ok(metadata.tool_inputs.request_browser_session.fields.includes('validation'));
+    assert.deepEqual(calls, ['browsers','sessions/' + 'c'.repeat(32)]);
+  } finally {await client.close(); await server.close();}
+});

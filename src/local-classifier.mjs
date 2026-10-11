@@ -1,6 +1,7 @@
 import {canonical, digest, exact, fail, random} from '../shared/protocol.mjs';
 import {checkClassificationBinding, classificationState, classifierDeadline, classifierInput, classifierResult} from '../shared/local-purpose.mjs';
 import {prepareSnapshot, selectedView} from '../extension/disclosure.mjs';
+import {purposeActionBlocked, purchaseAssessmentAllowed} from '../shared/purpose-engagement.mjs';
 
 // Account-local relay. Only the pinned paired bridge can submit a result.
 export class LocalClassifier {
@@ -54,12 +55,14 @@ export class LocalClassifier {
     const item = await this.current(row);
     if (type === 'plan') {
       const approved = selectedView(prepareSnapshot(row.input.snapshot, item.task), item.task, {allow: true, ids: row.result.ids}, {allow: true});
-      if (canonical(approved) !== canonical(data)) fail('LOCAL_CLASSIFIER_REFUSED', 'The cloud view differs from the local disclosure decision.');
+      const {assessment, ...published} = data;
+      if (canonical(approved) !== canonical(published) || canonical(assessment ?? null) !== canonical(row.result.assessment ?? null)) fail('LOCAL_CLASSIFIER_REFUSED', 'The cloud view differs from the local disclosure decision.');
     } else if (type === 'check_action') {
       for (const key of ['decision', 'effect', 'payment_cents', 'confidence']) if (data[key] !== row.result[key]) fail('LOCAL_CLASSIFIER_REFUSED', 'The cloud action differs from its local assessment.');
+      if (Boolean(data.hard_boundary) !== Boolean(purposeActionBlocked(item.task, row.input.view, row.input.action, row.input.submit))) fail('LOCAL_CLASSIFIER_REFUSED', 'The deterministic action boundary changed.');
       if (data.command_id !== row.state.operation_id) fail('LOCAL_CLASSIFIER_STALE', 'The command changed.');
     } else {
-      if (!['allow', 'confirm'].includes(row.result.decision) || canonical(data.snapshot?.review) !== canonical(row.input.review)) fail('LOCAL_CLASSIFIER_REFUSED', 'The cart differs from its local purpose assessment.');
+      if (!purchaseAssessmentAllowed(item.task, row.result, row.input.review) || canonical(data.snapshot?.review) !== canonical(row.input.review)) fail('LOCAL_CLASSIFIER_REFUSED', 'The cart differs from its local purpose assessment.');
       if (data.purpose_assessment) for (const key of ['decision', 'effect', 'payment_cents', 'confidence']) if (data.purpose_assessment[key] !== row.result[key]) fail('LOCAL_CLASSIFIER_REFUSED', 'The purchase assessment changed.');
     }
     return row;

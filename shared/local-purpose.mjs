@@ -3,6 +3,7 @@ import {prepareSnapshot} from '../extension/disclosure.mjs';
 import {purchaseReview} from './checkout-review.mjs';
 import {sanitizeText} from '../extension/policy.mjs';
 import {purchaseBoundary} from './purchase-boundary.mjs';
+import {engagementDecision} from './engagement.mjs';
 
 export const classifierDeadline = 90000;
 export const classifierConfidence = .98;
@@ -53,13 +54,14 @@ export function classifierResult(type, result, input) {
     return result;
   }
   if (type === 'plan') {
-    exact(result, ['ok', 'ids']);
+    exact(result, ['ok', 'ids', ...(input.task.engagement && result.assessment ? ['assessment'] : [])]);
+    if (result.assessment) {exact(result.assessment, ['decision', 'confidence', 'sensitive']); engagementDecision(input.task.engagement, result.assessment);}
     const allowed = new Set([...input.snapshot.blocks, ...input.snapshot.controls].map(entry => entry.ref));
     if (result.ok !== true || !Array.isArray(result.ids) || result.ids.length > 32 || new Set(result.ids).size !== result.ids.length || result.ids.some(id => !allowed.has(id))) fail('INVALID_RESULT', 'The classifier selected an unknown source.');
   } else {
     exact(result, ['ok', 'decision', 'effect', 'payment_cents', 'confidence']);
-    if (result.ok !== true || !['allow', 'confirm', 'deny'].includes(result.decision) || !['other', 'communication', 'payment'].includes(result.effect) || !Number.isSafeInteger(result.payment_cents) || result.payment_cents < 0 || !Number.isFinite(result.confidence) || result.confidence < 0 || result.confidence > 1) fail('INVALID_RESULT', 'Invalid strict purpose assessment.');
-    if (result.decision === 'allow' && (result.confidence < classifierConfidence || (type === 'check_purchase' ? result.effect !== 'payment' || result.payment_cents !== input.review.total_cents : result.effect !== 'other' || result.payment_cents !== 0))) fail('LOCAL_CLASSIFIER_REFUSED', 'Uncertain purpose or a commitment cannot run as a routine action.');
+    if (result.ok !== true || !['allow', 'confirm', 'deny', ...(input.task.engagement ? ['unavailable'] : [])].includes(result.decision) || !['other', 'communication', 'payment'].includes(result.effect) || !Number.isSafeInteger(result.payment_cents) || result.payment_cents < 0 || !Number.isFinite(result.confidence) || result.confidence < 0 || result.confidence > 1) fail('INVALID_RESULT', 'Invalid strict purpose assessment.');
+    if (result.decision === 'allow' && ((!input.task.engagement && result.confidence < classifierConfidence) || (type === 'check_purchase' ? result.effect !== 'payment' || result.payment_cents !== input.review.total_cents : result.effect !== 'other' || result.payment_cents !== 0))) fail('LOCAL_CLASSIFIER_REFUSED', 'Uncertain purpose or a commitment cannot run as a routine action.');
     if (result.decision === 'confirm' && (type === 'check_purchase' ? result.effect !== 'payment' || result.payment_cents !== input.review.total_cents : result.effect !== 'other' || result.payment_cents !== 0 || input.submit)) fail('LOCAL_CLASSIFIER_REFUSED', 'A consequential action needs its separate exact approval flow.');
     if (type === 'check_purchase' && result.decision !== 'deny' && !purchaseBoundary(input.task, input.review)) fail('LOCAL_CLASSIFIER_REFUSED', 'The full purchase violates a signed deterministic task constraint.');
   }

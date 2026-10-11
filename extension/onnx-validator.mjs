@@ -3,6 +3,7 @@ import {action} from './protocol.mjs';
 import {abortable, deadline} from './deadline.mjs';
 import {purchaseBoundary} from './purchase-boundary.mjs';
 import {enforceSender} from './purpose-constraints.mjs';
+import {purposeDecision} from './purpose-engagement.mjs';
 
 // The bundled binary model measures relevance. Deterministic affordance checks
 // limit it to disclosure, navigation and preparation. It never grants commitment.
@@ -31,7 +32,8 @@ export class OnnxValidator {
           // Preserve the checkpoint's established redaction format for relevance
           // inference. The same selected source retains necessary purchase prices
           // in publication; original totals/quantities have separate hard checks.
-          if (await score(sanitizeForTask(entry.text, task.goal), context, input.need || 'Read only evidence and controls necessary for the approved task.') >= .98) ids.push(entry.id);
+          const probability = await score(sanitizeForTask(entry.text, task.goal), context, input.need || 'Read only evidence and controls necessary for the approved task.');
+          if (task.engagement ? purposeDecision(task, {decision: probability >= .5 ? 'allow' : probability <= .02 ? 'deny' : 'confirm', confidence: probability}) === 'allow' : probability >= .98) ids.push(entry.id);
           if (ids.length === 32) break;
         }
         return {ok: true, ids};
@@ -43,6 +45,7 @@ export class OnnxValidator {
         for (const item of input.review.items) {
           confidence = Math.min(confidence, await score(JSON.stringify(item), 'Full cart item at ' + input.review.origin, 'Check whether this item and exact quantity are necessary for the approved purchase.'));
         }
+        if (task.engagement) return {ok: true, decision: confidence >= .5 ? 'allow' : confidence <= .02 ? 'deny' : 'confirm', effect: 'payment', payment_cents: input.review.total_cents, confidence};
         return confidence > .02 ? {ok: true, decision: confidence >= .98 ? 'allow' : 'confirm', effect: 'payment', payment_cents: input.review.total_cents, confidence} : denied(confidence);
       }
       if (type !== 'check_action') throw new Error('Unsupported ONNX purpose check.');
@@ -57,7 +60,7 @@ export class OnnxValidator {
       // This checkpoint was trained for evidence relevance. Action-effect
       // accuracy is unverified, so every supported preparation/navigation step
       // uses exact owner approval, even when relevance probability is high.
-      return {ok: true, decision: 'confirm', effect: 'other', payment_cents: 0, confidence};
-    }, 90000);
+      return {ok: true, decision: task.engagement ? confidence >= .5 ? 'allow' : confidence <= .02 ? 'deny' : 'confirm' : 'confirm', effect: 'other', payment_cents: 0, confidence};
+    }, input.task.engagement === 'AUDIT_ONLY' ? 1000 : 90000);
   }
 }

@@ -6,6 +6,8 @@ import {Engagement} from './engagement.mjs';
 import {engagementDecision} from '../shared/engagement.mjs';
 import {checkoutEnvelope, checkoutRequest, checkoutSnapshot, checkoutStates} from '../shared/checkout.mjs';
 import {PurchasePolicies} from './purchase-policies.mjs';
+import {purposeActionBlocked, purposeDecision, purchaseAssessmentAllowed} from '../shared/purpose-engagement.mjs';
+import {purchaseBoundary} from '../shared/purchase-boundary.mjs';
 
 const terminal = new Set(['revoked', 'expired', 'closed']);
 export class Engine {
@@ -26,16 +28,18 @@ export class Engine {
     if (active.length >= 8) fail('QUEUE_FULL', 'Eight requests are already open. Close an existing session first.', 429);
     let automatic = sessionDefaults(input, inference);
     const authorization = await new Engagement(this.db, this.now).current();
-    if (authorization && automatic.disclosure !== 'bounded' && !localPurpose) {
+    if (localPurpose && !authorization) {delete automatic.action_policy; automatic = {...automatic, engagement: 'AUDIT_ONLY', interaction: 'automatic'};}
+    if (authorization && automatic.disclosure !== 'bounded') {
       delete automatic.action_policy;
-      automatic = {...automatic, interaction: automatic.disclosure === 'local_planner' ? 'local_gate' : 'automatic', engagement: authorization.challenge.mode};
+      automatic = {...automatic, interaction: localPurpose ? 'automatic' : automatic.disclosure === 'local_planner' ? 'local_gate' : 'automatic', engagement: authorization.challenge.mode};
     }
     const task = scope({...automatic, ...(['local_planner', 'granular'].includes(automatic.disclosure) && inference ? {inference} : {}), ...(browserId ? {browser_id: browserId} : {}), ...(localPurpose ? {purpose_guard: localPurpose.guard, execution_browser: localPurpose.execution} : {})}), id = random();
     const item = {id, task, request_scope: input, principal, status: 'requested', created_at: this.now(), expires_at: this.now() + 900000, operations: 0, fills: {}, history: [], keys: {}};
+    if (localPurpose) {item.engagement_receipt = authorization; item.category = task.permissions.some(permission => ['fill', 'click'].includes(permission)) ? 'interactive' : 'read_only';}
     item.scope_digest = await digest(task);
     item.challenge = {version: 1, stage: 'session', session_id: id, nonce: random(), scope_digest: item.scope_digest, scope: task, expires_at: this.now() + task.ttl_seconds * 1000};
     item.expires_at = item.challenge.expires_at;
-    if (authorization && task.engagement) {
+    if (authorization && task.engagement && !localPurpose) {
       item.challenge.expires_at = item.expires_at = Math.min(item.expires_at, authorization.challenge.expires_at);
       item.session_receipt = {challenge: item.challenge, authorization}; item.status = 'active';
       item.runtime = {state: 'starting', code: null, updated_at: this.now()};
@@ -48,6 +52,11 @@ export class Engine {
     if (!/^[a-f0-9]{32}$/.test(id)) fail('NOT_FOUND', 'Unknown session.', 404);
     const item = await this.db.get('session:' + id);
     if (!item) fail('NOT_FOUND', 'Unknown session.', 404);
+    if (!terminal.has(item.status) && Object.hasOwn(item, 'engagement_receipt') && canonical(item.engagement_receipt) !== canonical(await new Engagement(this.db, this.now).current())) {
+      item.status = 'revoked';
+      for (const key of ['view', 'view_digest', 'pending', 'dom_request', 'dom_access', 'pending_read', 'read_challenge', 'action_challenge', 'action_receipt']) delete item[key];
+      item.fills = {}; this.clearCheckout(item); await this.save(item);
+    }
     if (!terminal.has(item.status) && item.session_receipt?.authorization && canonical(item.session_receipt.authorization) !== canonical(await new Engagement(this.db, this.now).current())) {
       item.status = 'revoked';
       for (const key of ['view', 'view_digest', 'pending', 'dom_request', 'dom_access', 'pending_read', 'read_challenge', 'action_challenge', 'action_receipt']) delete item[key];
@@ -155,6 +164,11 @@ export class Engine {
   }
   async publishView(id, candidate) {
     const item = await this.active(id);
+    if (item.task.purpose_guard && item.task.engagement && candidate.assessment) {
+      const {assessment, ...published} = candidate;
+      exact(assessment, ['decision', 'confidence', 'sensitive']); engagementDecision(item.task.engagement, assessment);
+      item.history.push({type: 'disclosure_check', at: this.now(), mode: item.task.engagement, ...assessment, applied: 'published'}); candidate = published;
+    }
     if (granularDisclosure(item.task.disclosure)) fail('OUT_OF_SCOPE', 'Bounded element sessions accept only request-bound DOM results.', 403);
     if (!item.task.permissions.includes('read')) fail('OUT_OF_SCOPE', 'Reading was not approved for this session.', 403);
     if ((item.disclosure_count || 0) >= 12 || (item.disclosure_chars || 0) + candidate.text?.length > 8000) fail('DISCLOSURE_BUDGET', 'The session disclosure limit is reached. Request a new scoped session.', 403);
@@ -284,19 +298,20 @@ export class Engine {
     item.status = 'awaiting_action';
   }
   async checkAction(id, input) {
-    exact(input, ['command_id', 'decision', ...['effect', 'payment_cents', 'confidence', 'sensitive'].filter(key => Object.hasOwn(input || {}, key))]);
+    exact(input, ['command_id', 'decision', ...['effect', 'payment_cents', 'confidence', 'sensitive', 'hard_boundary'].filter(key => Object.hasOwn(input || {}, key))]);
+    if (Object.hasOwn(input, 'hard_boundary') && typeof input.hard_boundary !== 'boolean') fail('INVALID_RESULT', 'Invalid deterministic boundary result.');
     const item = await this.get(id);
     if (item.status !== 'checking_action' || input.command_id !== item.pending?.id || item.pending.deadline <= this.now() || !checksActionPurpose(item.task)) fail('STALE_COMMAND', 'This action no longer awaits a local check.', 409);
     if (!['allow', 'confirm', 'deny', ...(item.task.engagement ? ['unavailable'] : [])].includes(input.decision)) fail('INVALID_RESULT', 'Invalid local action decision.');
     let decision = item.task.interaction === 'automatic' && input.decision === 'confirm' ? 'deny' : input.decision;
     if (item.task.purpose_guard) {
-      decision = input.decision;
+      decision = purposeDecision(item.task, input);
       if (!Number.isFinite(input.confidence) || input.confidence < 0 || input.confidence > 1 || input.effect !== 'other' || input.payment_cents !== 0) decision = 'deny';
-      else if (decision === 'allow' && input.confidence < .98) decision = 'confirm';
+      if (input.hard_boundary || purposeActionBlocked(item.task, item.view, item.pending.action)) decision = 'deny';
     }
     if (item.task.purpose_guard && item.pending.action.type === 'click' && /^(?:place\s+(?:your\s+)?order|send\b|submit\b|pay\b|purchase\b|buy\s+now|checkout\b|complete\s+(?:purchase|order)|confirm\b|transfer\b|donate\b|delete\b|publish\b|post\b|save\b|book\b|reserve\b|unsubscribe\b|cancel\b|invite\b|share\b|subscribe\b)/i.test(item.view?.controls.find(control => control.ref === item.pending.action.ref)?.label || '')) decision = 'deny';
     if (item.task.purpose_guard && decision === 'confirm') {item.pending.effect = 'other'; item.pending.payment_cents = 0;}
-    if (item.task.engagement) {
+    if (item.task.engagement && !item.task.purpose_guard) {
       if (!Object.hasOwn(input, 'confidence') || !Object.hasOwn(input, 'sensitive')) fail('INVALID_RESULT', 'An engagement action requires its classifier assessment.');
       decision = engagementDecision(item.task.engagement, input);
       // Deterministic commitment detection also runs at the coordinator.
@@ -311,6 +326,7 @@ export class Engine {
         item.payment_committed_cents = (item.payment_committed_cents || 0) + input.payment_cents;
       }
     }
+    if (item.task.purpose_guard && item.task.engagement) item.history.push({type: 'action_check', at: this.now(), mode: item.task.engagement, decision: input.decision, confidence: input.confidence, applied: decision});
     if (decision === 'deny') {
       item.last_command = {id: item.pending.id, status: 'failed', code: 'OUT_OF_SCOPE', site_outcome: 'unverified'};
       item.status = 'active'; delete item.pending;
@@ -349,12 +365,14 @@ export class Engine {
     exact(input, ['checkout_id', 'snapshot', ...(input.purpose_assessment ? ['purpose_assessment'] : [])]); const item = await this.get(id), checkout = item.checkout;
     if (item.status !== 'checkout_preparing' || checkout?.id !== input.checkout_id || checkout.deadline <= this.now()) fail('STALE_CHECKOUT', 'This checkout no longer awaits preparation.', 409);
     checkout.snapshot = checkoutSnapshot(input.snapshot, item.task, checkout.request);
+    if (item.task.purpose_guard && !purchaseBoundary(item.task, checkout.snapshot.review)) fail('OUT_OF_SCOPE', 'The full cart violates a signed task constraint.');
     checkout.challenge = {version: 1, stage: 'checkout', session_id: id, checkout_id: checkout.id, nonce: random(), scope_digest: item.scope_digest, view_digest: checkout.request.view_digest, submit_ref: checkout.request.submit_ref, snapshot: checkout.snapshot, expires_at: checkout.deadline};
     checkout.status = 'awaiting_approval'; item.status = 'awaiting_checkout';
     if (item.task.purpose_guard && input.purpose_assessment) {
       const result = input.purpose_assessment;
       exact(result, ['decision', 'effect', 'payment_cents', 'confidence']);
-      if (!['allow', 'confirm'].includes(result.decision) || result.effect !== 'payment' || result.payment_cents !== checkout.snapshot.total_cents || !Number.isFinite(result.confidence) || result.confidence < 0 || result.confidence > 1 || result.decision === 'allow' && result.confidence < .98) fail('OUT_OF_SCOPE', 'A complete local purchase assessment is required.');
+      if (!['allow', 'confirm', ...(item.task.engagement ? ['deny', 'unavailable'] : [])].includes(result.decision) || !Number.isFinite(result.confidence) || result.confidence < 0 || result.confidence > 1 || !purchaseAssessmentAllowed(item.task, result, checkout.snapshot.review)) fail('OUT_OF_SCOPE', 'A complete local purchase assessment is required.');
+      if (item.task.engagement) item.history.push({type: 'purchase_check', at: this.now(), mode: item.task.engagement, ...result, applied: purposeDecision(item.task, result)});
       checkout.purpose_assessment = result;
       checkout.policy_reference = await this.purchasePolicies.select({task: item.task, snapshot: checkout.snapshot, assessment: result});
       if (checkout.policy_reference) {checkout.status = 'executing'; item.status = 'checkout_executing';}

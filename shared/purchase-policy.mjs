@@ -1,6 +1,7 @@
 import {canonical, exact, fail, origin, text} from './protocol.mjs';
 import {purchaseReview} from './checkout-review.mjs';
 import {purchaseBoundary} from './purchase-boundary.mjs';
+import {purposeDecision} from './purpose-engagement.mjs';
 
 export function purchasePolicy(value, now = Date.now()) {
   exact(value, ['id', 'revision', 'goal', 'merchant', 'currency', 'limit_exclusive_cents', 'usage', 'max_purchases', 'budget_cents', 'expires_at', 'items', 'payment_description', 'delivery_description']);
@@ -25,7 +26,7 @@ export function evaluatePurchasePolicy(policy, {task, snapshot, assessment, purc
   try {purchasePolicy(policy, now); review = purchaseReview(snapshot.review);} catch {return {eligible: false, reason: 'invalid_or_expired'};}
   const deny = reason => ({eligible: false, reason});
   if (!task.purpose_guard || task.goal !== policy.goal || !task.origins.includes(policy.merchant) || review.origin !== policy.merchant || snapshot.origin !== policy.merchant || review.currency !== policy.currency || snapshot.currency !== policy.currency || snapshot.total_cents !== review.total_cents || snapshot.capture_digest !== review.capture_digest || !purchaseBoundary(task, review)) return deny('scope_or_total');
-  if (!assessment || assessment.decision !== 'allow' || assessment.effect !== 'payment' || assessment.payment_cents !== review.total_cents || !Number.isFinite(assessment.confidence) || assessment.confidence < .98) return deny('classifier_uncertain');
+  if (!assessment || !['allow', 'confirm', 'deny', 'unavailable'].includes(assessment.decision) || assessment.effect !== 'payment' || assessment.payment_cents !== review.total_cents || !Number.isFinite(assessment.confidence) || assessment.confidence < 0 || assessment.confidence > 1 || purposeDecision(task, assessment) !== 'allow') return deny('classifier_uncertain');
   if (review.purchase_kind !== 'one_time' || review.transaction_category !== 'goods' || excluded.test([task.goal, snapshot.summary, snapshot.payment_description, snapshot.delivery_description, ...review.items.map(item => item.name)].join(' '))) return deny('excluded_or_unknown_transaction');
   if (snapshot.fields.length) return deny('owner_fields_required');
   if (snapshot.payment_description !== policy.payment_description || snapshot.delivery_description !== policy.delivery_description) return deny('payment_or_delivery');

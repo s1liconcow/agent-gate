@@ -31,6 +31,6 @@ export class ModelRuntime {
       };
       this.queue = this.queue.then(operation, operation);
       return this.queue;
-    }, type === 'availability' ? Math.min(15000, this.milliseconds) : this.milliseconds);
+    }, input.task?.purpose_guard && input.task.engagement === 'AUDIT_ONLY' ? Math.min(1000, this.milliseconds) : type === 'availability' ? Math.min(15000, this.milliseconds) : this.milliseconds);
   }
 }

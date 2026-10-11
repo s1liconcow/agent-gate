@@ -81,7 +81,7 @@ function renderPurchasePolicies(state) {
     const dl = el('dl'); detail(dl, 'Merchant', p.merchant); detail(dl, 'Price ceiling including tax and shipping', 'Strictly under $' + (p.limit_exclusive_cents / 100).toFixed(2) + ' USD');
     for (const item of p.items) detail(dl, item.name + ' · ' + item.id, 'Exact quantity ' + item.quantity);
     detail(dl, 'Payment', p.payment_description); detail(dl, 'Delivery', p.delivery_description); detail(dl, 'Usage', p.usage === 'once' ? 'One purchase' : 'Repeated one-time goods purchases'); detail(dl, 'Limits', p.max_purchases + ' purchases; $' + (p.budget_cents / 100).toFixed(2) + ' total budget'); detail(dl, 'Expiry', new Date(p.expires_at).toLocaleString());
-    section.append(dl, el('p', 'A confident local purpose check and an unchanged complete checkout are required. Unknown transactions, subscriptions, financial or regulated purchases and missing fields still need approval.', 'hint'));
+    section.append(dl, el('p', 'Your saved engagement setting governs classifier concerns. The exact complete checkout must match this policy. Unknown transactions, subscriptions, financial or regulated purchases and missing fields still need approval.', 'hint'));
     section.append(button('Confirm and enable policy', async () => {
       if (row.deadline <= Date.now() || row.challenge.stage !== 'purchase_policy' || row.challenge.expires_at !== p.expires_at) throw new Error('Review the current policy again.');
       const receipt = {challenge: row.challenge, signature: b64url(await crypto.subtle.sign({name: 'ECDSA', hash: 'SHA-256'}, device.key, new TextEncoder().encode(canonical(row.challenge))))};
@@ -361,7 +361,7 @@ function render(items) {
     if (item.engagement) section.append(el('p', modeLabels[engagementModes.indexOf(item.engagement)], 'hint'));
     if (item.audit?.length) {
       const audit = el('details', undefined, 'audit-events'); audit.append(el('summary', 'Activity'));
-      for (const event of item.audit) audit.append(el('p', event.type === 'session' ? 'Session categorized and recorded.' : event.type === 'read_approval' ? 'Owner confirmed the field read.' : `${event.type === 'read_check' ? 'Read' : 'Action'}: ${event.decision}${event.confidence === null ? ' · confidence unavailable' : ' · ' + Math.round(event.confidence * 100) + '% confidence'}${event.sensitive ? ' · sensitive' : ''} → ${event.applied}`, 'hint'));
+      for (const event of item.audit) audit.append(el('p', event.type === 'session' ? 'Session categorized and recorded.' : event.type === 'read_approval' ? 'Owner confirmed the field read.' : `${event.type === 'read_check' || event.type === 'disclosure_check' ? 'Read' : event.type === 'purchase_check' ? 'Purchase' : 'Action'}: ${event.decision}${event.confidence === null || event.decision === 'unavailable' ? ' · model score unavailable' : ' · ' + Math.round(event.confidence * 100) + '% model score'}${event.sensitive ? ' · sensitive' : ''} → ${event.applied}`, 'hint'));
       section.append(audit);
     }
     if (item.challenge) {
@@ -371,7 +371,7 @@ function render(items) {
         if (item.scope.start_url) detail(dl, 'Starting page', item.scope.start_url);
         if (item.scope.purpose_guard) {
           detail(dl, 'Task browser', item.scope.execution_browser);
-          detail(dl, 'Purpose validation', (item.scope.purpose_guard.model === 'onnx' ? 'Pinned ONNX classifier' : 'Chrome built-in Prompt API') + ' on your paired local browser. Routine actions require a confident purpose match. Final purchase requires your exact approval or a separately confirmed bounded purchase policy.');
+          detail(dl, 'Purpose validation', (item.scope.purpose_guard.model === 'onnx' ? 'Pinned ONNX classifier' : 'Chrome built-in Prompt API') + ' on your paired local browser. Routine actions follow your saved engagement setting: Record only logs classifier concerns; Balanced asks about uncertainty; Careful uses the 0.98 cutoff. Final purchase requires your exact approval or a separately confirmed bounded purchase policy.');
           if (item.scope.execution_browser === 'cloud') detail(dl, 'Local classifier sharing', 'The cloud browser sends filtered page candidates, proposed actions and the cart review to your paired local browser.');
         }
         if (item.scope.inference) {

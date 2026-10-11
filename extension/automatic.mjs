@@ -12,6 +12,7 @@ import {adjudicatePurposeRead} from './purpose-read.mjs';
 import {purposeModel} from './purpose-model.mjs';
 import {purposeBrowserModel} from './purpose-browser-model.mjs';
 import {engagementDecision} from './engagement.mjs';
+import {purposeActionBlocked, purposeDecision} from './purpose-engagement.mjs';
 const enabled=(task,automation)=>task.disclosure==='bounded'?Boolean(automation?.grants_enabled??automation?.enabled):Boolean(automation?.enabled);
 
 export class AutomaticBrowser {
@@ -132,7 +133,7 @@ export class AutomaticBrowser {
           await this.receipt(item);
           const current = (await this.call('sessions')).sessions.find(i => i.id === item.id);
           if (this.ended.has(item.id) || current?.status !== 'active' || current.view || canonical(current.scope) !== canonical(item.scope) || current.disclosure_request?.id !== item.disclosure_request?.id || new URL((await this.api.tabs.get(tab.id)).url).origin !== site) continue;
-          const response = await this.call('sessions/' + item.id + '/view', {...approved, ...(planned.classifier_proof ? {classifier_proof: planned.classifier_proof} : {})});
+          const response = await this.call('sessions/' + item.id + '/view', {...approved, ...(planned.assessment ? {assessment: planned.assessment} : {}), ...(planned.classifier_proof ? {classifier_proof: planned.classifier_proof} : {})});
           const {bindings = {}} = await this.api.storage.session.get('bindings');
           bindings[item.id] = {session_id: item.id, tab_id: tab.id, view: response.view, view_digest: response.view_digest, fills: {}, submit_refs: snapshot.controls.filter(c => c.submit).map(c => c.ref)};
           await this.api.storage.session.set({bindings});
@@ -256,17 +257,17 @@ export class AutomaticBrowser {
       const {bindings = {}} = await this.api.storage.session.get('bindings'), binding = bindings[id];
       if (!binding || binding.view_digest !== command.view_digest) throw new Error('The task view changed.');
       const classify = () => this.model('check_action', {task: packet.scope, view: binding.view, action: command.action, staged: stagedFields(binding.view, binding.fills), submit: binding.submit_refs.includes(command.action.ref)}, {session_id: id, beforeInference: () => this.authorizeInference(packet, true)});
-      const result = await (packet.scope.engagement === 'AUDIT_ONLY' ? deadline(classify, 1000) : classify());
-      if (!['allow', 'confirm', 'deny'].includes(result.decision)) throw new Error('Invalid local decision.');
-      const decision = packet.scope.purpose_guard ? result.decision : packet.scope.engagement ? engagementDecision(packet.scope.engagement, result) : packet.scope.interaction === 'automatic' && (result.decision === 'confirm' || result.decision === 'allow' && !automaticActionAllowed(packet.scope, result)) ? 'deny' : result.decision;
-      const assessment = packet.scope.purpose_guard ? {effect: result.effect, payment_cents: result.payment_cents, confidence: result.confidence} : packet.scope.engagement ? {confidence: result.confidence, sensitive: result.sensitive} : packet.scope.interaction === 'automatic' && decision === 'allow' ? {effect: result.effect, payment_cents: result.payment_cents} : {};
+      const result = await (packet.scope.engagement === 'AUDIT_ONLY' && !packet.scope.purpose_guard ? deadline(classify, 1000) : classify());
+      if (!['allow', 'confirm', 'deny', ...(packet.scope.engagement ? ['unavailable'] : [])].includes(result.decision)) throw new Error('Invalid local decision.');
+      const decision = packet.scope.purpose_guard ? purposeActionBlocked(packet.scope, binding.view, command.action, binding.submit_refs.includes(command.action.ref)) ? 'deny' : purposeDecision(packet.scope, result) : packet.scope.engagement ? engagementDecision(packet.scope.engagement, result) : packet.scope.interaction === 'automatic' && (result.decision === 'confirm' || result.decision === 'allow' && !automaticActionAllowed(packet.scope, result)) ? 'deny' : result.decision;
+      const assessment = packet.scope.purpose_guard ? {effect: result.effect, payment_cents: result.payment_cents, confidence: result.confidence, ...(purposeActionBlocked(packet.scope, binding.view, command.action, binding.submit_refs.includes(command.action.ref)) ? {hard_boundary: true} : {})} : packet.scope.engagement ? {confidence: result.confidence, sensitive: result.sensitive} : packet.scope.interaction === 'automatic' && decision === 'allow' ? {effect: result.effect, payment_cents: result.payment_cents} : {};
       await this.receipt(packet);
       if (this.ended.has(id)) return;
       const {guarded = {}} = await this.api.storage.session.get('guarded');
       guarded[command.id] = {decision, ...assessment, digest: await this.commandDigest(packet)};
       await this.api.storage.session.set({guarded});
       await this.call('sessions/' + id + '/check', {command_id: command.id, decision: packet.scope.engagement ? result.decision : decision, ...assessment, ...(result.classifier_proof ? {classifier_proof: result.classifier_proof} : {})});
-      await this.audit(id, {id: 'check:' + command.id, type: 'action_check', action: command.action, decision, ...assessment});
+      await this.audit(id, {id: 'check:' + command.id, type: 'action_check', action: command.action, decision: result.decision, applied: decision, ...assessment});
     } catch (error) {
       if (packet.scope.engagement) {
         try {

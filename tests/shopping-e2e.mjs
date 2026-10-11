@@ -33,8 +33,9 @@ export async function localModel(type,input={}) {
   if(type==='plan') return {ok:true,ids:prepareSnapshot(input.snapshot,input.task).entries.map(e=>e.id).slice(0,24)};
   if(type==='check_action'||type==='check_purchase') {
     const purchase=type==='check_purchase';
-    const within_purpose=!purchase||input.review.items.every(i=>i.id==='BLUE-MUG-12'&&i.quantity===2)&&input.review.total_cents<=2500;
-    const result={within_purpose,decision:within_purpose?'allow':'deny',effect:purchase?'payment':'other',payment_cents:purchase?input.review.total_cents:0,confidence:.99};
+    const cartStep=!purchase&&input.view.controls.find(c=>c.ref===input.action.ref)?.label==='Add blue mugs to cart';
+    const within_purpose=!cartStep&&(!purchase||input.review.items.every(i=>i.id==='BLUE-MUG-12'&&i.quantity===2)&&input.review.total_cents<=2500);
+    const result={within_purpose,decision:within_purpose?'allow':'deny',effect:purchase?'payment':'other',payment_cents:purchase?input.review.total_cents:0,confidence:cartStep?.90:.99};
     return {ok:true,...checkedActionAssessment(input.task,input.view,input.action,result,result,input.submit,purchase?input.review:null)};
   }
   throw new Error('Unsupported synthetic guardian operation.');

@@ -5,8 +5,13 @@ import {LocalPlanner} from './planner.mjs';
 import {remoteModelAPI, inferenceError} from './remote-model.mjs';
 import {inferenceSettings, approvedInference} from './inference-settings.mjs';
 import {ensureLocalDocument} from './offscreen-host.mjs';
+import {auditPurpose} from './purpose-audit.mjs';
 const runtime = new ModelRuntime();
 export async function localModel(type, input = {}, {onStage = () => {}, beforeInference} = {}) {
+  if (input.task?.purpose_guard && input.task.engagement === 'AUDIT_ONLY' && ['plan', 'check_action', 'check_purchase'].includes(type)) return auditPurpose(type, input, () => modelRequest(type, input, {onStage, beforeInference}), beforeInference);
+  return modelRequest(type, input, {onStage, beforeInference});
+}
+async function modelRequest(type, input, {onStage, beforeInference}) {
   if (input.task?.purpose_guard?.model === 'onnx') return deadline(async signal => {
     await beforeInference?.(); await ensureLocalDocument(signal);
     const result = await abortable(() => chrome.runtime.sendMessage({target: 'purpose_validation', type, input}), signal);

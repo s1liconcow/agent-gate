@@ -71,14 +71,14 @@ test('expiry, disconnect and revocation discard pending local authorizations', a
     await assert.rejects(f.broker.read(f.id, request_id)); assert.deepEqual(await f.broker.pending(device), []);
   }
 });
-test('routine actions require confident local agreement; final order is denied outside checkout', async () => {
+test('legacy strict guardian retains confident agreement; final order is denied outside checkout', async () => {
   const f = await fixture('local'), view = await f.publish();
-  const action = {type: 'click', ref};
+  const action = {type: 'click', ref}, {engagement, ...legacy} = f.task;
   const input = {within_purpose: true, decision: 'allow', effect: 'other', payment_cents: 0, confidence: .99};
-  assert.equal(checkedActionAssessment(f.task, view, action, input, input).decision, 'allow');
-  assert.equal(checkedActionAssessment(f.task, view, action, input, {...input, confidence: .97}).decision, 'confirm');
-  for (const uncertain of [{...input, within_purpose: false}, {...input, effect: 'payment', payment_cents: 2500}]) assert.equal(checkedActionAssessment(f.task, view, action, input, uncertain).decision, 'deny');
-  assert.equal(checkedActionAssessment(f.task, {...view, controls: [{...view.controls[0], label: 'Place order'}]}, action, input, input).decision, 'deny');
+  assert.equal(checkedActionAssessment(legacy, view, action, input, input).decision, 'allow');
+  assert.equal(checkedActionAssessment(legacy, view, action, input, {...input, confidence: .97}).decision, 'confirm');
+  for (const uncertain of [{...input, within_purpose: false}, {...input, effect: 'payment', payment_cents: 2500}]) assert.equal(checkedActionAssessment(legacy, view, action, input, uncertain).decision, 'deny');
+  assert.equal(checkedActionAssessment(legacy, {...view, controls: [{...view.controls[0], label: 'Place order'}]}, action, input, input).decision, 'deny');
   const proposed = await f.engine.propose(f.id, {action, view_digest: (await f.engine.get(f.id)).view_digest, idempotency_key: 'add-to-cart'});
   const pending = (await f.engine.get(f.id)).pending;
   const response = await f.reply('check_action', {task: f.task, view, action, staged: [], submit: false}, assessment);
@@ -109,7 +109,7 @@ test('full cart review reconciles every item and exact amount; checkout approval
 test('strict result contract refuses uncertainty and private fills before relay', async () => {
   const f = await fixture(), view = {origin, text: '', controls: [{ref, label: 'Search products', role: 'field', approval: 'per_action'}]};
   for (const value of ['4242424242424242', 'secret: token']) assert.throws(() => classifierInput('check_action', {task: f.task, view, action: {type: 'fill', ref, value}, staged: [{ref, label: 'Search products', value: ''}], submit: false}, f.task), {code: 'LOCAL_CLASSIFIER_REFUSED'});
-  for (const result of [{...assessment, confidence: .97}, {...assessment, effect: 'payment', payment_cents: 1}, {...assessment, extra: 'authority'}]) assert.throws(() => classifierResult('check_action', result, {}));
+  for (const result of [{...assessment, confidence: .97}, {...assessment, effect: 'payment', payment_cents: 1}, {...assessment, extra: 'authority'}]) assert.throws(() => classifierResult('check_action', result, {task: {}}));
 });
 test('housekeeping preserves a binding published while status reporting is pending', async () => {
   const state = {bindings: {}, agent_tabs: {}, capture_diagnostics: {}}, fresh = {view_digest: 'new-view', fills: {field: 'two blue mugs'}};

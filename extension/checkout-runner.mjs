@@ -4,6 +4,7 @@ import {sanitizeText} from './policy.mjs';
 import {localModel} from './model-host.mjs';
 import {deadline} from './deadline.mjs';
 import {evaluatePurchasePolicy, purchasePolicyChallenge} from './purchase-policy.mjs';
+import {purchaseAssessmentAllowed} from './purpose-engagement.mjs';
 
 export class CheckoutRunner {
   constructor({call, config, verifySession, model = localModel, recordings, api = globalThis.chrome}) { Object.assign(this, {call, config, verifySession, model, recordings, api}); this.busy = new Set(); }
@@ -53,7 +54,7 @@ export class CheckoutRunner {
     let classifierProof, purposeAssessment;
     if (packet.scope.purpose_guard) {
       const assessment = await this.model('check_purchase', {task: packet.scope, view: binding.view, action: {type: 'click', ref: request.submit_ref}, staged: stagedFields(binding.view, binding.fills || {}), review: snapshot.review}, {session_id: sessionId, beforeInference: () => this.authorize(packet, 'checkout_preparing')});
-      if (!['allow', 'confirm'].includes(assessment.decision) || assessment.effect !== 'payment' || assessment.payment_cents !== snapshot.total_cents) throw Object.assign(new Error(), {code: 'OUT_OF_SCOPE'});
+      if (!purchaseAssessmentAllowed(packet.scope, assessment, snapshot.review)) throw Object.assign(new Error(), {code: 'OUT_OF_SCOPE'});
       classifierProof = assessment.classifier_proof;
       purposeAssessment = Object.fromEntries(['decision', 'effect', 'payment_cents', 'confidence'].map(key => [key, assessment[key]]));
     }
