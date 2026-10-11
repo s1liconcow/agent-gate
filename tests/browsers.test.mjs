@@ -50,9 +50,11 @@ test('pairing validates its extension origin, requires an owner phone and bounds
   for(let n=0;n<7;n++) await f.browsers.create(input,extension,coordinator); await assert.rejects(f.browsers.create(input,extension,coordinator));
   f.advance(300001); await f.browsers.create(input,extension,coordinator); await f.db.delete('phone'); await assert.rejects(f.browsers.create(input,extension,coordinator));
 });
-test('a newly approved browser replaces the previous credential without allowing an old claim to return',async()=>{
+test('new browser pairing preserves existing connections and revocation affects only its credential',async()=>{
   const f=await fixture(); await f.browsers.approve(f.item.id,{receipt:f.receipt,envelope:f.envelope}); await f.browsers.claim(f.item.id,f.credential,extension);
   const credential='d'.repeat(64), next=await f.browsers.create({name:'Replacement Chrome',credential_hash:await digest(credential)},extension,coordinator), receipt=await f.sign(next.challenge);
   await f.browsers.approve(next.id,{receipt,envelope:await sealPairing(f.secret,next.challenge,f.publicKey,receipt)}); await f.browsers.authorize(f.credential,extension);
-  await f.browsers.claim(next.id,credential,extension); await assert.rejects(f.browsers.authorize(f.credential,extension)); await assert.rejects(f.browsers.claim(f.item.id,f.credential,extension)); assert.equal(await f.browsers.authorize(credential,extension),next.id);
+  assert.equal(next.challenge.replace_existing, false);
+  await f.browsers.claim(next.id,credential,extension); assert.equal(await f.browsers.authorize(f.credential,extension),f.item.id); assert.equal(await f.browsers.authorize(credential,extension),next.id);
+  await f.browsers.revoke(next.id); await assert.rejects(f.browsers.authorize(credential,extension)); assert.equal(await f.browsers.authorize(f.credential,extension),f.item.id);
 });

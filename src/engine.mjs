@@ -14,7 +14,8 @@ export class Engine {
     if (await this.db.get('phone')) fail('ALREADY_PAIRED', 'A phone is already paired. Reset the deployment to replace it.', 409);
     await this.db.put('phone', publicKey);
   }
-  async create(input, principal = 'cli', inference = null) {
+  async create(input, principal = 'cli', inference = null, browserId = null) {
+    if (Object.hasOwn(input || {}, 'browser_id')) fail('INVALID_SCOPE', 'The task browser is selected by the owner.');
     if (Object.hasOwn(input || {}, 'inference')) fail('INVALID_SCOPE', 'Inference is configured by the browser owner.');
     if (Object.hasOwn(input || {}, 'action_policy')) fail('INVALID_SCOPE', 'Communications and payments are selected by the owner during purpose approval.');
     if (Object.hasOwn(input || {}, 'engagement')) fail('INVALID_SCOPE', 'Engagement is selected by the browser owner.');
@@ -27,8 +28,8 @@ export class Engine {
       delete automatic.action_policy;
       automatic = {...automatic, interaction: automatic.disclosure === 'local_planner' ? 'local_gate' : 'automatic', engagement: authorization.challenge.mode};
     }
-    const task = scope({...automatic, ...(['local_planner', 'granular'].includes(automatic.disclosure) && inference ? {inference} : {})}), id = random();
-    const item = {id, task, principal, status: 'requested', created_at: this.now(), expires_at: this.now() + 900000, operations: 0, fills: {}, history: [], keys: {}};
+    const task = scope({...automatic, ...(['local_planner', 'granular'].includes(automatic.disclosure) && inference ? {inference} : {}), ...(browserId ? {browser_id: browserId} : {})}), id = random();
+    const item = {id, task, request_scope: input, principal, status: 'requested', created_at: this.now(), expires_at: this.now() + 900000, operations: 0, fills: {}, history: [], keys: {}};
     item.scope_digest = await digest(task);
     item.challenge = {version: 1, stage: 'session', session_id: id, nonce: random(), scope_digest: item.scope_digest, scope: task, expires_at: this.now() + task.ttl_seconds * 1000};
     item.expires_at = item.challenge.expires_at;
@@ -91,6 +92,8 @@ export class Engine {
     }
     const checkoutNext = item.checkout?.status === 'dispatched' ? 'The final order button was dispatched once. Verify the merchant confirmation before reporting purchase success; do not submit again.' : item.checkout?.status === 'uncertain' ? 'Checkout may have submitted. Verify the merchant order history or existing task tab before any new purchase; do not retry.' : item.checkout?.status === 'failed' ? ({CHECKOUT_UNSUPPORTED: 'The checkout requires owner completion in the existing task tab. Hosted payment frames, redirects and unknown totals are unsupported.', CHECKOUT_CHANGED: 'The cart, fields or total changed. Review the existing cart before a new checkout.', STALE_VIEW: 'The prepared checkout view changed. Review the existing cart before a new checkout.', OUT_OF_SCOPE: 'The checkout did not match the approved purchase purpose or website. Review the intended order.', BRIDGE_ERROR: 'AgentGate could not complete checkout. Check the existing task tab and merchant order history before another purchase.'}[item.checkout.code]) : null;
     return {id: item.id, status: item.status, goal: item.task.goal, disclosure:item.task.disclosure, expires_at: item.expires_at, operations_remaining: Math.max(0, 24 - item.operations),
+      ...(item.task.browser_id || item.browser_id ? {browser_id: item.task.browser_id || item.browser_id} : {}),
+      browser_selectable: ['requested', 'active'].includes(item.status) && item.operations === 0 && !item.checkout && !Object.keys(item.fills).length,
       ...(item.task.engagement ? {engagement: item.task.engagement, category: item.category} : {}),
       ...(item.task.interaction ? {interaction: item.task.interaction} : {}),
       ...(item.task.action_policy ? {action_policy: item.task.action_policy, payment_remaining_cents: Math.max(0, item.task.action_policy.payment_limit_cents - (item.payment_committed_cents || 0))} : {}),
@@ -123,6 +126,23 @@ export class Engine {
     item.task = scope({...item.task, action_policy: actionPolicy(input.action_policy)});
     item.scope_digest = await digest(item.task);
     item.challenge = {...item.challenge, nonce: random(), scope_digest: item.scope_digest, scope: item.task};
+    await this.save(item);
+    return {...this.public(item), scope: item.task, challenge: item.challenge};
+  }
+  async chooseBrowser(id, browserId, inference) {
+    const item = await this.get(id);
+    if (!this.public(item).browser_selectable) fail('SESSION_BUSY', 'Choose a browser before this task starts taking actions.', 409);
+    const {inference: oldInference, engagement, action_policy, browser_id, ...previous} = item.task;
+    const automatic = sessionDefaults(item.request_scope || previous, inference);
+    if (engagement && automatic.disclosure !== 'bounded') {
+      delete automatic.action_policy;
+      Object.assign(automatic, {engagement, interaction: automatic.disclosure === 'local_planner' ? 'local_gate' : 'automatic'});
+    }
+    item.task = scope({...automatic, ...(['local_planner', 'granular'].includes(automatic.disclosure) && inference ? {inference} : {}), browser_id: browserId});
+    item.browser_id = browserId; item.scope_digest = await digest(item.task);
+    item.challenge = {...item.challenge, nonce: random(), scope: item.task, scope_digest: item.scope_digest};
+    item.status = 'requested';
+    for (const key of ['session_receipt', 'view', 'view_digest', 'dom_request', 'dom_access', 'pending_read', 'read_challenge', 'runtime', 'disclosure_request']) delete item[key];
     await this.save(item);
     return {...this.public(item), scope: item.task, challenge: item.challenge};
   }

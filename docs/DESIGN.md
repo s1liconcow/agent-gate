@@ -11,3 +11,5 @@ Checkout approval shows the prepared order, merchant and exact USD total, follow
 Use **Share logins**, **Connect**, **Allow task**, **Open** and **Stop task** for everyday actions. Put connection identifiers, model settings and diagnostic data behind details. Settings use **Record only**, **Balanced** and **Careful** while retaining the existing policy behavior. Show shared apps by name and running tasks above past tasks.
 
 The browser page uses one column: connection and task controls first, Advanced settings last.
+
+The approval app shows cloud and local connections together under **Browsers**. Use **Default for new tasks** for the saved preference and **Browser for this task** on each task before actions begin. Cloud is the initial default. Local pairing preserves the cloud connection and shared logins.

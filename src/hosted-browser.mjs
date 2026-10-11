@@ -29,6 +29,7 @@ export class HostedBrowser {
   }
   async authorize(packet, status, expected) {
     const config = await this.config(expected);
+    if (packet.scope.browser_id && packet.scope.browser_id !== config.browser_id) fail('INFERENCE_NOT_APPROVED', 'This task belongs to another browser.', 403);
     if (packet.scope.inference && canonical(packet.scope.inference) !== canonical(config.inference)) fail('INFERENCE_CONFIG_CHANGED', 'The inference provider changed.', 403);
     await verifyBrowserSession(packet, config.phone_key, Date.now(), config.coordinator);
     const state = await this.snapshot(), item = state.sessions.find(session => session.id === (packet.session_id || packet.id));

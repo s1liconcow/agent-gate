@@ -26,7 +26,7 @@ export class Browsers {
     if ((await this.list()).filter(i => ['requested', 'approved'].includes(i.status)).length >= 8) fail('QUEUE_FULL', 'Too many pending browser pairings. Deny an old request or wait for expiry.', 429);
     const id = random(), expires_at = this.now() + 300000;
     const item = {id, name: text(input.name, 1, 80), extension_origin: extensionOrigin, credential_hash: input.credential_hash, status: 'requested', expires_at, pairing_expires_at: expires_at};
-    item.challenge = {version: 1, stage: 'browser_pairing', browser_id: id, nonce: random(), name: item.name, extension_origin: extensionOrigin, coordinator, credential_hash: input.credential_hash, connection_ttl_seconds: 90 * 86400, replace_existing: true, expires_at};
+    item.challenge = {version: 1, stage: 'browser_pairing', browser_id: id, nonce: random(), name: item.name, extension_origin: extensionOrigin, coordinator, credential_hash: input.credential_hash, connection_ttl_seconds: 90 * 86400, replace_existing: false, expires_at};
     if (this.loginSource) Object.assign(item.challenge, {stage: 'login_source_pairing', account_id: accountId, replace_existing: false});
     await this.save(item); return this.public(item);
   }
@@ -47,8 +47,6 @@ export class Browsers {
     await this.poll(id, credential, extensionOrigin); const item = await this.get(id);
     if (!['approved', 'active'].includes(item.status) || item.pairing_expires_at <= this.now()) fail('STALE_APPROVAL', 'Scan a fresh browser QR code and approve it on your phone.', 409);
     if (item.status === 'approved') {
-      // v1 controls one desktop. A newly approved browser replaces the old credential.
-      if (!this.loginSource) for (const other of await this.list()) if (other.status === 'active' && other.id !== id) await this.revoke(other.id);
       item.status = 'active'; item.expires_at = this.now() + item.challenge.connection_ttl_seconds * 1000; await this.save(item);
     }
     return this.public(item);

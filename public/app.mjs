@@ -22,6 +22,7 @@ function pendingCard(section, type, item, extra = {}) {
 }
 let device, refreshing = false, signing = false;
 let scannedBrowser, engagementDirty = false;
+let browserChoices = [], defaultBrowserDirty = false;
 const modeLabels = engagementLabels;
 function describeEngagement() {
   const index = Number($('engagementSlider').value), mode = engagementModes[index];
@@ -69,6 +70,40 @@ const el = (tag, content, className) => { const node = document.createElement(ta
 function detail(dl, label, content) { dl.append(el('dt', label), el('dd', content)); }
 function more(label, ...nodes) { const details = el('details'); details.append(el('summary', label), ...nodes); return details; }
 function button(label, handler, className = '') { const b = el('button', label, className); b.addEventListener('click', async () => { if (signing) return; signing = true; b.disabled = true; try { await handler(); } catch (error) { message(error.message, true); } finally { signing = false; b.disabled = false; await refresh(); } }); return b; }
+const browserLabel = item => item.kind === 'cloud' ? 'Cloud browser' : item.name + ' · Local';
+function browserOptions(select, selected) {
+  select.replaceChildren(...browserChoices.map(item => { const option = el('option', browserLabel(item)); option.value = item.id; return option; }));
+  select.value = selected;
+}
+function renderDefaultBrowser(selected) {
+  $('defaultBrowserForm').hidden = !browserChoices.length;
+  if (!defaultBrowserDirty) browserOptions($('defaultBrowser'), selected);
+}
+$('defaultBrowser').addEventListener('change', () => { defaultBrowserDirty = true; });
+$('defaultBrowserForm').addEventListener('submit', async event => {
+  event.preventDefault(); if (signing) return; signing = true; $('saveDefaultBrowser').disabled = true;
+  try { await api('owner/browsers/default', {browser_id: $('defaultBrowser').value}); defaultBrowserDirty = false; message('Default saved. Running tasks keep their browser.'); }
+  catch (error) { message(error.message, true); }
+  finally { signing = false; $('saveDefaultBrowser').disabled = false; await refresh(); }
+});
+function taskBrowser(item) {
+  const browser = browserChoices.find(browser => browser.id === item.browser_id);
+  if (!browser) return el('p', item.hosted ? 'Cloud browser' : 'Local browser', 'hint');
+  if (!item.browser_selectable && item.status !== 'requested') return el('p', browserLabel(browser), 'hint');
+  const label = el('label', 'Browser for this task'), select = el('select');
+  select.id = 'task-browser-' + item.id; label.htmlFor = select.id; browserOptions(select, browser.id); label.append(select);
+  select.addEventListener('change', async () => {
+    if (signing) { select.value = item.browser_id; return; }
+    signing = true; select.disabled = true; let selected = false;
+    try {
+      await api('owner/sessions/' + item.id + '/browser', {browser_id: select.value});
+      selected = true;
+      message('Browser selected. Review and allow this task.');
+    } catch (error) { select.value = item.browser_id; message(error.message, true); }
+    finally { signing = false; select.disabled = false; await refresh(); if (selected) approvalQueue.reviewUpdated('session:' + item.id); }
+  });
+  return label;
+}
 async function approveBrowser(item) {
   const c = pairingChallenge(item.challenge);
   const source = item.role === 'login_source';
@@ -83,7 +118,7 @@ function renderBrowsers(items, pending, source = false) {
   for (const item of items.filter(i => !['expired', 'revoked'].includes(i.status))) {
     const section = el('article', undefined, 'request');
     section.append(el('h3', item.status === 'requested' ? 'Connect ' + item.name : item.name, 'request-title'));
-    if (item.status === 'requested') section.append(el('p', source ? 'Share the logins you choose in Chrome. No further phone prompts.' : 'Let this browser run your assistant’s tasks. Replaces your connected desktop.', 'hint'));
+    if (item.status === 'requested') section.append(el('p', source ? 'Share the logins you choose in Chrome. No further phone prompts.' : 'Add this browser for tasks. Your cloud browser and shared logins stay connected.', 'hint'));
     const dl = el('dl'); detail(dl, 'Browser', item.name); detail(dl, 'Extension', item.extension_origin); detail(dl, 'Access', '90 days');
     section.append(more('Details', dl));
     const actions = el('div', undefined, 'actions');
@@ -140,18 +175,16 @@ function focusLinkedLogin() {
 }
 function openHostedLogin(id) { return openCloudView('owner/login-connections/' + id + '/live-view', {}); }
 function renderHosted(item, pending) {
-  $('hostedSection').hidden = !item.available;
-  if (item.enabled) $('device').insertBefore($('hostedSection'), $('connectorSection'));
-  else $('device').before($('hostedSection'));
+  $('hostedSection').hidden = !item.available && !browserChoices.length;
   const nodes = [];
   if (item.enabled) {
-    nodes.push(el('p', 'Ready for tasks.', 'hint'));
+    nodes.push(el('p', 'Connected · Shared logins available.', 'hint'));
     nodes.push(more('Manage browser', button('Disconnect and erase logins', () => api('owner/hosted-browser/disable', {}), 'danger')));
   } else if (item.challenge) {
     const c = hostedChallenge(item.challenge);
     if (c.account_id !== (account || 'owner') || c.coordinator !== location.origin + base) throw new Error('Hosted browser approval belongs to another account.');
     const section = el('article', undefined, 'request');
-    section.append(el('h3', 'Connect cloud browser', 'request-title'), el('p', 'Cloudflare runs this browser and stores its logins. Replaces your connected desktop.', 'hint'));
+    section.append(el('h3', 'Connect cloud browser', 'request-title'), el('p', 'Cloudflare runs this browser and stores its logins. Your local browsers stay connected.', 'hint'));
     const actions = el('div', undefined, 'actions');
     actions.append(button('Connect', async () => {
       if (remaining(c.expires_at) === 0) throw new Error('Request a fresh cloud browser approval.');
@@ -300,6 +333,7 @@ function render(items) {
     const labels = {requested: 'Needs permission', active: 'Running', awaiting_read: 'Share text?', checking_action: 'Checking', awaiting_action: 'Allow action?', executing: 'Working', checkout_preparing: 'Preparing order', awaiting_checkout: 'Place order?', checkout_executing: 'Placing order', expired: 'Expired', revoked: 'Stopped', closed: 'Finished'};
     phase.append(el('span', labels[item.status] || item.status), el('span', ['expired', 'revoked', 'closed'].includes(item.status) ? 'Access ended' : remaining(item.challenge?.expires_at || item.expires_at) + 's left'));
     section.append(phase, el('h3', item.goal, 'request-title'));
+    section.append(taskBrowser(item));
     if (item.engagement) section.append(el('p', modeLabels[engagementModes.indexOf(item.engagement)], 'hint'));
     if (item.audit?.length) {
       const audit = el('details', undefined, 'audit-events'); audit.append(el('summary', 'Activity'));
@@ -395,11 +429,14 @@ let lastRender = '';
 async function refresh() {
   if (!device || refreshing || signing) return; refreshing = true; $('refresh').disabled = true;
   try {
-    const [{sessions}, {connectors}, {browsers}, hosted, engagement, {sources}, {transfers}, {connections}] = await Promise.all([api('owner/sessions'), api('owner/connectors'), api('owner/browsers'), api('owner/hosted-browser'), api('owner/engagement'), api('owner/login-sources'), api('owner/login-transfers'), api('owner/login-connections')]);
+    const [{sessions}, {connectors}, browserState, hosted, engagement, {sources}, {transfers}, {connections}] = await Promise.all([api('owner/sessions'), api('owner/connectors'), api('owner/browsers'), api('owner/hosted-browser'), api('owner/engagement'), api('owner/login-sources'), api('owner/login-transfers'), api('owner/login-connections')]);
+    const {browsers} = browserState;
+    browserChoices = browserState.choices || [];
+    renderDefaultBrowser(browserState.default_browser_id);
     renderEngagement(engagement);
-    const signature = canonical([sessions, connectors, browsers, hosted, engagement, sources, transfers, connections, scannedBrowser?.id]);
+    const signature = canonical([sessions, connectors, browserState, hosted, engagement, sources, transfers, connections, scannedBrowser?.id]);
     if (signature !== lastRender) {
-      const pending = [...renderPart('sessions', sessions, () => render(sessions))];
+      const pending = [...renderPart('sessions', [sessions, browserChoices], () => render(sessions))];
       pending.push(...renderPart('connectors', connectors, () => { const rows = []; renderConnectors(connectors, rows); return rows; }));
       pending.push(...renderPart('browsers', [browsers, scannedBrowser?.id], () => { const rows = []; renderBrowsers(browsers, rows); return rows; }));
       pending.push(...renderPart('sources', [sources, scannedBrowser?.id], () => { const rows = []; renderBrowsers(sources, rows, true); return rows; }));

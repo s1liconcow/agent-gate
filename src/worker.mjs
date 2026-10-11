@@ -5,6 +5,7 @@ import {Engagement} from './engagement.mjs';
 import {ConnectionSetup} from './connection-setup.mjs';
 import {Connectors} from './connectors.mjs';
 import {Browsers} from './browsers.mjs';
+import {BrowserRouting} from './browser-routing.mjs';
 import {registerInference, configuredInference} from './inference.mjs';
 import {withOAuth, oauthRoute} from './oauth.mjs';
 import {assetResponse} from './generated-assets.mjs';
@@ -46,13 +47,15 @@ async function body(request) {
 export class Gate extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env); this.engine = new Engine(ctx.storage); this.engagement = new Engagement(ctx.storage); this.connectors = new Connectors(ctx.storage); this.browsers = new Browsers(ctx.storage); this.tickets = new Map();
+    this.browserRouting = new BrowserRouting(ctx.storage);
     this.hostedConsent = new HostedConsent(ctx.storage, {model: hostedModel, available: Boolean(env.BROWSER && env.HOSTED_MODELS && hostedModel)});
     this.connectionSetup = new ConnectionSetup(ctx.storage, {model: hostedModel, available: Boolean(env.BROWSER && env.HOSTED_MODELS && hostedModel)});
     this.loginSources = new Browsers(ctx.storage, Date.now, {loginSource: true});
     this.loginSync = new LoginSync(ctx.storage, this.hostedConsent, this.loginSources);
     this.hosted = new HostedBrowser({storage: ctx.storage, consent: this.hostedConsent, factory: cloudflareBrowserFactory(env.BROWSER), scripts: hostedScripts,
       call: (path, data) => this.hostedCall(path, data), snapshot: () => this.hostedSnapshot(), reset: () => this.hostedLock(async () => {
-        for (const item of await this.engine.list()) if (item.status === 'active') {
+        const hosted = await this.hostedConsent.current();
+        for (const item of await this.engine.list()) if (item.status === 'active' && hosted && await this.browserRouting.owns(item, hosted.browser_id)) {
           if (Object.keys(item.fills).length) { await this.engine.end(item.id); continue; }
           delete item.view; delete item.view_digest; delete item.dom_access;
           item.runtime = {state: 'starting', code: null, updated_at: Date.now()}; await this.engine.save(item);
@@ -64,16 +67,29 @@ export class Gate extends DurableObject {
     if (answer.error) throw new GateError(answer.error.code, answer.error.message, answer.error.status);
     return answer.result;
   }
-  hostedSnapshot() { return this.hostedLock(async () => ({
-    sessions: (await this.engine.list()).map(item => ({...this.engine.public(item), scope: item.task, session_receipt: item.session_receipt})),
-    commands: await this.engine.commands(), checks: await this.engine.checks(), checkouts: await this.engine.checkouts()
-  })); }
+  async browserTasks(browserId) {
+    const items = await this.engine.list(), sessions = [];
+    for (const item of items) if (await this.browserRouting.owns(item, browserId)) sessions.push(item);
+    const ids = new Set(sessions.map(item => item.id));
+    return {sessions, commands: (await this.engine.commands()).filter(item => ids.has(item.session_id)),
+      checks: (await this.engine.checks()).filter(item => ids.has(item.session_id)), checkouts: (await this.engine.checkouts()).filter(item => ids.has(item.session_id))};
+  }
+  hostedSnapshot() { return this.hostedLock(async () => {
+    const current = await this.hostedConsent.current();
+    const state = await this.browserTasks(current?.browser_id);
+    return {...state, sessions: state.sessions.map(item => ({...this.engine.public(item), scope: item.task, session_receipt: item.session_receipt}))};
+  }); }
+  async requireTaskBrowser(sessionId, browserId) {
+    if (!await this.browserRouting.owns(await this.engine.get(sessionId), browserId)) fail('NOT_FOUND', 'Unknown task for this browser.', 404);
+  }
   hostedCall(path, data) { return this.hostedLock(async () => {
-    if (!await this.hostedConsent.current()) fail('INFERENCE_NOT_APPROVED', 'Hosted browser access ended.', 403);
+    const current = await this.hostedConsent.current();
+    if (!current) fail('INFERENCE_NOT_APPROVED', 'Hosted browser access ended.', 403);
     await this.engine.sweep();
-    if (path === 'sessions' && data === undefined) return {sessions: (await this.engine.list()).map(item => ({...this.engine.public(item), scope: item.task, session_receipt: item.session_receipt}))};
+    if (path === 'sessions' && data === undefined) return {sessions: (await this.browserTasks(current.browser_id)).sessions.map(item => ({...this.engine.public(item), scope: item.task, session_receipt: item.session_receipt}))};
     const route = path.match(/^sessions\/([a-f0-9]{32})\/(view|dom|runtime|check|result|checkout-prepare|checkout-result)$/);
     if (!route || data === undefined) fail('NOT_FOUND', 'Unknown hosted browser operation.', 404);
+    await this.requireTaskBrowser(route[1], current.browser_id);
     const methods = {view: 'publishView', dom: 'publishDOM', runtime: 'runtime', check: 'checkAction', result: 'result', 'checkout-prepare': 'prepareCheckout', 'checkout-result': 'checkoutResult'};
     const answer = await this.engine[methods[route[2]]](route[1], data);
     if (['awaiting_action', 'awaiting_checkout', 'awaiting_read'].includes(answer.status)) this.ctx.waitUntil(this.notify());
@@ -89,16 +105,20 @@ export class Gate extends DurableObject {
         catch (error) {
           const code = ['MODEL_TIMEOUT', 'BROWSER_RATE_LIMITED'].includes(error.code) ? error.code : 'BROWSER_UNRESPONSIVE';
           if (await this.hostedConsent.current()) await this.hostedLock(async () => {
-            for (const item of await this.engine.list()) if (item.status === 'active') await this.engine.runtime(item.id, {state: 'blocked', code, ...(error.browser_limit ? {browser_limit: error.browser_limit} : {})});
+            const current = await this.hostedConsent.current();
+            for (const item of (await this.browserTasks(current.browser_id)).sessions) if (item.status === 'active') await this.engine.runtime(item.id, {state: 'blocked', code, ...(error.browser_limit ? {browser_limit: error.browser_limit} : {})});
           });
         }
       } while (this.hostedAgain);
     })().finally(() => { this.hostedWork = null; });
     this.ctx.waitUntil(this.hostedWork);
   }
-  async endHostedTasks() {
-    for (const item of await this.engine.list()) if (!['expired', 'revoked', 'closed'].includes(item.status)) await this.engine.end(item.id);
+  async endBrowserTasks(browserId) {
+    if (!browserId) return;
+    for (const item of (await this.browserTasks(browserId)).sessions) if (!['expired', 'revoked', 'closed'].includes(item.status)) await this.engine.end(item.id);
   }
+  async endHostedTasks(browserId) { await this.endBrowserTasks(browserId || (await this.hostedConsent.current())?.browser_id); }
+  async endAllTasks() { for (const item of await this.engine.list()) if (!['expired', 'revoked', 'closed'].includes(item.status)) await this.engine.end(item.id); }
   stopHosted(item) { if (item) this.ctx.waitUntil(this.hosted.stop(item)); }
 
   async initializeAccount(id, pairingHash) {
@@ -121,15 +141,15 @@ export class Gate extends DurableObject {
   validateConnectionSetup(id, receipts) { return this.locked(async () => { await this.connectionSetup.verify(id, receipts); return {valid: true}; }); }
   completeConnectionSetup(id, receipts) { return this.locked(async () => {
     const result = await this.connectionSetup.complete(id, receipts);
-    await this.endHostedTasks();
+    await this.endAllTasks();
     if (result.hosted) await this.activateHosted(result.hosted);
     await this.ctx.storage.setAlarm(Date.now() + 30000);
     return {coordinator: result.coordinator};
   }); }
   async activateHosted(item, old) {
+    await this.browserRouting.pinSessions(await this.engine.list());
     this.stopHosted(old);
-    for (const browser of await this.browsers.list()) if (browser.status === 'active' && browser.id !== item.browser_id) await this.browsers.revoke(browser.id);
-    for (const ws of this.ctx.getWebSockets()) ws.close(4001, 'Cloud browser enabled');
+    if (old && old.browser_id !== item.browser_id) await this.browsers.revoke(old.browser_id);
     await this.ctx.storage.put('browser:' + item.browser_id, {id: item.browser_id, kind: 'hosted', name: 'Cloud browser', extension_origin: null, credential_hash: null, status: 'active', expires_at: item.expires_at});
     await this.ctx.storage.put('legacy_bridge_retired', true);
     await registerInference(this.ctx.storage, item.browser_id, {inference: item.inference});
@@ -141,7 +161,7 @@ export class Gate extends DurableObject {
     if(data!==undefined)await this.dispatch(); return answer;
   }
   async agentCall(path, data, principal = 'cli') {
-    if (path === 'sessions' && data !== undefined) { const result = await this.engine.create(data, principal, await configuredInference(this.ctx.storage)); if (result.status === 'requested') this.ctx.waitUntil(this.notify()); return result; }
+    if (path === 'sessions' && data !== undefined) { const browser = await this.browserRouting.current(); const result = await this.engine.create(data, principal, await configuredInference(this.ctx.storage, browser?.id), browser?.id); if (result.status === 'requested') this.ctx.waitUntil(this.notify()); return result; }
     const match = path.match(/^sessions\/([a-f0-9]{32})(?:\/(actions|close|revoke|disclosure|dom|checkout))?$/);
     if (!match) fail('NOT_FOUND', 'Unknown assistant endpoint.', 404);
     const [, id, operation] = match, item = await this.engine.get(id);
@@ -272,15 +292,11 @@ export class Gate extends DurableObject {
       const credential = request.headers.get('Authorization')?.replace(/^Bearer /, '');
       if (!pairing[2] && method === 'GET') return json(await this.browsers.poll(pairing[1], credential, extensionOrigin));
       if (pairing[2] === 'claim' && method === 'POST') {
-        exact(await body(request), []); const before = await this.browsers.get(pairing[1]);
-        const replacesBrowser = before.status === 'approved' && ((await this.browsers.list()).some(i => i.status === 'active' && i.id !== before.id) || this.ctx.getWebSockets().some(ws => ws.readyState === 1 && !this.ctx.getTags(ws).includes('browser:' + before.id)));
+        exact(await body(request), []);
+        await this.browserRouting.pinSessions(await this.engine.list());
         const result = await this.browsers.claim(pairing[1], credential, extensionOrigin);
-        const oldHosted = await this.hostedConsent.disable();
-        if (oldHosted) await this.endHostedTasks();
-        this.stopHosted(oldHosted);
-        if (replacesBrowser) for (const item of await this.engine.list()) if (!['expired', 'revoked', 'closed'].includes(item.status)) await this.engine.end(item.id);
         await this.ctx.storage.put('legacy_bridge_retired', true);
-        for (const ws of this.ctx.getWebSockets()) if (!this.ctx.getTags(ws).includes('browser:' + before.id)) ws.close(4001, 'Browser replaced through phone-approved QR pairing');
+        for (const ws of this.ctx.getWebSockets('browser:legacy')) ws.close(4001, 'Connect the browser through QR pairing');
         return json(result);
       }
       fail('NOT_FOUND', 'Unknown pairing operation.', 404);
@@ -318,7 +334,7 @@ export class Gate extends DurableObject {
       }
       if (path === '/api/owner/engagement/approve' && method === 'POST') {
         const result = await this.engagement.approve(await body(request));
-        await this.endHostedTasks();
+        await this.endAllTasks();
         return json(result);
       }
       if (path === '/api/owner/hosted-browser' && method === 'GET') return json(await this.hostedConsent.status());
@@ -335,7 +351,7 @@ export class Gate extends DurableObject {
       if (path === '/api/owner/hosted-browser/approve' && method === 'POST') {
         const old = await this.hostedConsent.current(), account = await this.ctx.storage.get('account_id') || 'owner';
         const item = await this.hostedConsent.approve(await body(request), account, account === 'owner' ? url.origin : url.origin + '/u/' + account);
-        await this.endHostedTasks(); await this.activateHosted(item, old);
+        await this.endHostedTasks(old?.browser_id); await this.activateHosted(item, old);
         await this.ctx.storage.setAlarm(Date.now() + 30000);
         return json(await this.hostedConsent.status());
       }
@@ -348,17 +364,23 @@ export class Gate extends DurableObject {
       }
       if (path === '/api/owner/hosted-browser/disable' && method === 'POST') {
         exact(await body(request), []); const item = await this.hostedConsent.disable();
-        if (item) { await this.browsers.revoke(item.browser_id); await this.endHostedTasks(); this.stopHosted(item); }
+        if (item) { await this.browsers.revoke(item.browser_id); await this.endHostedTasks(item.browser_id); this.stopHosted(item); }
         return json(await this.hostedConsent.status());
       }
-      if (path === '/api/owner/browsers' && method === 'GET') return json({browsers: (await this.browsers.list()).filter(item => item.kind !== 'hosted').map(item => this.browsers.public(item))});
+      if (path === '/api/owner/browsers' && method === 'GET') return json({browsers: (await this.browsers.list()).filter(item => item.kind !== 'hosted').map(item => this.browsers.public(item)), choices: await this.browserRouting.choices(), default_browser_id: (await this.browserRouting.current())?.id || null});
+      if (path === '/api/owner/browsers/default' && method === 'POST') {
+        const input = await body(request); exact(input, ['browser_id']);
+        await this.browserRouting.pinSessions(await this.engine.list());
+        await this.browserRouting.setDefault(input.browser_id);
+        return json({default_browser_id: input.browser_id});
+      }
       const browser = path.match(/^\/api\/owner\/browsers\/([a-f0-9]{32})\/(approve|revoke)$/);
       if (browser && method === 'POST') {
         if (browser[2] === 'approve') return json(await this.browsers.approve(browser[1], await body(request)));
         exact(await body(request), []); const sockets = this.ctx.getWebSockets('browser:' + browser[1]), result = await this.browsers.revoke(browser[1]);
         const hosted = await this.hostedConsent.current();
-        if (hosted?.browser_id === browser[1]) { await this.hostedConsent.disable(); await this.endHostedTasks(); this.stopHosted(hosted); }
-        if (sockets.some(ws => ws.readyState === 1)) for (const item of await this.engine.list()) if (!['expired', 'revoked', 'closed'].includes(item.status)) await this.engine.end(item.id);
+        if (hosted?.browser_id === browser[1]) { await this.hostedConsent.disable(); this.stopHosted(hosted); }
+        await this.endBrowserTasks(browser[1]);
         for (const ws of sockets) ws.close(4001, 'Browser revoked');
         return json(result);
       }
@@ -371,8 +393,8 @@ export class Gate extends DurableObject {
         return json(result);
       }
       if (path === '/api/owner/sessions' && method === 'GET') {
-        const items = await this.engine.list(), hosted = Boolean(await this.hostedConsent.current());
-        return json({sessions: items.map(item => ({...this.engine.public(item), scope: item.task, hosted, audit: item.history.filter(event => ['session', 'action_check', 'read_check', 'read_approval'].includes(event.type)), read_preview: item.status === 'awaiting_read' ? item.pending_read?.items : undefined, challenge: item.status === 'requested' ? item.challenge : item.status === 'awaiting_action' ? item.action_challenge : item.status === 'awaiting_read' ? item.read_challenge : item.status === 'awaiting_checkout' ? item.checkout.challenge : null}))});
+        const items = await this.engine.list(), hosted = await this.hostedConsent.current();
+        return json({sessions: await Promise.all(items.map(async item => ({...this.engine.public(item), scope: item.task, browser_id: await this.browserRouting.sessionBrowser(item), hosted: Boolean(hosted && await this.browserRouting.owns(item, hosted.browser_id)), audit: item.history.filter(event => ['session', 'action_check', 'read_check', 'read_approval'].includes(event.type)), read_preview: item.status === 'awaiting_read' ? item.pending_read?.items : undefined, challenge: item.status === 'requested' ? item.challenge : item.status === 'awaiting_action' ? item.action_challenge : item.status === 'awaiting_read' ? item.read_challenge : item.status === 'awaiting_checkout' ? item.checkout.challenge : null})))});
       }
       if (path === '/api/owner/push-key' && method === 'GET') return json({public_key: this.env.VAPID_PUBLIC_KEY || null});
       if (path === '/api/owner/push' && method === 'POST') {
@@ -381,8 +403,12 @@ export class Gate extends DurableObject {
         if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password || endpoint.port || !['fcm.googleapis.com', 'updates.push.services.mozilla.com', 'web.push.apple.com'].includes(endpoint.hostname) || input.endpoint.length > 2000 || !/^[A-Za-z0-9_-]{80,100}$/.test(input.keys.p256dh) || !/^[A-Za-z0-9_-]{20,30}$/.test(input.keys.auth)) fail('INVALID_PUSH', 'Unsupported push subscription.');
         await this.ctx.storage.put('push', input); return json({subscribed: true});
       }
-      const route = path.match(/^\/api\/owner\/sessions\/([a-f0-9]{32})\/(approve|revoke|policy)$/);
+      const route = path.match(/^\/api\/owner\/sessions\/([a-f0-9]{32})\/(approve|revoke|policy|browser)$/);
       if (route && method === 'POST') {
+        if (route[2] === 'browser') {
+          const input = await body(request); exact(input, ['browser_id']); await this.browserRouting.select(input.browser_id);
+          return json(await this.engine.chooseBrowser(route[1], input.browser_id, await configuredInference(this.ctx.storage, input.browser_id)));
+        }
         if (route[2] === 'policy') return json(await this.engine.chooseActionPolicy(route[1], await body(request)));
         if (route[2] === 'revoke') { exact(await body(request), []); return json(await this.engine.end(route[1])); }
         const item = await this.engine.get(route[1]), receipt = await body(request);
@@ -390,16 +416,17 @@ export class Gate extends DurableObject {
       }
     }
     if (role === 'bridge') {
-      if (path === '/api/bridge/inference' && method === 'POST') return json(await registerInference(this.ctx.storage, browserId, await body(request)));
+      if (path === '/api/bridge/inference' && method === 'POST') { await this.browserRouting.pinSessions(await this.engine.list()); return json(await registerInference(this.ctx.storage, browserId, await body(request))); }
       if (path === '/api/bridge/ticket' && method === 'POST') {
         exact(await body(request), []); const ticket = random();
         for (const [key, item] of this.tickets) if (item.expires_at <= Date.now()) this.tickets.delete(key);
         if (this.tickets.size >= 16) fail('TOO_MANY_CONNECTIONS', 'Too many bridge connection requests.', 429);
         this.tickets.set(ticket, {expires_at: Date.now() + 30000, browser_id: browserId, extension_origin: browserOrigin(request)}); return json({ticket});
       }
-      if (path === '/api/bridge/sessions' && method === 'GET') return json({sessions: (await this.engine.list()).filter(i => ['active', 'checking_action', 'awaiting_action', 'awaiting_read', 'executing', 'checkout_preparing', 'awaiting_checkout', 'checkout_executing'].includes(i.status)).map(i => ({...this.engine.public(i), scope: i.task, session_receipt: i.session_receipt}))});
+      if (path === '/api/bridge/sessions' && method === 'GET') return json({sessions: (await this.browserTasks(browserId)).sessions.filter(i => ['active', 'checking_action', 'awaiting_action', 'awaiting_read', 'executing', 'checkout_preparing', 'awaiting_checkout', 'checkout_executing'].includes(i.status)).map(i => ({...this.engine.public(i), scope: i.task, session_receipt: i.session_receipt}))});
       const route = path.match(/^\/api\/bridge\/sessions\/([a-f0-9]{32})\/(view|check|runtime|dom|checkout-prepare|checkout-result)$/);
       if (route && method === 'POST') {
+        await this.requireTaskBrowser(route[1], browserId);
         const input = await body(request);
         if (route[2] === 'view') return json(await this.engine.publishView(route[1], input));
         if (route[2] === 'dom') { const result = await this.engine.publishDOM(route[1], input); if (result.status === 'awaiting_read') this.ctx.waitUntil(this.notify()); return json(result); }
@@ -421,7 +448,7 @@ export class Gate extends DurableObject {
     if (!item || item.expires_at <= Date.now() || request.headers.get('Upgrade') !== 'websocket' || requestOrigin !== item.extension_origin) fail('UNAUTHORIZED', 'Request a fresh single-use bridge ticket.', 403);
     if (item.browser_id === 'legacy') { if (await this.ctx.storage.get('account_id') || await this.ctx.storage.get('legacy_bridge_retired')) fail('UNAUTHORIZED', 'Connect the browser through QR pairing.', 403); }
     else if ((await this.browsers.get(item.browser_id)).status !== 'active') fail('UNAUTHORIZED', 'This browser connection has ended.', 403);
-    for (const old of this.ctx.getWebSockets()) old.close(1000, 'Bridge replaced');
+    for (const old of this.ctx.getWebSockets('browser:' + item.browser_id)) old.close(1000, 'Bridge reconnected');
     const [client, server] = Object.values(new WebSocketPair()); this.ctx.acceptWebSocket(server, ['browser:' + item.browser_id]);
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
     return new Response(null, {status: 101, webSocket: client, headers: {'Sec-WebSocket-Protocol': protocol}});
@@ -432,7 +459,7 @@ export class Gate extends DurableObject {
       if (typeof message !== 'string' || message.length > 1000) return ws.close(1008, 'Invalid message');
       if (message === 'ready') { await this.dispatch(); return; }
       const input = JSON.parse(message); exact(input, ['session_id', 'result']);
-      const accepted = await this.ctx.blockConcurrencyWhile(async () => { try { await this.engine.result(input.session_id, input.result); return true; } catch { return false; } });
+      const accepted = await this.ctx.blockConcurrencyWhile(async () => { try { await this.requireTaskBrowser(input.session_id, this.ctx.getTags(ws).find(tag => tag.startsWith('browser:')).slice(8)); await this.engine.result(input.session_id, input.result); return true; } catch { return false; } });
       if (!accepted) { ws.send(JSON.stringify({error: 'RESULT_REJECTED'})); return; }
       ws.send(JSON.stringify({ack: input.result.command_id}));
     } catch { ws.send(JSON.stringify({error: 'RESULT_REJECTED'})); }
@@ -442,9 +469,10 @@ export class Gate extends DurableObject {
     const sockets = [];
     for (const ws of this.ctx.getWebSockets()) if (ws.readyState === 1) { if (await this.socketAllowed(ws)) sockets.push(ws); else ws.close(4001, 'Browser connection ended'); }
     if (!sockets.length) return;
-    const commands = await this.engine.commands(), checks = await this.engine.checks(), checkouts = await this.engine.checkouts();
-    const sessions = (await this.engine.list()).map(i => ({id: i.id, status: i.status}));
-    for (const ws of sockets) { try { ws.send(JSON.stringify({sessions, commands, checks, checkouts})); } catch { /* closed socket */ } }
+    for (const ws of sockets) {
+      const browserId = this.ctx.getTags(ws).find(tag => tag.startsWith('browser:')).slice(8), state = await this.browserTasks(browserId);
+      try { ws.send(JSON.stringify({...state, sessions: state.sessions.map(item => ({id: item.id, status: item.status}))})); } catch { /* closed socket */ }
+    }
   }
   async socketAllowed(ws) {
     const tag = this.ctx.getTags(ws).find(t => t.startsWith('browser:'));
@@ -469,7 +497,7 @@ export class Gate extends DurableObject {
       const item = await this.ctx.storage.get('hosted:consent');
       if (item && item.expires_at <= Date.now()) {
         await this.hostedConsent.disable(); await this.browsers.revoke(item.browser_id);
-        await this.endHostedTasks(); this.stopHosted(item);
+        await this.endHostedTasks(item.browser_id); this.stopHosted(item);
       }
     });
     await this.dispatch(); await this.ctx.storage.setAlarm(Date.now() + 30000);

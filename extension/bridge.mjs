@@ -77,7 +77,9 @@ async function pairingStatus() {
   return {status: 'paired', fingerprint: (await digest(phone_key)).slice(0, 24), name: pending.item.name};
 }
 async function verifySession(packet, publicKey) {
-  const c = await verifySessionAuthority(packet, publicKey, {expectedCoordinator: (await config())?.url});
+  const settings = await config();
+  const c = await verifySessionAuthority(packet, publicKey, {expectedCoordinator: settings?.url});
+  if (packet.scope.browser_id && packet.scope.browser_id !== settings?.browser_id) throw new Error('This task belongs to another browser.');
   const previous = leases.get(c.session_id);
   if (!previous) leases.set(c.session_id, {at: performance.now(), duration: Math.max(0, c.expires_at - Date.now())});
   else if (performance.now() - previous.at >= previous.duration) throw new Error('The local session lease expired.');

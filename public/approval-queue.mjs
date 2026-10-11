@@ -84,11 +84,14 @@ export class ApprovalQueue {
     warning.className = 'approval-changed'; text.textContent = 'This approval changed. Review the updated request before confirming.';
     button.type = 'button'; button.className = 'secondary'; button.textContent = 'Review updated approval';
     button.addEventListener('click', () => {
-      const updated = this.cards.get(row.key)?.updated; if (!updated) return;
-      this.cards.set(row.key, this.prepare(updated)); row.node.remove(); this.deferred = true;
-      setTimeout(() => { if (!this.pressing.size) { this.deferred = false; this.present(this.rows); this.heading.focus({preventScroll: true}); } }, 0);
+      this.reviewUpdated(row.key);
     });
     warning.append(text, button); row.review.prepend(warning); row.warning = warning;
+  }
+  reviewUpdated(key) {
+    const row = this.cards.get(key), updated = row?.updated; if (!updated) return;
+    this.cards.set(key, this.prepare(updated)); row.node.remove(); this.deferred = true;
+    setTimeout(() => { if (!this.pressing.size) { this.deferred = false; this.present(this.rows); this.heading.focus({preventScroll: true}); } }, 0);
   }
   show(key) {
     this.selected = key;

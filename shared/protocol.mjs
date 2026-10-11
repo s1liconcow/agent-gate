@@ -47,7 +47,7 @@ export function coordinator(value) {
   return base + (url.pathname === '/' ? '' : url.pathname);
 }
 export function scope(value) {
-  exact(value, ['goal', 'origins', 'permissions', 'ttl_seconds', ...['disclosure', 'interaction', 'start_url', 'inference','read_grants', 'action_policy', 'engagement'].filter(key => Object.hasOwn(value || {}, key))]);
+  exact(value, ['goal', 'origins', 'permissions', 'ttl_seconds', ...['disclosure', 'interaction', 'start_url', 'inference','read_grants', 'action_policy', 'engagement', 'browser_id'].filter(key => Object.hasOwn(value || {}, key))]);
   const disclosure = value.disclosure === undefined ? 'local_planner' : value.disclosure;
   if (!['local_planner', 'granular','bounded'].includes(disclosure)) fail('INVALID_SCOPE', 'Choose automatic local_planner, granular or bounded disclosure.');
   if (value.interaction !== undefined && !['automatic', 'local_gate', 'every_action'].includes(value.interaction)) fail('INVALID_SCOPE', 'Choose automatic actions, local purpose checks with confirmation, or approval for every action.');
@@ -56,6 +56,10 @@ export function scope(value) {
   if (!Array.isArray(value.permissions) || value.permissions.length < 1 || value.permissions.some(x => !['read', 'fill', 'click', 'navigate'].includes(x))) fail('INVALID_SCOPE', 'Permissions are read, fill, click and navigate.');
   if (!Number.isInteger(value.ttl_seconds) || value.ttl_seconds < 60 || value.ttl_seconds > 600) fail('INVALID_SCOPE', 'Session duration must be 60 to 600 seconds.');
   const task = {goal: text(value.goal, 8), origins: [...new Set(value.origins.map(origin))], permissions: [...new Set(value.permissions)].sort(), ttl_seconds: value.ttl_seconds, disclosure, ...(value.interaction ? {interaction: value.interaction} : {})};
+  if (value.browser_id !== undefined) {
+    if (!/^[a-f0-9]{32}$/.test(value.browser_id)) fail('INVALID_SCOPE', 'Select a connected task browser.');
+    task.browser_id = value.browser_id;
+  }
   if (value.engagement !== undefined) {
     if (!['AUDIT_ONLY', 'AUTO_APPROVE', 'AGGRESSIVE'].includes(value.engagement) || value.action_policy || disclosure === 'bounded' || value.interaction !== (disclosure === 'local_planner' ? 'local_gate' : 'automatic')) fail('INVALID_SCOPE', 'Engagement is selected by the owner for model-classified sessions.');
     task.engagement = value.engagement;
