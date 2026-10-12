@@ -1,4 +1,4 @@
-// Chrome's small browser surface as used by AutomaticBrowser and CheckoutRunner.
+// Chrome's small browser surface as used by AutomaticBrowser.
 // This object is per Gate execution; no tenant data lives in module globals.
 export function hostedAPI(adapter, store, privateSession = new Map()) {
   const area = namespace => ({
@@ -24,6 +24,7 @@ export function hostedAPI(adapter, store, privateSession = new Map()) {
     permissions: {contains: async () => true},
     tabs: {
       get: id => adapter.tab(id),
+      remove: id => adapter.closeTab(id),
       create: ({url}) => adapter.createTab(url),
       update: (id, {url}) => adapter.navigate(id, url),
       sendMessage: (id, message) => adapter.message(id, message)

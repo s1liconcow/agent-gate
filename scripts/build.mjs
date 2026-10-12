@@ -7,14 +7,13 @@ import {assetSource} from './assets.mjs';
 import {buildPurposeEngine, purposeProtocol} from './purpose-bundle.mjs';
 import {buildHosted} from './build-hosted.mjs';
 const root = new URL('../', import.meta.url);
+// Retire generated purchase modules so an old local build cannot repack them.
+for(const directory of ['extension','public'])for(const name of ['checkout.mjs','checkout-review.mjs','purchase-boundary.mjs','purchase-policy.mjs'])await rm(new URL(directory+'/'+name,root),{force:true});
 const purpose = await buildPurposeEngine(fileURLToPath(root));
 await buildHosted(fileURLToPath(root), purpose);
 const protocol = await readFile(new URL('shared/protocol.mjs', root), 'utf8');
 const localPurpose = (await readFile(new URL('shared/local-purpose.mjs', root), 'utf8')).replaceAll("'../extension/", "'./");
 await writeFile(new URL('extension/local-purpose.mjs', root), localPurpose);
-for (const destination of ['public/checkout-review.mjs', 'extension/checkout-review.mjs']) await copyFile(new URL('shared/checkout-review.mjs', root), new URL(destination, root));
-for (const destination of ['public/purchase-boundary.mjs', 'extension/purchase-boundary.mjs']) await copyFile(new URL('shared/purchase-boundary.mjs', root), new URL(destination, root));
-for (const destination of ['public/purchase-policy.mjs', 'extension/purchase-policy.mjs']) await copyFile(new URL('shared/purchase-policy.mjs', root), new URL(destination, root));
 for (const destination of ['public/purpose-engagement.mjs', 'extension/purpose-engagement.mjs']) await copyFile(new URL('shared/purpose-engagement.mjs', root), new URL(destination, root));
 await copyFile(new URL('shared/policy.mjs', root), new URL('public/policy.mjs', root));
 await writeFile(new URL('public/protocol.mjs', root), protocol);
@@ -25,7 +24,6 @@ for (const destination of ['public/read-grants.mjs', 'extension/read-grants.mjs'
 await build({entryPoints: [fileURLToPath(new URL('shared/xpath.mjs', root))], bundle: true, format: 'iife', globalName: 'AgentGateXPath', platform: 'browser', outfile: fileURLToPath(new URL('extension/xpath.js', root))});
 for (const destination of ['public/browser-pairing.mjs', 'extension/browser-pairing.mjs']) await copyFile(new URL('shared/browser-pairing.mjs', root), new URL(destination, root));
 for (const destination of ['public/login-sync-protocol.mjs', 'extension/login-sync-protocol.mjs']) await copyFile(new URL('shared/login-sync.mjs', root), new URL(destination, root));
-for (const destination of ['public/checkout.mjs', 'extension/checkout.mjs']) await copyFile(new URL('shared/checkout.mjs', root), new URL(destination, root));
 await build({stdin: {contents: "export {default} from 'qrcode';", resolveDir: fileURLToPath(root)}, bundle: true, format: 'esm', platform: 'browser', minify: true, outfile: fileURLToPath(new URL('extension/qr.mjs', root))});
 await copyFile(new URL('extension/qr.mjs', root), new URL('public/qr.mjs', root));
 await copyFile(new URL('shared/policy.mjs', root), new URL('extension/policy.mjs', root));

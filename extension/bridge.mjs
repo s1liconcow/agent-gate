@@ -7,7 +7,6 @@ import {initializeBrowser} from './browser-setup.mjs';
 import {purposeBrowserModel} from './purpose-browser-model.mjs';
 import {auditActiveSessions, auditConnectionEnded, auditEvent, auditPrune, auditRecording, auditStatuses} from './audit-log.mjs';
 import {SessionRecordings} from './session-recording.mjs';
-import {CheckoutRunner} from './checkout-runner.mjs';
 import {PairedLocalClassifier} from './local-classifier.mjs';
 const ready = Promise.all([chrome.storage.local.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'}), chrome.storage.session.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'}), chrome.storage.session.remove(['source', 'binding', 'snapshot'])]);
 let socket, heartbeat, reconnectTimer, setupPromise, setupCredential, queue = Promise.resolve(), pairingQueue = Promise.resolve();
@@ -15,7 +14,6 @@ const leases = new Map();
 const recordings = new SessionRecordings({audit: auditRecording});
 const automatic = new AutomaticBrowser({call, config, verifySession, audit: auditEvent, recordings});
 const classifier = new PairedLocalClassifier({call, config});
-const checkout = new CheckoutRunner({call, config, verifySession, recordings});
 async function config() { await ready; return (await chrome.storage.local.get('settings')).settings; }
 async function setupBrowser() {
   const settings = await config();
@@ -197,10 +195,8 @@ async function connect() {
         queue = queue.then(async () => {
           await classifier.tick(packet.classifier_requests || []);
           await automatic.stop(packet.sessions);
-          await checkout.stop(packet.sessions);
           for (const check of packet.checks || []) await automatic.check(check);
           for (const command of packet.commands || []) await execute(command);
-          for (const handoff of packet.checkouts || []) await checkout.run(handoff);
           automatic.tick().catch(() => {});
           auditStatuses(packet.sessions);
         }).catch(() => {});

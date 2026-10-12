@@ -1,0 +1,502 @@
+{
+  "base": "4199f237ebc716a0090fdb2697842a9074b074b2",
+  "branch": "refactor/basic-browser-flow",
+  "files": [
+    {
+      "status": "M",
+      "path": ".gitignore"
+    },
+    {
+      "status": "A",
+      "path": "docs/BASIC_BROWSER_FLOW.md"
+    },
+    {
+      "status": "A",
+      "path": "docs/flow-verification.json"
+    },
+    {
+      "status": "A",
+      "path": "docs/mcp-schema.json"
+    },
+    {
+      "status": "A",
+      "path": "docs/refactor-files.json"
+    },
+    {
+      "status": "M",
+      "path": "extension/action-guard.mjs"
+    },
+    {
+      "status": "M",
+      "path": "extension/automatic.mjs"
+    },
+    {
+      "status": "M",
+      "path": "extension/bridge.mjs"
+    },
+    {
+      "status": "D",
+      "path": "extension/checkout-content.js"
+    },
+    {
+      "status": "D",
+      "path": "extension/checkout-runner.mjs"
+    },
+    {
+      "status": "M",
+      "path": "extension/content.js"
+    },
+    {
+      "status": "D",
+      "path": "extension/decision-model.mjs"
+    },
+    {
+      "status": "D",
+      "path": "extension/element-check.mjs"
+    },
+    {
+      "status": "D",
+      "path": "extension/granted-read.mjs"
+    },
+    {
+      "status": "A",
+      "path": "extension/inference-error.mjs"
+    },
+    {
+      "status": "M",
+      "path": "extension/inference-settings.mjs"
+    },
+    {
+      "status": "M",
+      "path": "extension/model-host.mjs"
+    },
+    {
+      "status": "M",
+      "path": "extension/model-runtime.mjs"
+    },
+    {
+      "status": "M",
+      "path": "extension/onnx-validator.mjs"
+    },
+    {
+      "status": "M",
+      "path": "extension/planner.mjs"
+    },
+    {
+      "status": "M",
+      "path": "extension/purpose-audit.mjs"
+    },
+    {
+      "status": "M",
+      "path": "extension/purpose-browser-model.mjs"
+    },
+    {
+      "status": "D",
+      "path": "extension/purpose-model.mjs"
+    },
+    {
+      "status": "D",
+      "path": "extension/purpose-read.mjs"
+    },
+    {
+      "status": "D",
+      "path": "extension/remote-model.mjs"
+    },
+    {
+      "status": "M",
+      "path": "extension/review.html"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/.gitignore"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/broker/__init__.py"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/broker/client.py"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/broker/mcp_server.py"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/broker/policy.py"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/broker/reviewer.py"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/broker/server.py"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/broker/setup.py"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/broker/store.py"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/docs/ARCHITECTURE.md"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/docs/REDACTION_DESIGN.md"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/docs/TEST_REPORT.md"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/examples/agent_poll.py"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/examples/demo.html"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/examples/request_funds.py"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/extension/app.html"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/extension/app.js"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/extension/manifest.json"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/extension/policy.mjs"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/extension/style.css"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/extension/worker.js"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/package.json"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/README.md"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/requirements-mcp.txt"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/requirements-test.txt"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/scripts/check.sh"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/tests/browser_ui.py"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/tests/policy.test.mjs"
+    },
+    {
+      "status": "D",
+      "path": "legacy/v0.1/tests/test_backend.py"
+    },
+    {
+      "status": "A",
+      "path": "mcp/contract.mjs"
+    },
+    {
+      "status": "D",
+      "path": "mcp/read-dom.mjs"
+    },
+    {
+      "status": "M",
+      "path": "mcp/tools.mjs"
+    },
+    {
+      "status": "M",
+      "path": "package.json"
+    },
+    {
+      "status": "M",
+      "path": "public/app.mjs"
+    },
+    {
+      "status": "M",
+      "path": "public/index.html"
+    },
+    {
+      "status": "M",
+      "path": "README.md"
+    },
+    {
+      "status": "A",
+      "path": "scripts/api-schema.mjs"
+    },
+    {
+      "status": "M",
+      "path": "scripts/build-hosted.mjs"
+    },
+    {
+      "status": "M",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "status": "A",
+      "path": "scripts/check-source.mjs"
+    },
+    {
+      "status": "A",
+      "path": "scripts/demo-flow.mjs"
+    },
+    {
+      "status": "A",
+      "path": "scripts/native-flow-probe.mjs"
+    },
+    {
+      "status": "A",
+      "path": "scripts/run-flow.mjs"
+    },
+    {
+      "status": "D",
+      "path": "shared/checkout-review.mjs"
+    },
+    {
+      "status": "D",
+      "path": "shared/checkout.mjs"
+    },
+    {
+      "status": "M",
+      "path": "shared/local-purpose.mjs"
+    },
+    {
+      "status": "M",
+      "path": "shared/protocol.mjs"
+    },
+    {
+      "status": "D",
+      "path": "shared/purchase-boundary.mjs"
+    },
+    {
+      "status": "D",
+      "path": "shared/purchase-policy.mjs"
+    },
+    {
+      "status": "M",
+      "path": "shared/purpose-engagement.mjs"
+    },
+    {
+      "status": "M",
+      "path": "src/engine.mjs"
+    },
+    {
+      "status": "M",
+      "path": "src/hosted-api.mjs"
+    },
+    {
+      "status": "M",
+      "path": "src/hosted-browser.mjs"
+    },
+    {
+      "status": "M",
+      "path": "src/local-classifier.mjs"
+    },
+    {
+      "status": "D",
+      "path": "src/purchase-policies.mjs"
+    },
+    {
+      "status": "D",
+      "path": "src/session-defaults.mjs"
+    },
+    {
+      "status": "M",
+      "path": "src/worker.mjs"
+    },
+    {
+      "status": "M",
+      "path": "tests/action-guard.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "tests/approval-link.test.mjs"
+    },
+    {
+      "status": "D",
+      "path": "tests/automatic-action.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "tests/browser-routing.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "tests/browser-setup.test.mjs"
+    },
+    {
+      "status": "D",
+      "path": "tests/checkout-browser.mjs"
+    },
+    {
+      "status": "D",
+      "path": "tests/checkout-e2e.mjs"
+    },
+    {
+      "status": "D",
+      "path": "tests/checkout.test.mjs"
+    },
+    {
+      "status": "D",
+      "path": "tests/default-policy.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "tests/disclosure.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "tests/draft-planner.test.mjs"
+    },
+    {
+      "status": "D",
+      "path": "tests/element-check.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "tests/engagement.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "tests/engine.test.mjs"
+    },
+    {
+      "status": "A",
+      "path": "tests/flow/fixture.mjs"
+    },
+    {
+      "status": "A",
+      "path": "tests/flow/site.html"
+    },
+    {
+      "status": "A",
+      "path": "tests/flow/support.mjs"
+    },
+    {
+      "status": "A",
+      "path": "tests/flow/worker.mjs"
+    },
+    {
+      "status": "A",
+      "path": "tests/flow/wrangler.jsonc"
+    },
+    {
+      "status": "D",
+      "path": "tests/granted-automatic.test.mjs"
+    },
+    {
+      "status": "D",
+      "path": "tests/granted-read.test.mjs"
+    },
+    {
+      "status": "D",
+      "path": "tests/granular.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "tests/hosted-browser-lifecycle.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "tests/hosted-browser.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "tests/local-purpose.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "tests/login-sync.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "tests/mcp-discovery.test.mjs"
+    },
+    {
+      "status": "D",
+      "path": "tests/onnx-purpose-probe.mjs"
+    },
+    {
+      "status": "D",
+      "path": "tests/purchase-policy.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "tests/purpose-browser.test.mjs"
+    },
+    {
+      "status": "D",
+      "path": "tests/purpose-engagement.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "tests/purpose-financial.test.mjs"
+    },
+    {
+      "status": "D",
+      "path": "tests/purpose-model.test.mjs"
+    },
+    {
+      "status": "D",
+      "path": "tests/purpose-read.test.mjs"
+    },
+    {
+      "status": "D",
+      "path": "tests/read-dom.test.mjs"
+    },
+    {
+      "status": "D",
+      "path": "tests/remote-inference.test.mjs"
+    },
+    {
+      "status": "D",
+      "path": "tests/session-defaults.test.mjs"
+    },
+    {
+      "status": "D",
+      "path": "tests/shopping-browser.mjs"
+    },
+    {
+      "status": "D",
+      "path": "tests/shopping-cloud-browser.mjs"
+    },
+    {
+      "status": "D",
+      "path": "tests/shopping-e2e.mjs"
+    },
+    {
+      "status": "D",
+      "path": "tests/shopping-native-probe.mjs"
+    }
+  ]
+}

@@ -133,22 +133,6 @@
         });
         respond({revision, version, capture_id: captureId, current}); return false;
       }
-      if (message.type === 'dom_snapshot') {
-        if (!Array.isArray(message.origins) || !message.origins.includes(location.origin) || !Number.isInteger(message.offset) || message.offset < 0 || message.offset > 100 || !Number.isInteger(message.limit) || message.limit < 1 || message.limit > 4) throw new Error();
-        const nodes = AgentGateXPath.selectElements(document, message.xpath).slice(message.offset, message.offset + message.limit);
-        references = new Map(); capturedAt = performance.now(); captureId = crypto.randomUUID();
-        const blocks = [], paths = {};
-        for (const node of nodes) {
-          if (!node.isConnected || !visible(node) || node.closest('input,textarea,[contenteditable]:not([contenteditable="false"]),script,style,noscript,[data-agentgate-ui]')) continue;
-          const text = renderedText(node), path = AgentGateXPath.elementPath(node), nearby = context(node,true);
-          if (!text || !path) continue;
-          const ref = crypto.randomUUID().replaceAll('-', '');
-          const sender=mailSender(node),source_kind=purposeKind(node);
-          references.set(ref, {node, role: 'dom_text',selector:message.xpath,match_offset:message.offset+nodes.indexOf(node), fingerprint: JSON.stringify([text, nearby, path, location.href,sender,source_kind])});
-          blocks.push({ref, text, context: nearby,source_kind,...(sender?{sender}: {})}); paths[ref] = path;
-        }
-        respond({origin: location.origin, controls: [], blocks, paths, revision, version, capture_id: captureId}); return false;
-      }
       if (message.type === 'snapshot') {
         references = new Map(); capturedAt = performance.now(); captureId = crypto.randomUUID();
         const controls = [];

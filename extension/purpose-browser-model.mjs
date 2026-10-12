@@ -1,6 +1,6 @@
 import {inferenceProfile, exact} from './protocol.mjs';
 import {abortable, deadline} from './deadline.mjs';
-import {inferenceError} from './remote-model.mjs';
+import {inferenceError} from './inference-error.mjs';
 import {purposeInput} from './purpose-browser-input.mjs';
 import {ensureLocalDocument} from './offscreen-host.mjs';
 

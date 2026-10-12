@@ -1,0 +1,514 @@
+{
+  "command": "npm run demo:flow",
+  "status": "passed",
+  "unit_tests": {
+    "passed": 206,
+    "failed": 0
+  },
+  "checks": [
+    "JavaScript syntax and frontend import bundling",
+    "Production Worker graph excludes test-only entrypoints",
+    "Authoritative MCP schema artifact/discovery",
+    "Wrangler production configuration dry-run"
+  ],
+  "components": {
+    "worker": "real local workerd",
+    "mcp": "real stdio SDK",
+    "owner_approvals": "ephemeral P-256 signatures through production HTTP routes",
+    "cloud_acquisition": "fixture; real HostedBrowser/HostedAdapter in isolated local Chromium"
+  },
+  "matrix": [
+    {
+      "route": "local",
+      "backend": "chrome_ai",
+      "mode": "AUDIT_ONLY",
+      "runtime": "explicit deterministic fixture",
+      "status": "passed",
+      "request_approval": false,
+      "actions": [
+        {
+          "raw": "deny",
+          "confidence": 0.7,
+          "applied": "allow",
+          "hard_boundary": false
+        },
+        {
+          "raw": "deny",
+          "confidence": 0.7,
+          "applied": "allow",
+          "hard_boundary": false
+        }
+      ]
+    },
+    {
+      "route": "local",
+      "backend": "chrome_ai",
+      "mode": "AUTO_APPROVE",
+      "runtime": "explicit deterministic fixture",
+      "status": "passed",
+      "request_approval": true,
+      "actions": [
+        {
+          "raw": "confirm",
+          "confidence": 0.7,
+          "applied": "confirm",
+          "hard_boundary": false
+        },
+        {
+          "raw": "confirm",
+          "confidence": 0.7,
+          "applied": "confirm",
+          "hard_boundary": false
+        }
+      ]
+    },
+    {
+      "route": "local",
+      "backend": "chrome_ai",
+      "mode": "AGGRESSIVE",
+      "runtime": "explicit deterministic fixture",
+      "status": "passed",
+      "request_approval": true,
+      "actions": [
+        {
+          "raw": "confirm",
+          "confidence": 0.7,
+          "applied": "confirm",
+          "hard_boundary": false
+        },
+        {
+          "raw": "confirm",
+          "confidence": 0.7,
+          "applied": "confirm",
+          "hard_boundary": false
+        }
+      ]
+    },
+    {
+      "route": "local",
+      "backend": "onnx",
+      "mode": "AUDIT_ONLY",
+      "runtime": "explicit deterministic fixture",
+      "status": "passed",
+      "request_approval": false,
+      "actions": [
+        {
+          "raw": "deny",
+          "confidence": 0.7,
+          "applied": "allow",
+          "hard_boundary": false
+        },
+        {
+          "raw": "deny",
+          "confidence": 0.7,
+          "applied": "allow",
+          "hard_boundary": false
+        }
+      ]
+    },
+    {
+      "route": "local",
+      "backend": "onnx",
+      "mode": "AUTO_APPROVE",
+      "runtime": "explicit deterministic fixture",
+      "status": "passed",
+      "request_approval": true,
+      "actions": [
+        {
+          "raw": "confirm",
+          "confidence": 0.7,
+          "applied": "confirm",
+          "hard_boundary": false
+        },
+        {
+          "raw": "confirm",
+          "confidence": 0.7,
+          "applied": "confirm",
+          "hard_boundary": false
+        }
+      ]
+    },
+    {
+      "route": "local",
+      "backend": "onnx",
+      "mode": "AGGRESSIVE",
+      "runtime": "explicit deterministic fixture",
+      "status": "passed",
+      "request_approval": true,
+      "actions": [
+        {
+          "raw": "confirm",
+          "confidence": 0.7,
+          "applied": "confirm",
+          "hard_boundary": false
+        },
+        {
+          "raw": "confirm",
+          "confidence": 0.7,
+          "applied": "confirm",
+          "hard_boundary": false
+        }
+      ]
+    },
+    {
+      "route": "cloud",
+      "backend": "chrome_ai",
+      "mode": "AUDIT_ONLY",
+      "runtime": "explicit deterministic fixture",
+      "status": "passed",
+      "request_approval": false,
+      "actions": [
+        {
+          "raw": "deny",
+          "confidence": 0.7,
+          "applied": "allow",
+          "hard_boundary": false
+        },
+        {
+          "raw": "deny",
+          "confidence": 0.7,
+          "applied": "allow",
+          "hard_boundary": false
+        }
+      ]
+    },
+    {
+      "route": "cloud",
+      "backend": "chrome_ai",
+      "mode": "AUTO_APPROVE",
+      "runtime": "explicit deterministic fixture",
+      "status": "passed",
+      "request_approval": true,
+      "actions": [
+        {
+          "raw": "confirm",
+          "confidence": 0.7,
+          "applied": "confirm",
+          "hard_boundary": false
+        },
+        {
+          "raw": "confirm",
+          "confidence": 0.7,
+          "applied": "confirm",
+          "hard_boundary": false
+        }
+      ]
+    },
+    {
+      "route": "cloud",
+      "backend": "chrome_ai",
+      "mode": "AGGRESSIVE",
+      "runtime": "explicit deterministic fixture",
+      "status": "passed",
+      "request_approval": true,
+      "actions": [
+        {
+          "raw": "confirm",
+          "confidence": 0.7,
+          "applied": "confirm",
+          "hard_boundary": false
+        },
+        {
+          "raw": "confirm",
+          "confidence": 0.7,
+          "applied": "confirm",
+          "hard_boundary": false
+        }
+      ]
+    },
+    {
+      "route": "cloud",
+      "backend": "onnx",
+      "mode": "AUDIT_ONLY",
+      "runtime": "explicit deterministic fixture",
+      "status": "passed",
+      "request_approval": false,
+      "actions": [
+        {
+          "raw": "deny",
+          "confidence": 0.7,
+          "applied": "allow",
+          "hard_boundary": false
+        },
+        {
+          "raw": "deny",
+          "confidence": 0.7,
+          "applied": "allow",
+          "hard_boundary": false
+        }
+      ]
+    },
+    {
+      "route": "cloud",
+      "backend": "onnx",
+      "mode": "AUTO_APPROVE",
+      "runtime": "explicit deterministic fixture",
+      "status": "passed",
+      "request_approval": true,
+      "actions": [
+        {
+          "raw": "confirm",
+          "confidence": 0.7,
+          "applied": "confirm",
+          "hard_boundary": false
+        },
+        {
+          "raw": "confirm",
+          "confidence": 0.7,
+          "applied": "confirm",
+          "hard_boundary": false
+        }
+      ]
+    },
+    {
+      "route": "cloud",
+      "backend": "onnx",
+      "mode": "AGGRESSIVE",
+      "runtime": "explicit deterministic fixture",
+      "status": "passed",
+      "request_approval": true,
+      "actions": [
+        {
+          "raw": "confirm",
+          "confidence": 0.7,
+          "applied": "confirm",
+          "hard_boundary": false
+        },
+        {
+          "raw": "confirm",
+          "confidence": 0.7,
+          "applied": "confirm",
+          "hard_boundary": false
+        }
+      ]
+    },
+    {
+      "route": "local",
+      "backend": "onnx",
+      "mode": "AUDIT_ONLY",
+      "runtime": "real installed model",
+      "status": "passed",
+      "request_approval": false,
+      "actions": [
+        {
+          "raw": "confirm",
+          "confidence": 0.03930020823796014,
+          "applied": "allow",
+          "hard_boundary": false
+        },
+        {
+          "raw": "confirm",
+          "confidence": 0.1869138849057639,
+          "applied": "allow",
+          "hard_boundary": false
+        }
+      ]
+    },
+    {
+      "route": "cloud",
+      "backend": "onnx",
+      "mode": "AUDIT_ONLY",
+      "runtime": "real installed model",
+      "status": "passed",
+      "request_approval": false,
+      "actions": [
+        {
+          "raw": "confirm",
+          "confidence": 0.03930020823796014,
+          "applied": "allow",
+          "hard_boundary": false
+        },
+        {
+          "raw": "confirm",
+          "confidence": 0.1869138849057639,
+          "applied": "allow",
+          "hard_boundary": false
+        }
+      ]
+    },
+    {
+      "route": "local",
+      "backend": "chrome_ai",
+      "mode": "AUDIT_ONLY",
+      "runtime": "real installed model",
+      "status": "passed",
+      "request_approval": false,
+      "actions": [
+        {
+          "raw": "unavailable",
+          "confidence": 0,
+          "applied": "allow",
+          "hard_boundary": false
+        },
+        {
+          "raw": "unavailable",
+          "confidence": 0,
+          "applied": "allow",
+          "hard_boundary": false
+        }
+      ]
+    },
+    {
+      "route": "cloud",
+      "backend": "chrome_ai",
+      "mode": "AUDIT_ONLY",
+      "runtime": "real installed model",
+      "status": "passed",
+      "request_approval": false,
+      "actions": [
+        {
+          "raw": "unavailable",
+          "confidence": 0,
+          "applied": "allow",
+          "hard_boundary": false
+        },
+        {
+          "raw": "unavailable",
+          "confidence": 0,
+          "applied": "allow",
+          "hard_boundary": false
+        }
+      ]
+    }
+  ],
+  "failure_cases": [
+    {
+      "route": "local",
+      "name": "reject request; stale approval refused",
+      "status": "passed",
+      "components": "real Worker/MCP/executor; fixture classifier"
+    },
+    {
+      "route": "local",
+      "name": "cancel pending action; no later approval or execution",
+      "status": "passed",
+      "components": "real Worker/MCP/executor; fixture classifier"
+    },
+    {
+      "route": "local",
+      "name": "stale view refused",
+      "status": "passed",
+      "components": "real Worker/MCP/executor; fixture classifier"
+    },
+    {
+      "route": "local",
+      "name": "origin escape refused",
+      "status": "passed",
+      "components": "real Worker/MCP/executor; fixture classifier"
+    },
+    {
+      "route": "local",
+      "name": "duplicate action idempotent; changed replay refused",
+      "status": "passed",
+      "components": "real Worker/MCP/executor; fixture classifier"
+    },
+    {
+      "route": "local",
+      "name": "AUDIT final commitment remains blocked",
+      "status": "passed",
+      "components": "real Worker/MCP/executor; fixture classifier"
+    },
+    {
+      "route": "local",
+      "name": "revocation clears the view and cancels authority",
+      "status": "passed",
+      "components": "real Worker/MCP/executor; fixture classifier"
+    },
+    {
+      "route": "cloud",
+      "name": "reject request; stale approval refused",
+      "status": "passed",
+      "components": "real Worker/MCP/executor; fixture classifier"
+    },
+    {
+      "route": "cloud",
+      "name": "cancel pending action; no later approval or execution",
+      "status": "passed",
+      "components": "real Worker/MCP/executor; fixture classifier"
+    },
+    {
+      "route": "cloud",
+      "name": "stale view refused",
+      "status": "passed",
+      "components": "real Worker/MCP/executor; fixture classifier"
+    },
+    {
+      "route": "cloud",
+      "name": "origin escape refused",
+      "status": "passed",
+      "components": "real Worker/MCP/executor; fixture classifier"
+    },
+    {
+      "route": "cloud",
+      "name": "duplicate action idempotent; changed replay refused",
+      "status": "passed",
+      "components": "real Worker/MCP/executor; fixture classifier"
+    },
+    {
+      "route": "cloud",
+      "name": "AUDIT final commitment remains blocked",
+      "status": "passed",
+      "components": "real Worker/MCP/executor; fixture classifier"
+    },
+    {
+      "route": "cloud",
+      "name": "revocation clears the view and cancels authority",
+      "status": "passed",
+      "components": "real Worker/MCP/executor; fixture classifier"
+    },
+    {
+      "route": "local",
+      "name": "paired classifier disconnect revokes task",
+      "status": "passed",
+      "components": "real Worker/WebSocket shutdown"
+    },
+    {
+      "route": "cloud",
+      "name": "paired classifier disconnect revokes task",
+      "status": "passed",
+      "components": "real Worker/WebSocket shutdown"
+    }
+  ],
+  "real_models": [
+    {
+      "backend": "onnx",
+      "status": "executed",
+      "successful_action_inferences": 4,
+      "scope": "AUDIT_ONLY; semantic observations remain advisory"
+    },
+    {
+      "backend": "chrome_ai",
+      "status": "unavailable",
+      "successful_action_inferences": 0,
+      "scope": "AUDIT_ONLY; semantic observations remain advisory",
+      "reason": "The installed extension runtime returned no completed action inference."
+    }
+  ],
+  "native_component": {
+    "component": "production ModelRuntime with real Chrome web Prompt API",
+    "full_extension_flow": false,
+    "cases": [
+      {
+        "name": "exact synthetic search preparation",
+        "result": {
+          "ok": true,
+          "decision": "confirm",
+          "effect": "other",
+          "payment_cents": 0,
+          "confidence": 0.95
+        },
+        "milliseconds": 8243
+      }
+    ],
+    "chrome_version": "154.0.8037.98",
+    "availability": "available",
+    "status": "executed"
+  },
+  "cleanup": "Task tab closure asserted for each completed browser case; temporary test browsers, servers, Worker state and profiles removed.",
+  "limits": [
+    "Live Cloudflare acquisition was not exercised.",
+    "Chrome built-in AI is unavailable in the test extension Chromium runtime; its installed-Chrome web component executed separately.",
+    "Some unused legacy freshness/authorization helpers remain after automatic approval review rejected their combined removal.",
+    "No configured ESLint/TypeScript project; syntax, imports and strict runtime contracts were checked."
+  ]
+}
