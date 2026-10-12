@@ -102,7 +102,7 @@ function renderBrowsers(items, pending, source = false) {
     const actions = el('div', undefined, 'actions');
     if (item.status === 'requested' && scannedBrowser?.id === item.id && scannedBrowser.source === source) actions.append(button('Connect', () => approveBrowser(item)));
     else if (item.status === 'requested') section.append(el('p', 'Scan the QR in Chrome to connect.', 'hint'));
-    else section.append(el('p', item.status === 'active' ? 'Connected' : 'Connecting…', 'hint'));
+    else section.append(el('p', item.status === 'active' ? item.socket_connected ? 'Connected · Online' : 'Paired · Offline' : 'Connecting…', 'hint'));
     actions.append(button(item.status === 'requested' ? 'Cancel' : 'Disconnect', () => api(`owner/${source ? 'login-sources' : 'browsers'}/${item.id}/revoke`, {}), 'danger'));
     section.append(actions);
     if (item.status === 'requested') pending.push(pendingCard(section, source ? 'login-source' : 'browser', item, {scanned: scannedBrowser?.id === item.id && scannedBrowser.source === source}));
@@ -276,6 +276,7 @@ async function refresh() {
 async function showDevice() {
   $('intro').hidden = true; $('pairing').hidden = true; $('inbox').hidden = false; $('device').hidden = false;
   $('fingerprint').textContent = 'Device key: ' + (await digest(device.publicKey)).slice(0, 24);
+  $('accountIdentity').textContent = 'Account: ' + (account || 'owner') + ' · Coordinator: ' + location.origin + base;
   await refresh();
 }
 $('pairForm').addEventListener('submit', async event => {

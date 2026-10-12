@@ -234,7 +234,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       pairingQueue = pairingQueue.then(operation, operation); return pairingQueue;
     }
     if (message.type === 'connect') { socket?.close(); socket = null; await connect(); return {ok: true}; }
-    if (message.type === 'status') return {ok: true, connected: socket?.readyState === WebSocket.OPEN, automation: (await chrome.storage.local.get('automation')).automation || null};
+    if (message.type === 'status') { const settings = await config(); return {ok: true, connected: socket?.readyState === WebSocket.OPEN, account_url: settings?.url || null, browser_id: settings?.browser_id || null, automation: (await chrome.storage.local.get('automation')).automation || null}; }
     if (message.type === 'inference_status') { await setupBrowser(); return {ok: true, ...inferencePresentation(await inferenceSettings())}; }
     if (message.type === 'save_inference') { const presentation = await saveInference(message, value => call('inference', value)); await setupBrowser(); automatic.tick().catch(() => {}); return {ok: true, ...presentation}; }
     if (message.type === 'test_inference') return {ok: true, ...await testInference()};
