@@ -65,8 +65,8 @@ try {
   const raw = JSON.stringify(snapshot);
   for (const value of ['EXISTING_PRIVATE_SUBJECT', 'EXISTING_PRIVATE_BODY', 'PRIVATE_PASSWORD', 'PRIVATE_MFA', 'Hidden control']) assert.ok(!raw.includes(value), value);
   for (const label of ['Subject', 'Message Body']) assert.ok(snapshot.controls.some(c => c.label === label && c.role === 'field' && c.context === 'New Message'), label);
-  await mkdir(resolve(root, 'artifacts'), {recursive: true});
-  await writeFile(resolve(root, 'artifacts/draft-capture.json'), JSON.stringify({task, inbox: inboxSnapshot, editor: snapshot}));
+  await mkdir(resolve(root, 'data/evaluation'), {recursive: true});
+  await writeFile(resolve(root, 'data/evaluation/draft-capture.json'), JSON.stringify({task, inbox: inboxSnapshot, editor: snapshot}));
   assert.equal(prepareSnapshot(snapshot, {...task, permissions: ['read']}).entries.some(e => e.kind === 'control'), false);
   assert.equal(prepareSnapshot(snapshot, {...task, permissions: ['read', 'click']}).entries.some(e => e.role === 'field'), false);
   result = await planner.plan(snapshot, task);

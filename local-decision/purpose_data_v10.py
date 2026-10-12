@@ -62,7 +62,7 @@ def build(split):
  return unique(evidence,lambda r:evidence_pair(r,r['intent'])),unique(intents,lambda r:r['text']),unique(facts,lambda r:fact_pair(r['intent'],r['text']))
 
 def main():
- root=Path('artifacts/decision-model/purpose-data-v10');root.mkdir(exist_ok=False);seen=set()
+ root=Path('data/decision-model/purpose-data-v10');root.mkdir(exist_ok=False);seen=set()
  manifest={'synthetic':True,'template_families_shared':True,'split_before_augmentation':True,
   'architecture':'trusted-intent-and-complete-fact-v4','source_context':'observed-mail-header-v1',
   'intent_grouping':'same-fact-set-v1','intents':INTENTS_V3,'splits':{}}

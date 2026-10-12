@@ -7,6 +7,10 @@
 
 # Completing committed work
 
+- Work in the primary checkout on `main`. Create a branch or worktree only when the user explicitly requests one.
+- Integrate and reconcile existing branches, worktrees, and local changes into `main`, preserving useful work and resolving conflicts against the current implementation.
 - Publish completed fixes to the coordinator and push them without asking for confirmation.
 - When committing and pushing completed work, merge it into `main` and push `main` unless the user explicitly requests branch-only work.
 - Fetch the latest remote state, preserve existing changes, and verify the merged result before pushing. Never force-push `main`.
+- Remove stale worktrees and local branches after their work is integrated and recoverable backups are verified.
+- Build the extension in the repository's existing `extension/` folder and preserve its installed model files.

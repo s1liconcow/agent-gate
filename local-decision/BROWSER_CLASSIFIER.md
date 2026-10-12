@@ -52,8 +52,8 @@ API key. The measured Chrome probe made no remote requests.
 ## Build and load
 
 The latest Chrome-verified experimental export is
-`artifacts/decision-model/purpose-browser-v12-fp32`; its dedicated extension is
-`artifacts/purpose-browser-extension-v12`. Its full FP32 weights occupy
+`data/decision-model/purpose-browser-v12-fp32`. Install it into the repository's
+single `extension/` directory. Its full FP32 weights occupy
 738,676,631 bytes. Development verification found zero probability drift and
 zero decision disagreements across 16,961 rows using byte-identical graphs and
 one full inference pass. Real Chrome measured a 1,552.7 ms cold start and maximum
@@ -63,22 +63,23 @@ Use the Python environment from `requirements.txt` and
 `requirements-browser.txt`. From the repository root:
 
 ```sh
-artifacts/decision-model/.venv/bin/python local-decision/export_purpose_browser.py \
-  --model artifacts/decision-model/purpose-run-multidomain-v12/model \
+data/decision-model/.venv/bin/python local-decision/export_purpose_browser.py \
+  --model data/decision-model/purpose-run-multidomain-v12/model \
   --precision fp32 \
-  --output artifacts/decision-model/purpose-browser-new
-artifacts/decision-model/.venv/bin/python local-decision/verify_purpose_export.py \
-  --bundle artifacts/decision-model/purpose-browser-new \
-  --dev artifacts/decision-model/purpose-data-multidomain-v12/dev.jsonl \
-  --output artifacts/decision-model/purpose-browser-new/fidelity.json
-npm run build
-npm run build:purpose -- artifacts/decision-model/purpose-browser-new \
-  artifacts/purpose-browser-extension-new
+  --output data/decision-model/purpose-browser-new
+data/decision-model/.venv/bin/python local-decision/verify_purpose_export.py \
+  --bundle data/decision-model/purpose-browser-new \
+  --dev data/decision-model/purpose-data-multidomain-v12/dev.jsonl \
+  --output data/decision-model/purpose-browser-new/fidelity.json
+npm run build:purpose -- data/decision-model/purpose-browser-new
 ```
 
-Export and packaging require new output directories. Packaging checks a passed
-fidelity report against the manifest hash. Trained weights stay outside the
-standard extension and coordinator assets.
+Exports use new model directories. `build:purpose` installs a verified model into
+`extension/models/purpose/` and rebuilds `extension/` in place. Later `npm run build`
+commands preserve its pinned model ID and rebuild its runtime. Packaging checks a
+passed fidelity report against the manifest hash. Model files and generated runtime
+stay ignored by Git. Rebuilds update this folder without creating additional
+extension copies or model archives. Training and evaluation data lives under `data/`.
 Packaging also requires at least 95% necessary recall and at most 1% unrelated
 releases on development data before a candidate receives a fresh holdout.
 For calibrated-utility checkpoints, export requires passed development criteria;
@@ -86,9 +87,9 @@ verification and packaging also check at least 90% recall in each workflow.
 Smoke checkpoints are excluded from deployment exports.
 
 In **chrome://extensions**, enable **Developer mode**, select **Load unpacked**,
-and choose the dedicated extension directory. Pair the browser, allow approved
+and choose the repository's `extension/` directory. Pair the browser, allow approved
 websites, then select **Chrome ML engine**, choose **Use Chrome ML engine**, and enable automatic tasks.
-The dedicated bundle supplies its pinned model ID.
+The build supplies the installed model's pinned ID.
 
 ## Training and evaluation
 
@@ -112,9 +113,9 @@ capture/freshness. Inspected holdouts become regression evidence. New candidates
 receive fresh holdouts with separate topics and prose.
 
 ```sh
-npm run test:purpose-browser -- artifacts/purpose-browser-extension-new \
-  artifacts/purpose-browser-regression-new.json \
-  tests/fixtures/purpose-workflow-reserve-v6.mjs
+npm run test:purpose-browser -- extension \
+  data/evaluation/purpose-browser-regression-new.json \
+  data/evaluation/fixtures/purpose-workflow-reserve-v6.mjs
 ```
 
 Reference comparisons shuffle cases and send opaque identifiers plus only the

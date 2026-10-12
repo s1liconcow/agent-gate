@@ -4,7 +4,7 @@ V12 runs in Chrome and remains below the Luna quality target. On a fresh
 520-case operational reserve it releases 122/156 necessary fields (78.2%) with
 two false releases. Matched single-case Luna releases 153/156 (98.1%) with 62
 false releases. Full results and provenance are in
-[results/purpose-browser-v12.json](results/purpose-browser-v12.json).
+[../data/evaluation/purpose-browser-v12.json](../data/evaluation/purpose-browser-v12.json).
 
 The active objective is Luna-level performance across diverse AgentGate tasks,
 including email and banking, with independent holdouts. No hosted deployment or
@@ -138,7 +138,7 @@ new operational holdout. The three unscored generated tests remain reserved.
 Latest local evidence and model directories are retained. Superseded weights,
 exports, obsolete corpora, synthetic browser profiles and raw logs are removed.
 Historical manifests, epoch records and source snapshots remain under
-`artifacts/decision-model/history`. Large weights and raw evidence remain local
+`data/decision-model/history`. Large weights and raw evidence remain local
 under the repository's artifact ignore rules; the compact V12 results above are
 versioned with the source.
 

@@ -6,9 +6,9 @@ import {createServer} from 'node:http';
 import {cp,mkdir,mkdtemp,readFile,writeFile,rm} from 'node:fs/promises';
 import {tmpdir,cpus,totalmem} from 'node:os';
 import {resolve} from 'node:path';
-import {accessCases} from '../tests/fixtures/access-cases.mjs';
-import {accessHoldout} from '../tests/fixtures/access-holdout.mjs';
-import {accessAcceptance} from '../tests/fixtures/access-acceptance.mjs';
+import {accessCases} from '../data/evaluation/fixtures/access-cases.mjs';
+import {accessHoldout} from '../data/evaluation/fixtures/access-holdout.mjs';
+import {accessAcceptance} from '../data/evaluation/fixtures/access-acceptance.mjs';
 import {createHash} from 'node:crypto';
 const root=resolve(import.meta.dirname,'..'),args=process.argv.slice(2),runs=Number(args.find(a=>a.startsWith('--runs='))?.slice(7)||3);
 assert.ok(Number.isInteger(runs)&&runs>=1&&runs<=20);
@@ -16,7 +16,7 @@ const suite=args.includes('--acceptance')?'acceptance':args.includes('--holdout'
 const temporary=await mkdtemp(resolve(tmpdir(),'agentgate-element-benchmark-'));
 const report={created_at:new Date().toISOString(),environment:{cpu:cpus()[0]?.model,memory_gib:totalmem()/2**30},method:{synthetic:true,runs,includes:['hard filtering','two fresh native decision contexts','constrained decisions','exact source ID intersection'],excludes:['startup','phone approval','Chrome DOM capture/freshness','coordinator/MCP transport'],prototype:'element-check.mjs; not enabled in production'},samples:[]};
 report.method.suite=suite;
-for(const file of ['extension/element-check.mjs','extension/disclosure.mjs',`tests/fixtures/access-${suite}.mjs`])report.method[file+'_sha256']=createHash('sha256').update(await readFile(resolve(root,file))).digest('hex');
+for(const file of ['extension/element-check.mjs','extension/disclosure.mjs',`data/evaluation/fixtures/access-${suite}.mjs`])report.method[file+'_sha256']=createHash('sha256').update(await readFile(resolve(root,file))).digest('hex');
 let server,context;
 try {
   await cp(resolve(root,'extension'),temporary,{recursive:true});
@@ -28,14 +28,14 @@ try {
     if(!/^\/[a-z-]+\.(?:mjs|json|html)$/.test(path)){res.writeHead(404).end();return;}
     try{res.setHeader('Content-Type',path.endsWith('.mjs')?'text/javascript':path.endsWith('.json')?'application/json':'text/html');res.end(await readFile(resolve(temporary,path.slice(1))));}catch{res.writeHead(404).end();}
   });await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-  const profile=resolve(root,'artifacts/native-chrome-profile');await mkdir(profile,{recursive:true});
+  const profile=resolve(root,'data/evaluation/native-chrome-profile');await mkdir(profile,{recursive:true});
   const ignored=['--disable-background-networking','--disable-component-update','--disable-field-trial-config','--enable-unsafe-swiftshader','--disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion'];
   context=await chromium.launchPersistentContext(profile,{channel:'chrome',headless:false,ignoreDefaultArgs:ignored,args:['--enable-blink-features=AIPromptAPILegacyParams,AIPromptAPILegacyIdentifiers']});
   report.environment.chrome=context.browser().version();
   const page=await context.newPage();await page.goto(`http://127.0.0.1:${server.address().port}/index.html`);await page.waitForFunction(()=>window.benchmark?.availability,{timeout:15000});
   assert.equal(await page.evaluate(()=>window.benchmark.availability),'available','Requires the genuine cached Chrome model.');
   await page.locator('#start').click();
-  const path=resolve(root,`artifacts/access-native-${suite==='cases'?'element':suite}.json`);
+  const path=resolve(root,`data/evaluation/access-native-${suite==='cases'?'element':suite}.json`);
   const benchmarkDeadline=Date.now()+600000;
   for(;;){
     const state=await page.evaluate(()=>window.benchmark);Object.assign(report,state);await writeFile(path,JSON.stringify(report,null,2));

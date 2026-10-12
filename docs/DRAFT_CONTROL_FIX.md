@@ -54,8 +54,8 @@ Existing checkout changes were preserved; no commit or deployment was made.
   unrelated actions were denied.
 - `git diff --check` and syntax checks: passed.
 
-Native reports are local ignored artifacts at `artifacts/native-draft-report.json`
-and `artifacts/chrome-ai-report.json`.
+Native reports are local ignored artifacts at `data/evaluation/native-draft-report.json`
+and `data/evaluation/chrome-ai-report.json`.
 
 ## Limits
 

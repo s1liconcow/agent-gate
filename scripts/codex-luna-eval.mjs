@@ -4,13 +4,13 @@ import {createHash} from 'node:crypto';
 import {mkdtemp, mkdir, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
-import {accessCases} from '../tests/fixtures/access-cases.mjs';
+import {accessCases} from '../data/evaluation/fixtures/access-cases.mjs';
 import {prepareSnapshot, selectionPrompt, verificationPrompt, itemVerificationPrompt, selectedView} from '../extension/disclosure.mjs';
 import {guardPrompt, checkedActionDecision} from '../extension/action-guard.mjs';
 
 const root = resolve(import.meta.dirname, '..');
-const fixturePath = resolve(root, 'tests/fixtures/access-cases.mjs');
-const reportPath = resolve(root, 'artifacts/codex-luna-eval.json');
+const fixturePath = resolve(root, 'data/evaluation/fixtures/access-cases.mjs');
+const reportPath = resolve(root, 'data/evaluation/codex-luna-eval.json');
 const temp = await mkdtemp(join(tmpdir(), 'agentgate-luna-'));
 const percentile = (values, p) => values.length ? [...values].sort((a, b) => a - b)[Math.ceil(values.length * p) - 1] : null;
 const ref = n => n.toString(16).padStart(32, '0');
@@ -113,7 +113,7 @@ async function evaluateAction(c) {
 
 const report = {created_at: new Date().toISOString(), model: 'gpt-6-luna', transport: 'codex --no-daemon exec -m gpt-6-luna', fixture_sha256: createHash('sha256').update(await readFile(fixturePath)).digest('hex'), method: 'Synthetic development fixture, production preparation/prompts and independent selection, verification, item and guardian calls. Prompt-only JSON; CLI instruction layer is additional.', disclosure: [], actions: []};
 try {
-  await mkdir(resolve(root, 'artifacts'), {recursive: true});
+  await mkdir(resolve(root, 'data/evaluation'), {recursive: true});
   for (const c of accessCases) {
     const sample = await evaluateDisclosure(c);
     report.disclosure.push(sample);

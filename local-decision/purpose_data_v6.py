@@ -76,7 +76,7 @@ def build(split):
     return evidence,intents,facts
 
 def main():
-    root=Path('artifacts/decision-model/purpose-data-v6');root.mkdir(exist_ok=False);seen=set()
+    root=Path('data/decision-model/purpose-data-v6');root.mkdir(exist_ok=False);seen=set()
     manifest={'synthetic':True,'template_families_shared':True,'split_before_augmentation':True,
         'architecture':'trusted-intent-and-complete-fact-v2','intent_grouping':'same-fact-set-v1','splits':{}}
     for split in ['train','dev','test']:

@@ -85,7 +85,7 @@ def build(split):
  return unique(evidence,lambda r:evidence_pair(r,r['intent'])),unique(intents,lambda r:r['text']),unique(facts,lambda r:fact_pair(r['intent'],r['text']))
 
 def main():
- p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',default='artifacts/decision-model/purpose-data-v13')
+ p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',default='data/decision-model/purpose-data-v13')
  root=Path(p.parse_args().output);root.mkdir(exist_ok=False);seen={}
  manifest={'synthetic':True,'template_families_shared':True,'split_before_augmentation':True,
   'architecture':'trusted-intent-and-complete-fact-v5','source_context':'observed-mail-header-v1','clause_guard':'complete-sentences-v1',

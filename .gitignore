@@ -10,13 +10,19 @@ __pycache__/
 !.env.example
 .dev.vars*
 .wrangler/
+.worktrees/
 artifacts/
 test-results/
 playwright-report/
 *.zip
 *.log
 # Local datasets, model weights, caches, and generated experiment outputs.
-data/
+/data/*
+!/data/README.md
+!/data/evaluation/
+/data/evaluation/*
+!/data/evaluation/fixtures/
+!/data/evaluation/purpose-browser-v12.json
 datasets/
 models/
 checkpoints/
@@ -46,6 +52,7 @@ outputs/
 *.sqlite3-*
 *.pem
 *.key
+!/data/evaluation/fixtures/*.jsonl
 # Generated prototype captures and raw test logs stay local.
 /.impeccable/mocks/
 /.impeccable/questions/
@@ -65,6 +72,8 @@ outputs/
 /extension/protocol.mjs
 /extension/browser-pairing.mjs
 /extension/qr.mjs
+/extension/purpose-runtime.mjs
+/extension/purpose-vendor/
 /extension/policy.mjs
 /extension/style.css
 /extension/icon.svg
@@ -73,9 +82,8 @@ outputs/
 /public/xpath.mjs
 /public/read-grants.mjs
 /extension/read-grants.mjs
-/dist/pages/
+/dist/
 
-# Generated browser and login-sharing assets.
 /src/generated-hosted.mjs
 /public/hosted-browser.mjs
 /public/engagement.mjs
@@ -83,8 +91,6 @@ outputs/
 /public/login-sync-protocol.mjs
 /extension/login-sync-protocol.mjs
 /extension/login-storage.js
-/extension/purpose-runtime.mjs
-/extension/purpose-vendor/
 
 # Generated purpose-bound shopping modules
 /extension/local-purpose.mjs

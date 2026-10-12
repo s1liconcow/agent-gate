@@ -1,7 +1,7 @@
 import {prepareSnapshot, selectedView, validateSelection, intersectReview, selectionPrompt, selectionSchema, verificationPrompt, verificationSchema, controlSelectionPrompt, controlVerificationPrompt, itemVerificationPrompt, itemVerificationSchema, validateItemReview} from './disclosure.mjs';
-import {checkedActionAssessment, guardPrompt, guardSchema, automaticGuardSchema, engagementGuardSchema, engagementGuardInstructions, purposeGuardSchema, purposeGuardInstructions} from './action-guard.mjs';
+import {checkedActionAssessment, guardPrompt, purposeGuardSchema, purposeGuardInstructions} from './action-guard.mjs';
 import {abortable, dispose} from './deadline.mjs';
-import {remoteCodes} from './remote-model.mjs';
+import {remoteCodes} from './inference-error.mjs';
 const options = {expectedInputs: [{type: 'text', languages: ['en']}], expectedOutputs: [{type: 'text', languages: ['en']}]};
 export class LocalPlanner {
   constructor(api = globalThis.LanguageModel, diagnostics = false) { this.api = api; this.diagnostics = diagnostics; this.base = null; this.checker = null; this.guardian = null; this.itemChecker = null; this.controlBase = null; this.controlChecker = null; this.onStage = () => {}; }
@@ -22,18 +22,18 @@ export class LocalPlanner {
       [this.base, this.checker, this.guardian, this.itemChecker, this.controlBase, this.controlChecker] = created;
     } catch (error) { created.forEach(dispose); if (signal?.aborted) throw signal.reason; throw new Error('The on-device model could not start. Check inference setup or choose another provider.'); }
   }
-  async checkAction(task, view, proposed, staged, submit = false, signal, purchaseReview = null) {
+  async checkAction(task, view, proposed, staged, submit = false, signal) {
     if (!this.guardian) throw new Error('The local action guardian is not ready.');
     const instances = [];
     try {
-      const input = JSON.stringify({approved_task: task.goal, allowed_origins: task.origins, allowed_permissions: task.permissions, interaction: purchaseReview ? 'local_gate' : task.interaction || 'every_action', action_policy: task.action_policy, ...(task.purpose_guard ? {assessment_instructions: purposeGuardInstructions, purchase_review: purchaseReview} : task.engagement ? {engagement: task.engagement, assessment_instructions: engagementGuardInstructions} : {}), minimal_view: view, proposed_action: proposed, staged_fields: staged, native_submit: submit});
+      const input = JSON.stringify({approved_task: task.goal, allowed_origins: task.origins, allowed_permissions: task.permissions, assessment_instructions: purposeGuardInstructions, minimal_view: view, proposed_action: proposed, staged_fields: staged, native_submit: submit});
       const decisions = [];
       for (let i = 0; i < 2; i++) {
         const instance = await abortable(() => this.guardian.clone({signal}), signal, dispose); instances.push(instance);
-        decisions.push(JSON.parse(await abortable(() => instance.prompt(input, {responseConstraint: task.purpose_guard ? purposeGuardSchema : task.engagement ? engagementGuardSchema : task.interaction === 'automatic' ? automaticGuardSchema : guardSchema, signal}), signal)));
+        decisions.push(JSON.parse(await abortable(() => instance.prompt(input, {responseConstraint: purposeGuardSchema, signal}), signal)));
       }
-      const assessment = checkedActionAssessment(task, view, proposed, decisions[0], decisions[1], submit, purchaseReview);
-      return task.engagement || task.interaction === 'automatic' ? assessment : assessment.decision;
+      const assessment = checkedActionAssessment(task, view, proposed, decisions[0], decisions[1], submit);
+      return assessment;
     } finally { instances.forEach(dispose); }
   }
   async plan(snapshot, task, need = '', signal) {

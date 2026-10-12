@@ -7,7 +7,7 @@ import {createHash} from 'node:crypto';
 import {createServer} from 'node:http';
 import {pathToFileURL} from 'node:url';
 
-const [extensionInput, reportInput, reserveInput = 'tests/fixtures/purpose-multidomain-reserve-v1.mjs'] = process.argv.slice(2);
+const [extensionInput, reportInput, reserveInput = 'data/evaluation/fixtures/purpose-multidomain-reserve-v1.mjs'] = process.argv.slice(2);
 if (!extensionInput || !reportInput) throw new Error('Usage: npm run test:purpose-browser -- EXTENSION_DIRECTORY REPORT_JSON [RESERVE_MODULE]');
 const reservePath = resolve(reserveInput), {purposeMultidomainReserve} = await import(pathToFileURL(reservePath));
 if (!Array.isArray(purposeMultidomainReserve) || !purposeMultidomainReserve.length) throw new Error('A frozen reserve is required.');
@@ -19,8 +19,13 @@ if (!calendarCase || !calendarOther || bankCase && !bankOther) throw new Error('
 const extension = resolve(extensionInput), reportPath = resolve(reportInput);
 const temporary = await mkdtemp(resolve(tmpdir(), 'agentgate-purpose-browser-'));
 let context, server;
+const probeFiles = ['purpose-check.html', 'purpose-check.mjs'];
+const originalProbes = await Promise.all(probeFiles.map(async name => {
+  try { return await readFile(resolve(extension, name)); }
+  catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+}));
 try {
-  // The probe files are added to the isolated bundle and contain synthetic data.
+  // Temporary probe files contain only synthetic data; Chrome uses a fresh profile.
   await writeFile(resolve(extension, 'purpose-check.html'), '<!doctype html><title>Chrome purpose classifier check</title><script type="module" src="purpose-check.mjs"></script>');
   await writeFile(resolve(extension, 'purpose-check.mjs'), `import {purposeBrowserModel} from './purpose-browser-model.mjs';
 import {adjudicatePurposeRead} from './purpose-read.mjs';
@@ -92,5 +97,9 @@ globalThis.adjudicatePurposeRead=adjudicatePurposeRead;globalThis.diagnosePurpos
   await context?.close();
   server?.closeAllConnections();
   if (server?.listening) await new Promise(resolve => server.close(resolve));
+  for (const [index, name] of probeFiles.entries()) {
+    if (originalProbes[index] === null) await rm(resolve(extension, name), {force: true});
+    else await writeFile(resolve(extension, name), originalProbes[index]);
+  }
   await rm(temporary, {recursive: true, force: true});
 }

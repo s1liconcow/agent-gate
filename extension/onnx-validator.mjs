@@ -1,7 +1,6 @@
 import {prepareSnapshot, sanitizeForTask} from './disclosure.mjs';
 import {action} from './protocol.mjs';
 import {abortable, deadline} from './deadline.mjs';
-import {purchaseBoundary} from './purchase-boundary.mjs';
 import {enforceSender} from './purpose-constraints.mjs';
 import {purposeDecision} from './purpose-engagement.mjs';
 
@@ -39,15 +38,6 @@ export class OnnxValidator {
         return {ok: true, ids};
       }
       const denied = confidence => ({ok: true, decision: 'deny', effect: 'other', payment_cents: 0, confidence});
-      if (type === 'check_purchase') {
-        if (!purchaseBoundary(task, input.review)) return denied(1);
-        let confidence = 1;
-        for (const item of input.review.items) {
-          confidence = Math.min(confidence, await score(JSON.stringify(item), 'Full cart item at ' + input.review.origin, 'Check whether this item and exact quantity are necessary for the approved purchase.'));
-        }
-        if (task.engagement) return {ok: true, decision: confidence >= .5 ? 'allow' : confidence <= .02 ? 'deny' : 'confirm', effect: 'payment', payment_cents: input.review.total_cents, confidence};
-        return confidence > .02 ? {ok: true, decision: confidence >= .98 ? 'allow' : 'confirm', effect: 'payment', payment_cents: input.review.total_cents, confidence} : denied(confidence);
-      }
       if (type !== 'check_action') throw new Error('Unsupported ONNX purpose check.');
       const proposed = action(input.action, task, input.view), control = input.view.controls.find(c => c.ref === proposed.ref);
       const label = control?.label || '';

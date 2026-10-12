@@ -44,7 +44,7 @@ These workloads have different contracts. The signed-field result is not a
 replacement accuracy score for natural-language adjudication. Denying every
 request also does not count as success. The experimental model gates remain
 unconnected to the production bounded path; thresholds were not relaxed to make
-the benchmark pass. Failed runs remain in `artifacts/`.
+the benchmark pass. Failed runs remain in `data/evaluation/`.
 
 The field benchmark includes exact grant validation, Chrome isolated-world
 capture, local filtering and live original-source proof. Its elapsed time excludes
@@ -131,7 +131,7 @@ MCP SDK and the real extension. Its test manifest grants website permissions at
 installation instead of driving Chrome's native permission bubble.
 
 `npm run benchmark:elements -- --acceptance` runs genuine native Chrome inference
-in the dedicated `artifacts/native-chrome-profile`. It excludes model startup
+in the dedicated `data/evaluation/native-chrome-profile`. It excludes model startup
 (about five seconds when cached), fixes topK=1/temperature=0, uses fresh contexts,
 and hashes the implementation and fixtures in each report. This prototype is not
 enabled for real data. Reusing an observed test set after revising prompts makes

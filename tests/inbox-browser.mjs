@@ -49,7 +49,7 @@ try {
   snapshot = await capture();
   const messages=prepared.entries.filter(e=>e.kind==='text'&&/Friday daycare|Delivery Monday/.test(e.text));assert.equal(messages.length,2,'Nested row text is grouped without duplicates.');
   const output=selectedView(prepared,task,{allow:true,ids:messages.map(e=>e.id)},{allow:true});assert.match(output.text,/Friday/);assert.match(output.text,/Monday/);
-  await mkdir(resolve(root,'artifacts'),{recursive:true});await writeFile(resolve(root,'artifacts/inbox-capture.json'),JSON.stringify(snapshot));
+  await mkdir(resolve(root,'data/evaluation'),{recursive:true});await writeFile(resolve(root,'data/evaluation/inbox-capture.json'),JSON.stringify(snapshot));
   // Gmail variants without ARIA rows still use its visible .zA rows; opened bodies
   // preserve nested paragraphs and anchors without exposing editable replies.
   await page.evaluate(()=>{document.querySelectorAll('tr.zA').forEach(n=>n.removeAttribute('role'));document.querySelector('#opened').classList.remove('hidden');});
@@ -67,7 +67,7 @@ try {
   assert.equal((await current([selected])).current, true);
   snapshot = await capture();
   assert.ok(!JSON.stringify(snapshot).includes('AgentGate'), 'Status chrome must not leak into captured source content.');
-  await page.screenshot({path: resolve(root, 'artifacts/tab-activity-inbox.png')});
+  await page.screenshot({path: resolve(root, 'data/evaluation/tab-activity-inbox.png')});
   // The frame allows the underlying page to receive normal clicks.
   await page.locator('h1').click();
   await worker.evaluate(id => chrome.tabs.sendMessage(id, {type: 'agentgate_activity', state: 'waiting', expires_at: Date.now() + 60000}), tabId);

@@ -152,7 +152,7 @@ capture, trained classifier and live-source proof are included; model/browser
 startup and human approval are excluded. The seven browser reports total 2,223
 warm reads with no false releases and maximum 34.7 ms. This meets the defined
 finite inbox target; it is not a general language/layout safety proof or a public
-Internet latency guarantee. See `artifacts/access-purpose-v17-final-summary.json`
+Internet latency guarantee. See `data/evaluation/access-purpose-v17-final-summary.json`
 for report hashes and the two retained older utility misses.
 
 The current objective trains three views: trusted goal/request intent, complete
@@ -165,21 +165,21 @@ development calibration and elapsed training time are in its immutable run bundl
 
 ## Reproduction
 
-Use the isolated Python environment under `artifacts/decision-model/.venv` with
+Use the isolated Python environment under `data/decision-model/.venv` with
 the versions in `requirements.txt`; production Node code does not depend on it.
 
 ```sh
-artifacts/decision-model/.venv/bin/python local-decision/fetch_encoder.py
-artifacts/decision-model/.venv/bin/python local-decision/purpose_data.py
-artifacts/decision-model/.venv/bin/python local-decision/train_purpose.py \
-  --base artifacts/decision-model/purpose-encoder-base \
-  --data artifacts/decision-model/purpose-data-v2 \
-  --output artifacts/decision-model/purpose-new-run \
+data/decision-model/.venv/bin/python local-decision/fetch_encoder.py
+data/decision-model/.venv/bin/python local-decision/purpose_data.py
+data/decision-model/.venv/bin/python local-decision/train_purpose.py \
+  --base data/decision-model/purpose-encoder-base \
+  --data data/decision-model/purpose-data-v2 \
+  --output data/decision-model/purpose-new-run \
   --epochs 2 --batch-size 16 --lr 0.00001
-artifacts/decision-model/.venv/bin/python local-decision/evaluate_purpose.py \
-  --model artifacts/decision-model/purpose-new-run/model \
-  --cases artifacts/decision-model/purpose-data-v2/test.jsonl \
-  --output artifacts/access-purpose-new-test.json
+data/decision-model/.venv/bin/python local-decision/evaluate_purpose.py \
+  --model data/decision-model/purpose-new-run/model \
+  --cases data/decision-model/purpose-data-v2/test.jsonl \
+  --output data/evaluation/access-purpose-new-test.json
 ```
 
 Do not recreate a known test suite and call it unseen after inspecting it.

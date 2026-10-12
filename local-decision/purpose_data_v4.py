@@ -71,7 +71,7 @@ def rows(split):
 
 
 def main():
-    root=Path('artifacts/decision-model/purpose-data-v4');root.mkdir(exist_ok=False)
+    root=Path('data/decision-model/purpose-data-v4');root.mkdir(exist_ok=False)
     seen=set();manifest={'synthetic':True,'template_families_shared':True,'split_before_augmentation':True,'splits':{}}
     for split in ['train','dev','test']:
         data=rows(split);keys=set(map(pair,data))

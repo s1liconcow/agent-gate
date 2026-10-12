@@ -2,13 +2,13 @@
 // This file makes no API requests and never loads browser data or credentials.
 import {createHash} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
-import {accessCases} from '../tests/fixtures/access-cases.mjs';
-import {accessHoldout} from '../tests/fixtures/access-holdout.mjs';
-import {accessAcceptance} from '../tests/fixtures/access-acceptance.mjs';
+import {accessCases} from '../data/evaluation/fixtures/access-cases.mjs';
+import {accessHoldout} from '../data/evaluation/fixtures/access-holdout.mjs';
+import {accessAcceptance} from '../data/evaluation/fixtures/access-acceptance.mjs';
 import {prepareSnapshot, selectionPrompt, verificationPrompt, itemVerificationPrompt, selectionSchema, itemVerificationSchema} from '../extension/disclosure.mjs';
 import {inferenceDefaults} from '../shared/protocol.mjs';
 
-const suites = {development: [accessCases, '../tests/fixtures/access-cases.mjs'], holdout: [accessHoldout, '../tests/fixtures/access-holdout.mjs'], acceptance: [accessAcceptance, '../tests/fixtures/access-acceptance.mjs']};
+const suites = {development: [accessCases, '../data/evaluation/fixtures/access-cases.mjs'], holdout: [accessHoldout, '../data/evaluation/fixtures/access-holdout.mjs'], acceptance: [accessAcceptance, '../data/evaluation/fixtures/access-acceptance.mjs']};
 const name = process.argv[2];
 if (!Object.hasOwn(suites, name)) throw new Error('Choose development, holdout or acceptance.');
 const [cases, relativePath] = suites[name];

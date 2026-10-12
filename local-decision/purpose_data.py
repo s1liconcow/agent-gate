@@ -155,7 +155,7 @@ def generate(split, rounds):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output',default='artifacts/decision-model/purpose-data-v2')
+    parser.add_argument('--output',default='data/decision-model/purpose-data-v2')
     args=parser.parse_args();root=Path(args.output)
     root.mkdir(parents=True,exist_ok=True)
     summary={'generator':'purpose_data.py','synthetic':True,'split_before_augmentation':True,

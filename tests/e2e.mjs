@@ -6,7 +6,7 @@ import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {createHash,randomBytes} from 'node:crypto';
 import {cp, mkdtemp, mkdir, readFile, rm, writeFile} from 'node:fs/promises';
-import {tmpdir, homedir} from 'node:os';
+import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
 import {spawn, execFile} from 'node:child_process';
 import {promisify} from 'node:util';
@@ -17,6 +17,8 @@ const root = resolve(import.meta.dirname, '..'), temporary = await mkdtemp(resol
 const nativeAutomatic = process.argv.includes('--native-automatic');
 const automaticFixture = process.argv.includes('--automatic-fixture');
 const remoteFixture = process.argv.includes('--remote-fixture');
+const pairedInbox = process.argv.includes('--paired-inbox');
+const setupOnly = process.argv.includes('--setup-only');
 const boundedRemote=process.argv.includes('--bounded-remote');
 const boundedFixture=process.argv.includes('--bounded-fixture')||boundedRemote;
 const purposeRemote=process.argv.includes('--purpose-remote');
@@ -33,7 +35,7 @@ assert.match(purposeReport,/^[a-z0-9-]+$/);
 const purposeRuntimeFiles=['extension/automatic.mjs','extension/bridge.mjs','extension/content.js','extension/purpose-read.mjs','extension/purpose-constraints.mjs','extension/purpose-model.mjs','extension/disclosure.mjs','shared/protocol.mjs','src/worker.mjs','src/engine.mjs','mcp/tools.mjs','mcp/read-dom.mjs','local-decision/purpose_classifier.py','local-decision/purpose_semantics.py','local-decision/serve_purpose.py','tests/e2e.mjs','tests/fixtures/inbox.html','package-lock.json'];
 async function purposeRuntimeHashes(){const hashes={};for(const file of purposeRuntimeFiles)hashes[file]=createHash('sha256').update(await readFile(resolve(root,file))).digest('hex');return hashes;}
 const purposeRuntimeAtStart=purposeLocal?await purposeRuntimeHashes():null;
-const config = JSON.parse(await readFile(resolve(process.env.AGENTGATE_CONFIG_DIR || resolve(homedir(), '.agentgate-control'), 'config.json'), 'utf8'));
+const config = {agent_token:randomBytes(32).toString('hex'), bridge_token:randomBytes(32).toString('hex'), pairing_token:randomBytes(32).toString('hex')};
 const processes = [], errors = [], transcript = [];
 let context, phoneContext, phoneBrowser, mcp, inboxServer, providerServer, providerEndpoint;
 const providerRequests = [], decisionRequests = [];
@@ -85,20 +87,26 @@ try {
     providerEndpoint = 'https://inference.agentgate.test:' + providerServer.address().port + '/v1/chat/completions';
   }
   await assert.rejects(fetch('http://127.0.0.1:8788/api/health', {signal: AbortSignal.timeout(500)}), undefined, 'Use free development ports for this test.');
-  const runtime = spawn(process.execPath, [resolve(root, 'node_modules/wrangler/bin/wrangler.js'), 'dev', '--ip', '127.0.0.1', '--port', '8788', '--persist-to', resolve(temporary, 'state')], {cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {...process.env, WRANGLER_SEND_METRICS: 'false', X_LOCAL_EXPLORER: 'false', X_LOCAL_OBSERVABILITY: 'false'}});
+  const runtimeConfig = JSON.parse(await readFile(resolve(root, 'wrangler.jsonc'), 'utf8'));
+  runtimeConfig.main = resolve(root, 'src/worker.mjs');
+  runtimeConfig.assets.directory = resolve(root, 'public');
+  runtimeConfig.vars = {AGENT_TOKEN:config.agent_token, BRIDGE_TOKEN:config.bridge_token, PAIRING_TOKEN:config.pairing_token};
+  const runtimeConfigPath = resolve(temporary, 'wrangler.json');
+  await writeFile(runtimeConfigPath, JSON.stringify(runtimeConfig));
+  const runtime = spawn(process.execPath, [resolve(root, 'node_modules/wrangler/bin/wrangler.js'), 'dev', '--config', runtimeConfigPath, '--local', '--ip', '127.0.0.1', '--port', '8788', '--persist-to', resolve(temporary, 'state')], {cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {...process.env, WRANGLER_SEND_METRICS: 'false', X_LOCAL_EXPLORER: 'false', X_LOCAL_OBSERVABILITY: 'false'}});
   let runtimeLog = ''; runtime.stdout.on('data', b => runtimeLog += b); runtime.stderr.on('data', b => runtimeLog += b); processes.push(runtime);
   const demo = spawn('python3', ['-m', 'http.server', '8080', '--bind', '127.0.0.1', '--directory', resolve(root, 'demos')], {stdio: 'ignore'}); processes.push(demo);
   await until(async () => { try { return (await fetch('http://127.0.0.1:8788/api/health')).ok; } catch { if (runtime.exitCode !== null) throw new Error(runtimeLog); return false; } }, 30000);
   assert.equal((await fetch('http://127.0.0.1:8788/cdn-cgi/local/explorer/api/local/workers')).status,404);
   const nativeDefaults = ['--disable-background-networking','--disable-component-update','--disable-field-trial-config','--enable-unsafe-swiftshader','--disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion'];
-  const extensionPath = nativeAutomatic ? resolve(root, 'artifacts/native-extension-build') : resolve(temporary, 'automatic-extension');
+  const extensionPath = resolve(temporary, 'automatic-extension');
   await cp(resolve(root, 'extension'), extensionPath, {recursive:true});
   if (nativeAutomatic || automaticFixture || remoteFixture || boundedFixture || purposeLocal) {
-    const manifest = JSON.parse(await readFile(resolve(extensionPath,'manifest.json'),'utf8')); manifest.host_permissions.push('https://*/*');
+    const manifest = JSON.parse(await readFile(resolve(extensionPath,'manifest.json'),'utf8')); if (!manifest.host_permissions.includes('https://*/*')) manifest.host_permissions.push('https://*/*');
     await writeFile(resolve(extensionPath,'manifest.json'),JSON.stringify(manifest));
     if (automaticFixture) await writeFile(resolve(extensionPath,'model-host.mjs'), `import {prepareSnapshot} from './disclosure.mjs'; import {checkedActionAssessment} from './action-guard.mjs'; export async function localModel(type,input={}) { if(type==='availability') return {ok:true,availability:'available'}; if(type==='plan') { const entries=prepareSnapshot(input.snapshot,input.task).entries; return {ok:true,ids:entries.filter(e=>e.text==='Open demo workspace'||e.text==='Ali confirmed doggie daycare is available on Friday.'||(input.task.goal.startsWith('Send a demo email')&&(['To','Subject','Message','Send demo email'].includes(e.text)||e.text.startsWith('Demo email recorded')))||(input.task.goal==='Summarize my visible inbox messages.'&&(e.kind==='text'&&/Friday daycare|Delivery Monday/.test(e.text)||e.text==='Select'))).map(e=>e.id)}; } if(type==='check_action') { const result={decision:'allow',within_purpose:true,...(input.task.interaction==='automatic'?{effect:input.action.type==='click'&&input.view.controls.find(c=>c.ref===input.action.ref)?.label==='Send demo email'?'communication':'other',payment_cents:0}:{})};return {ok:true,...checkedActionAssessment(input.task,input.view,input.action,result,result,input.submit)}; } throw new Error('Unknown fixture operation'); }`);
   }
-  context = await chromium.launchPersistentContext(nativeAutomatic ? resolve(root, 'artifacts/native-extension-profile') : resolve(temporary, 'browser'), {channel: 'chromium', headless: !nativeAutomatic, ...(nativeAutomatic ? {ignoreDefaultArgs: nativeDefaults} : {}), viewport: {width: 1280, height: 900}, args: ['--disable-extensions-except=' + extensionPath, '--load-extension=' + extensionPath, ...(remoteFixture ? ['--host-resolver-rules=MAP inference.agentgate.test 127.0.0.1', '--ignore-certificate-errors', '--no-proxy-server'] : [])]});
+  context = await chromium.launchPersistentContext(nativeAutomatic ? resolve(root, 'data/evaluation/native-extension-profile') : resolve(temporary, 'browser'), {channel: 'chromium', headless: !nativeAutomatic, ...(nativeAutomatic ? {ignoreDefaultArgs: nativeDefaults} : {}), viewport: {width: 1280, height: 900}, args: ['--disable-extensions-except=' + extensionPath, '--load-extension=' + extensionPath, ...(remoteFixture ? ['--host-resolver-rules=MAP inference.agentgate.test 127.0.0.1', '--ignore-certificate-errors', '--no-proxy-server'] : [])]});
   if (nativeAutomatic) for (const oldPage of context.pages()) await oldPage.close();
   const serviceWorker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker'), extensionId = serviceWorker.url().split('/')[2];
   if (nativeAutomatic) await serviceWorker.evaluate(async () => { await chrome.storage.local.clear(); await chrome.storage.session.clear(); });
@@ -107,7 +115,10 @@ try {
   await phone.goto('http://127.0.0.1:8788/#pair=' + config.pairing_token); await phone.getByRole('button', {name: 'Pair this phone', exact: true}).click();
   await phone.locator('#inbox').waitFor({state: 'visible'});
   const review = await context.newPage(); review.on('pageerror', e => errors.push(e.message)); await review.goto(`chrome-extension://${extensionId}/review.html`);
-  assert.equal(await review.locator('#provider').inputValue(), 'purpose_encoder'); assert.equal(await review.locator('#capture').count(), 0); assert.equal(await review.locator('#remoteConsent').count(), 0);
+  await review.waitForFunction(() => !document.getElementById('provider').disabled);
+  const bundledPurpose = await review.locator('#provider option[value="purpose_browser"]').isEnabled();
+  assert.equal(await review.locator('#provider').inputValue(), bundledPurpose ? 'purpose_browser' : 'local'); assert.equal(await review.locator('#capture').count(), 0); assert.equal(await review.locator('#remoteConsent').count(), 0);
+  for (const id of ['enableAI', 'allowWebsites', 'testProvider', 'useLocal']) assert.equal(await review.locator('#' + id).count(), 0);
   assert.ok(!await serviceWorker.evaluate(() => chrome.runtime.getManifest().permissions.includes('activeTab')));
   for (const type of ['capture', 'snapshot', 'publish', 'publish_auto']) {
     const result = await review.evaluate(type => chrome.runtime.sendMessage({type}), type);
@@ -118,18 +129,27 @@ try {
   const extensionOrigin = 'chrome-extension://' + extensionId;
   const ticketProbe = token => fetch('http://127.0.0.1:8788/api/bridge/ticket',{method:'POST',headers:{Origin:extensionOrigin,Authorization:'Bearer '+token,'Content-Type':'application/json'},body:'{}'});
   assert.equal((await ticketProbe(pending.credential)).status,403); assert.equal(await review.locator('#bridgeKey').count(),0); assert.equal(await review.locator('#phoneKey').count(),0);
-  await review.screenshot({path:resolve(root,'artifacts/browser-pairing.png'),fullPage:true});
+  await review.screenshot({path:resolve(root,'data/evaluation/browser-pairing.png'),fullPage:true});
   // Opening the exact encoded QR target stands in for the phone camera; no key copying.
   await phone.goto(pending.url+'/#browser='+pending.item.id+'&secret='+pending.secret);
   await phone.getByRole('button',{name:'Approve browser connection',exact:true}).waitFor(); assert.equal(new URL(phone.url()).hash,'');
-  await phone.screenshot({path:resolve(root,'artifacts/phone-browser-pairing.png'),fullPage:true});
+  await phone.screenshot({path:resolve(root,'data/evaluation/phone-browser-pairing.png'),fullPage:true});
   const forgedPairing = await fetch(`http://127.0.0.1:8788/api/owner/browsers/${pending.item.id}/approve`,{method:'POST',headers:{Origin:'http://127.0.0.1:8788',Authorization:'Bearer '+config.agent_token,'Content-Type':'application/json'},body:'{}'}); assert.equal(forgedPairing.status,403);
   await phone.getByRole('button',{name:'Approve browser connection',exact:true}).click();
-  try { await review.locator('#message').filter({hasText:'Browser connected'}).waitFor({timeout:nativeAutomatic?90000:30000}); } catch { const state=await serviceWorker.evaluate(async()=>{const a=await chrome.storage.local.get('settings'),b=await chrome.storage.session.get(['last_error','pending_pairing']);return {browser_id:a.settings?.browser_id,pending:b.pending_pairing?.item?.id,last_error:b.last_error};});throw new Error('Pairing UI failed: '+await review.locator('#message').textContent()+'; phone: '+await phone.locator('#message').textContent()+'; JS errors: '+JSON.stringify(errors)+'; local: '+JSON.stringify(state)); }
+  try { await review.locator('#message').filter({hasText:'Browser connected'}).waitFor({timeout:120000}); } catch { const state=await serviceWorker.evaluate(async()=>{const a=await chrome.storage.local.get('settings'),b=await chrome.storage.session.get(['last_error','pending_pairing']);return {browser_id:a.settings?.browser_id,pending:b.pending_pairing?.item?.id,last_error:b.last_error};});throw new Error('Pairing UI failed: '+await review.locator('#message').textContent()+'; phone: '+await phone.locator('#message').textContent()+'; JS errors: '+JSON.stringify(errors)+'; local: '+JSON.stringify(state)); }
   assert.equal(await review.locator('#fingerprint').textContent(),await phone.locator('#fingerprint').textContent());
   await until(async () => (await serviceWorker.evaluate(async () => (await chrome.storage.local.get('settings')).settings))?.browser_id === pending.item.id);
   assert.equal((await ticketProbe(config.bridge_token)).status,403, 'QR pairing retires the shared legacy bridge key.');
-  await until(async () => serviceWorker.evaluate(() => chrome.runtime.getManifest().version === '0.7.0'));
+  await until(async () => serviceWorker.evaluate(() => chrome.runtime.getManifest().version === '0.7.1'));
+  const pairedSetup = await serviceWorker.evaluate(async () => chrome.storage.local.get(['inference_settings', 'automation']));
+  assert.equal(pairedSetup.automation.enabled, true);
+  assert.equal(pairedSetup.automation.setup_version, 1);
+  if (bundledPurpose) assert.equal(pairedSetup.inference_settings.profile.provider, 'purpose_browser');
+  assert.match(await review.locator('#aiStatus').textContent(), /Ready/);
+  assert.equal(await review.locator('#remoteSettings').isVisible(), false);
+  await review.screenshot({path:resolve(root,'data/evaluation/paired-browser-ready.png'),fullPage:true});
+  // Other suites explicitly exercise the whole-page or desktop providers.
+  if (!pairedInbox) assert.equal((await review.evaluate(() => chrome.runtime.sendMessage({type:'save_inference',provider:'local'}))).ok, true);
   mcp = new McpClient({name: 'agentgate-e2e', version: '1.0.0'});
   await mcp.connect(new StdioClientTransport({command: process.execPath, args: [resolve(root, 'mcp/server.mjs')], env: {...process.env, AGENTGATE_URL: 'http://127.0.0.1:8788', AGENTGATE_AGENT_TOKEN: config.agent_token}, stderr: 'pipe'}));
   const tools = await mcp.listTools(); assert.equal(tools.tools.length, 8);
@@ -165,7 +185,7 @@ try {
   const chatgptProtocol = await connectRemote('ChatGPT protocol integration test');
   const claudeProtocol = await connectRemote('Claude protocol integration test');
   // Neither this test name nor an SDK client is the actual ChatGPT/Claude product UI.
-  await mkdir(resolve(root, 'artifacts'), {recursive: true});
+  await mkdir(resolve(root, 'data/evaluation'), {recursive: true});
   mcp=stdio;
   const auditGoal='Read a synthetic inbox subject.';
   const auditSession=await tool('request_browser_session',{goal:auditGoal,origins:['http://127.0.0.1:8080'],permissions:['read'],ttl_seconds:300});
@@ -181,19 +201,54 @@ try {
   assert.match(await auditPage.locator('#detail').textContent(),/Read a synthetic inbox subject/);
   await auditPage.close();
   console.log('PASS: local session audit records approval and close; separate audit page is linked from desktop setup.');
+  if (pairedInbox) {
+    assert.ok(bundledPurpose, 'Install the trained Chrome model before the paired-inbox test.');
+    const html = await readFile(resolve(root, 'tests/fixtures/inbox.html'));
+    inboxServer = createServer((req, res) => { res.writeHead(200, {'Content-Type':'text/html'}); res.end(html); });
+    await new Promise(resolve => inboxServer.listen(0, '127.0.0.1', resolve));
+    const origin = 'http://127.0.0.1:' + inboxServer.address().port;
+    const requested = await tool('request_browser_session', {goal:'Summarize the subjects and snippets in my visible inbox.', origins:[origin], permissions:['read'], ttl_seconds:600, start_url:origin+'/inbox'});
+    assert.equal(requested.disclosure, 'granular');
+    assert.equal((await serviceWorker.evaluate(async () => (await chrome.storage.session.get('agent_tabs')).agent_tabs || {}))[requested.id], undefined);
+    await phone.getByRole('button', {name:'Refresh', exact:true}).click();
+    const card = phone.locator('#requests .request').filter({hasText:requested.goal});
+    assert.match(await card.textContent(), /Purpose enforcement/);
+    assert.ok((await card.textContent()).includes(pairedSetup.inference_settings.profile.model));
+    await card.getByRole('button', {name:'Approve scoped session', exact:true}).click();
+    await until(async () => (await status(requested.id)).view, 30000);
+    await review.close();
+    async function pairedRead(xpath, offset, key) {
+      const pending = await tool('read_browser_dom', {session_id:requested.id, xpath, offset, limit:1, need:'Read my visible inbox previews.', idempotency_key:key});
+      return pending.dom_access && !pending.dom_request ? pending : await until(async () => { const current = await status(requested.id); return current.dom_access?.request_id === pending.dom_request.id ? current : false; });
+    }
+    const subject = '//tr[@role="row"]//span[@class="bog"]', snippet = '//tr[@role="row"]//span[@class="y2"]';
+    const inboxReads = [];
+    for (const [xpath, offset, expected] of [[subject,0,/Friday daycare/], [subject,1,/Delivery Monday/], [snippet,0,/confirmed for Friday/], [snippet,1,/parcel arrives Monday/]]) {
+      const result = await pairedRead(xpath, offset, 'paired-inbox-' + xpath.length + '-' + offset);
+      assert.ok(['ready','withheld'].includes(result.dom_access.status), JSON.stringify(result));
+      assert.ok(result.dom_access.items.length <= 1);
+      if (result.dom_access.items.length) assert.match(result.dom_access.items[0].text, expected);
+      inboxReads.push({xpath, offset, access:result.dom_access});
+    }
+    await writeFile(resolve(root,'data/evaluation/paired-inbox-setup.json'), JSON.stringify({extension_version:'0.7.1', model:pairedSetup.inference_settings.profile.model, goal:requested.goal, reads:inboxReads},null,2)+'\n');
+    await tool('close_browser_session', {session_id:requested.id});
+    assert.equal((await status(requested.id)).view, undefined);
+    console.log('PASS: extension installation and signed phone pairing alone select and warm the real Chrome model; scoped inbox reads finish after the setup page closes.');
+    console.log('Inbox classifier results: '+inboxReads.filter(r=>r.access.items.length).length+'/4 fields released. Withheld fields remain withheld.');
+  }
   if(purposeLocal) {
     const previousMcp=mcp;if(purposeRemote)mcp=chatgptProtocol.client;
     const token=randomBytes(32).toString('hex'),tokenPath=resolve(temporary,'purpose-token');
     await writeFile(tokenPath,token,{mode:0o600});
-    const classifier=spawn(resolve(root,'artifacts/decision-model/.venv/bin/python'),[resolve(root,'local-decision/serve_purpose.py'),'--model',purposeCheckpoint,'--token-file',tokenPath,'--port','0','--extension-origin',extensionOrigin],{cwd:root,stdio:['ignore','pipe','pipe']});
+    const classifier=spawn(resolve(root,'data/decision-model/.venv/bin/python'),[resolve(root,'local-decision/serve_purpose.py'),'--model',purposeCheckpoint,'--token-file',tokenPath,'--port','0','--extension-origin',extensionOrigin],{cwd:root,stdio:['ignore','pipe','pipe']});
     processes.push(classifier);let output='',classifierErrors='';classifier.stdout.on('data',b=>output+=b);classifier.stderr.on('data',b=>classifierErrors+=b);
     const identity=await until(async()=>{if(classifier.exitCode!==null)throw new Error('Classifier startup failed: '+classifierErrors.slice(-500));try{return JSON.parse(output.trim());}catch{return false;}},30000);
+    await review.locator('#inferenceSettings > summary').click();
     await review.locator('#provider').selectOption('purpose_encoder');
     await review.locator('#endpoint').fill(identity.url+'/v1/purpose');await review.locator('#model').fill(identity.model);await review.locator('#apiKey').fill(token);
     assert.equal(await review.locator('#remoteTerms').isVisible(),false);
     await review.getByRole('button',{name:'Save local classifier',exact:true}).click();
     await until(async()=>(await review.locator('#providerStatus').textContent()).includes(identity.model));
-    await review.getByRole('button',{name:'Enable automatic tasks',exact:true}).click();
     await until(async()=>serviceWorker.evaluate(async()=>(await chrome.storage.local.get('automation')).automation?.enabled));
     const html=await readFile(resolve(root,'tests/fixtures/inbox.html'));
     inboxServer=createServer((req,res)=>{res.writeHead(200,{'Content-Type':'text/html'});res.end(html);});await new Promise(resolve=>inboxServer.listen(0,'127.0.0.1',resolve));
@@ -221,14 +276,14 @@ try {
       const elapsed=performance.now()-start;
       if(!answer.dom_access||answer.dom_request) {
         const diagnostic=await serviceWorker.evaluate(async id=>(await chrome.storage.session.get('capture_diagnostics')).capture_diagnostics?.[id],id);
-        await writeFile(resolve(root,'artifacts/'+purposeReport+'-pending.json'),JSON.stringify({transport:purposeRemote?'OAuth Streamable HTTP':'stdio',mcp_ms:elapsed,samples,diagnostic,status:answer.status,runtime:answer.browser_runtime,pending:!!answer.dom_request,model:identity.model},null,2)+'\n');
+        await writeFile(resolve(root,'data/evaluation/'+purposeReport+'-pending.json'),JSON.stringify({transport:purposeRemote?'OAuth Streamable HTTP':'stdio',mcp_ms:elapsed,samples,diagnostic,status:answer.status,runtime:answer.browser_runtime,pending:!!answer.dom_request,model:identity.model},null,2)+'\n');
       }
       assert.ok(answer.dom_access&&!answer.dom_request,'The real purpose read must finish in its MCP call.');
       const diagnostic=await serviceWorker.evaluate(async id=>(await chrome.storage.session.get('capture_diagnostics')).capture_diagnostics[id],id);
       const sample={case:caseId,mcp_ms:elapsed,local_adjudication_ms:diagnostic.adjudication_ms,released:answer.dom_access.items.length,expected};
       samples.push(sample);
       const conforms=expected&&caseId?sample.released<=1:sample.released===(expected?1:0);
-      if(!conforms)await writeFile(resolve(root,'artifacts/'+purposeReport+'-failed.json'),JSON.stringify({synthetic:true,transport:purposeRemote?'OAuth Streamable HTTP':'stdio',actual_mcp:true,actual_phone_signature:true,model:identity.model,checkpoint:purposeCheckpoint,failure:{xpath,offset,need,case:caseId,expected,released:sample.released},samples,acceptance_complete:false},null,2)+'\n',{flag:'wx'});
+      if(!conforms)await writeFile(resolve(root,'data/evaluation/'+purposeReport+'-failed.json'),JSON.stringify({synthetic:true,transport:purposeRemote?'OAuth Streamable HTTP':'stdio',actual_mcp:true,actual_phone_signature:true,model:identity.model,checkpoint:purposeCheckpoint,failure:{xpath,offset,need,case:caseId,expected,released:sample.released},samples,acceptance_complete:false},null,2)+'\n',{flag:'wx'});
       assert.ok(conforms,'Purpose read outcome failed; see the preserved failure report.');
       assert.equal(answer.view.controls.length,0);return answer;
     }
@@ -267,8 +322,8 @@ try {
     assert.equal((await mcp.callTool({name:'read_browser_dom',arguments:{session_id:narrow.id,xpath:subject,need:narrowGoal,idempotency_key:'purpose-after-revocation'}})).isError,true);
     let acceptance;
     if(purposeAcceptance) {
-      const suiteFile='tests/fixtures/purpose-authored-v'+purposeSuite+'.mjs';
-      const authored=(await import('./fixtures/purpose-authored-v'+purposeSuite+'.mjs'))['purposeAuthoredV'+purposeSuite];
+      const suiteFile='data/evaluation/fixtures/purpose-authored-v'+purposeSuite+'.mjs';
+      const authored=(await import('../data/evaluation/fixtures/purpose-authored-v'+purposeSuite+'.mjs'))['purposeAuthoredV'+purposeSuite];
       const groups=Map.groupBy(authored,c=>c.goal);
       for(const [goal,cases] of groups) {
         const session=await tool('request_browser_session',{goal,origins:[origin],permissions:['read'],disclosure:'granular',ttl_seconds:600,start_url:origin+'/inbox'});
@@ -287,7 +342,7 @@ try {
       transport:purposeRemote?'OAuth Streamable HTTP':'stdio',external_poll_diagnostic:purposeAsyncProbe,actual_mcp:true,actual_phone_signature:true,actual_extension:true,local_coordinator:true,
       startup_and_phone_approval_excluded:true,samples,acceptance,necessary:samples.filter(s=>s.expected).length,false_releases:samples.filter(s=>!s.expected&&s.released).length,
       p95_mcp_ms:samples.map(s=>s.mcp_ms).sort((a,b)=>a-b)[Math.ceil(samples.length*.95)-1],max_mcp_ms:Math.max(...samples.map(s=>s.mcp_ms))};
-    await writeFile(resolve(root,'artifacts/'+purposeReport+'-report.json'),JSON.stringify(report,null,2)+'\n',{flag:'wx'});
+    await writeFile(resolve(root,'data/evaluation/'+purposeReport+'-report.json'),JSON.stringify(report,null,2)+'\n',{flag:'wx'});
     assert.deepEqual(runtimeHashes,purposeRuntimeAtStart,'Purpose runtime source must stay frozen during MCP validation.');
     assert.ok(samples.every(s=>s.mcp_ms<1000),'Every complete warm purpose/MCP decision must take less than one second.');
     if(acceptance)assert.ok(acceptance.false_releases===0&&acceptance.released_necessary/acceptance.necessary>=.95,'The frozen reserve must pass through real signed-purpose MCP, not just the isolated gate.');
@@ -310,7 +365,7 @@ try {
     await phone.getByRole('button',{name:'Refresh',exact:true}).click();
     await phone.locator('#requests .request').filter({hasText:'Summarize the subjects and snippets in my visible inbox.'}).getByRole('button',{name:'Approve scoped session',exact:true}).waitFor();
     assert.match(await phone.locator('#requests').textContent(),/Visible inbox subjects/);assert.match(await phone.locator('#requests').textContent(),/without a relevance model/);assert.match(await phone.locator('#requests').textContent(),/450 characters/);
-    await phone.screenshot({path:resolve(root,'artifacts/phone-bounded-read-approval.png'),fullPage:true});
+    await phone.screenshot({path:resolve(root,'data/evaluation/phone-bounded-read-approval.png'),fullPage:true});
     await phone.getByRole('button',{name:'Approve scoped session',exact:true}).click();
     await until(async()=>(await status(requested.id)).view,30000);await review.close();
     const timings=[],mcpTimings=[],mcpCompleted=[];
@@ -333,28 +388,40 @@ try {
     await serviceWorker.evaluate(async id=>chrome.scripting.executeScript({target:{tabId:id},func:()=>{document.querySelector('h1').textContent='Inbox';document.querySelector('.bog').textContent='Password: synthetic-private-value';}}),owned);
     assert.equal((await boundedRead(subject,0,'bounded-hard-private')).dom_access.items.length,0);
     await tool('close_browser_session',{session_id:requested.id});assert.equal((await status(requested.id)).dom_access,undefined);
-    await writeFile(resolve(root,`artifacts/bounded-${boundedRemote?'remote-':''}e2e-report.json`),JSON.stringify({synthetic:true,actual_mcp:true,transport:boundedRemote?'OAuth Streamable HTTP':'stdio',actual_phone_signature:true,actual_extension:true,model_calls:0,local_adjudication_ms:timings,mcp_call_ms:mcpTimings,completed_in_call:mcpCompleted,deadline_ms:950,local_coordinator:true,phone_approval_excluded:true},null,2));
+    await writeFile(resolve(root,`data/evaluation/bounded-${boundedRemote?'remote-':''}e2e-report.json`),JSON.stringify({synthetic:true,actual_mcp:true,transport:boundedRemote?'OAuth Streamable HTTP':'stdio',actual_phone_signature:true,actual_extension:true,model_calls:0,local_adjudication_ms:timings,mcp_call_ms:mcpTimings,completed_in_call:mcpCompleted,deadline_ms:950,local_coordinator:true,phone_approval_excluded:true},null,2));
     assert.ok(mcpCompleted.every(Boolean),'Every bounded fixture read must complete in its MCP call.');assert.ok(mcpTimings.every(ms=>ms<1000),'Local MCP read completion must meet the sub-second target.');
     console.log('PASS: signed field grants through real MCP, phone UI, owned Chrome tab and production local adjudicator; exact subject/snippet reads, hard redaction, wrong-context denial, request bounds and close. No model or supplied model decisions.');
     mcp=previousMcp;
   }
   if (nativeAutomatic || automaticFixture || remoteFixture) {
-    // Test manifest grants website access at install instead of driving Chrome's native permission bubble.
-    // Model setup uses the real extension button and real model download; no inference output is supplied.
     if (remoteFixture) {
+      await review.locator('#inferenceSettings > summary').click();
       await review.locator('#provider').selectOption('openai_compatible');
       await review.locator('#model').fill('synthetic-remote-model'); await review.locator('#endpoint').fill(providerEndpoint);
       await review.locator('#apiKey').fill('synthetic-provider-key');
       await review.getByRole('button',{name:'Save remote provider',exact:true}).click();
       await until(async()=> (await review.locator('#providerStatus').textContent()).includes('synthetic-remote-model'));
       assert.equal(await review.locator('#apiKey').inputValue(),'');
-      await review.getByRole('button',{name:'Test with synthetic data',exact:true}).click();
-      await until(async()=> (await review.locator('#message').textContent()).includes('Provider returned a valid JSON'));
+      assert.equal((await review.evaluate(() => chrome.runtime.sendMessage({type:'test_inference'}))).ok, true);
       assert.equal(providerRequests.length,1); assert.equal(providerRequests[0].synthetic_test,true);
-      await review.screenshot({path:resolve(root,'artifacts/remote-provider-setup.png'),fullPage:true});
+      await review.screenshot({path:resolve(root,'data/evaluation/remote-provider-setup.png'),fullPage:true});
     }
-    if (automaticFixture) await serviceWorker.evaluate(()=>chrome.storage.local.set({automation:{enabled:true}}));
-    else await review.getByRole('button',{name:'Enable automatic tasks',exact:true}).click();
+    if (setupOnly) {
+      await review.locator('#provider').selectOption('purpose_browser');
+      await until(async () => (await review.locator('#providerStatus').textContent()).includes('Chrome ML engine'));
+      const local = await serviceWorker.evaluate(() => chrome.storage.local.get(['inference_settings','automation']));
+      assert.equal(local.inference_settings.profile.provider, 'purpose_browser');
+      assert.equal(local.inference_settings.api_key, '');
+      assert.equal(local.automation.enabled, true);
+      assert.equal(await review.locator('#remoteSettings').isVisible(), false);
+      await review.evaluate(() => chrome.runtime.sendMessage({type:'disable_automation'}));
+      await review.reload();
+      await until(async () => (await review.locator('#aiStatus').textContent()).includes('paused'));
+      assert.equal((await serviceWorker.evaluate(() => chrome.storage.local.get('automation'))).automation.enabled, false);
+      await review.evaluate(() => chrome.runtime.sendMessage({type:'enable_automation'}));
+      await review.close();
+      console.log('PASS: advanced provider save over real HTTPS, Chrome ML selection removes the key and requires no activation button, and reload preserves an intentional pause.');
+    } else {
     try { await until(async()=>(await serviceWorker.evaluate(async()=> (await chrome.storage.local.get('automation')).automation))?.enabled,300000); }
     catch { throw new Error('Native model setup failed: '+await review.locator('#message').textContent()+'; '+await review.locator('#aiStatus').textContent()); }
     await review.close();
@@ -366,7 +433,7 @@ try {
       assert.equal(providerRequests.length,1,'No browser content may reach inference before phone approval.');
       assert.match(await phone.locator('#requests').textContent(),/synthetic-remote-model/);
       assert.match(await phone.locator('#requests').textContent(),/unrelated ordinary content/);
-      await phone.screenshot({path:resolve(root,'artifacts/phone-remote-inference-approval.png'),fullPage:true});
+      await phone.screenshot({path:resolve(root,'data/evaluation/phone-remote-inference-approval.png'),fullPage:true});
     }
     await phone.getByRole('button',{name:'Approve scoped session',exact:true}).click();
     async function automaticView() { try { return await until(async()=>{const s=await status(auto.id);return s.view?s:false;},90000); } catch { const s=await status(auto.id); const local=await serviceWorker.evaluate(async()=> (await chrome.storage.session.get('last_error')).last_error);throw new Error('Automatic view failed: '+JSON.stringify(s)+'; local='+local); } }
@@ -426,7 +493,12 @@ try {
       assert.equal(await phone.getByLabel('Total payment limit (USD)', {exact:true}).isVisible(), false);
       await phone.getByLabel('Allow communications', {exact:true}).check();
       await phone.getByRole('button',{name:'Approve scoped session',exact:true}).click();
-      const approvedScope = await serviceWorker.evaluate(async id => (await chrome.runtime.sendMessage({type:'sessions'})).sessions.find(s=>s.id===id).scope, auto.id);
+      const approvedScope = await until(() => serviceWorker.evaluate(async id => {
+        const {settings} = await chrome.storage.local.get('settings');
+        const response = await fetch(settings.url+'/api/bridge/sessions', {headers:{Authorization:'Bearer '+settings.bridge_token,'X-AgentGate-Extension':'chrome-extension://'+chrome.runtime.id}});
+        if (!response.ok) throw new Error('Signed-scope regression read failed.');
+        return (await response.json()).sessions.find(s=>s.id===id)?.scope;
+      }, auto.id));
       assert.deepEqual(approvedScope.action_policy, {communications:true,payments:false,payment_limit_cents:0});
       autoView=await automaticView();await autoAction({type:'click',ref:autoView.view.controls.find(c=>c.label==='Open demo workspace').ref},'auto-draft-workspace');
       for(const [label,value] of [['To','ali@example.test'],['Subject','Daycare'],['Message','Hi Ali, confirming Friday.']]) await autoAction({type:'fill',ref:autoView.view.controls.find(c=>c.label===label).ref,value},'auto-fill-'+label);
@@ -461,6 +533,7 @@ try {
       assert.ok(inboxPayload.includes('Friday'));assert.ok(!inboxPayload.includes('ali@example.test'));
       const decisionSetup = await context.newPage(); decisionSetup.on('pageerror',e=>errors.push(e.message));
       await decisionSetup.goto(`chrome-extension://${extensionId}/review.html`);
+      await decisionSetup.locator('#inferenceSettings > summary').click();
       await decisionSetup.locator('#provider').selectOption('openjev');
       await decisionSetup.locator('#endpoint').fill(providerEndpoint.replace('/chat/completions','/systemone'));
       await decisionSetup.locator('#apiKey').fill('synthetic-provider-key');
@@ -504,10 +577,11 @@ try {
       const rawDecisions=JSON.stringify(decisionRequests);
       for(const privateValue of ['12,480.72','clinic results','UNSENT_PRIVATE_DRAFT','EXISTING_PRIVATE_VALUE','HIDDEN_PASSWORD_VALUE','ali@example.test','synthetic-provider-key'])assert.ok(!rawDecisions.includes(privateValue),privateValue);
       // Restore the existing planner profile before the profile-change/revocation cases.
-      const restore=await context.newPage();await restore.goto(`chrome-extension://${extensionId}/review.html`);await restore.locator('#provider').selectOption('openai_compatible');await restore.locator('#endpoint').fill(providerEndpoint);await restore.locator('#model').fill('synthetic-remote-model');await restore.locator('#format').selectOption('schema');await restore.locator('#apiKey').fill('synthetic-provider-key');await restore.getByRole('button',{name:'Save remote provider',exact:true}).click();await until(async()=>(await restore.locator('#providerStatus').textContent()).includes('synthetic-remote-model'));await restore.close();
+      const restore=await context.newPage();await restore.goto(`chrome-extension://${extensionId}/review.html`);await restore.locator('#inferenceSettings > summary').click();await restore.locator('#provider').selectOption('openai_compatible');await restore.locator('#endpoint').fill(providerEndpoint);await restore.locator('#model').fill('synthetic-remote-model');await restore.locator('#format').selectOption('schema');await restore.locator('#apiKey').fill('synthetic-provider-key');await restore.getByRole('button',{name:'Save remote provider',exact:true}).click();await until(async()=>(await restore.locator('#providerStatus').textContent()).includes('synthetic-remote-model'));await restore.close();
       console.log('PASS: granular MCP read → own Chrome tab → preflight → local redaction → per-element typed decisions → filtered structural paths; refusal, hard exclusions, invalid model, changing source, replay and close. Synthetic OpenJev decisions over actual HTTPS.');
       const pending = await tool('request_browser_session',{goal:'Summarize my visible inbox messages.',origins:['http://127.0.0.1:8080'],permissions:['read'],ttl_seconds:300});
       const change = await context.newPage(); change.on('pageerror',e=>errors.push(e.message));await change.goto(`chrome-extension://${extensionId}/review.html`);
+      await change.locator('#inferenceSettings > summary').click();
       await change.locator('#model').fill('changed-remote-model');await change.locator('#apiKey').fill('synthetic-provider-key');
       await change.getByRole('button',{name:'Save remote provider',exact:true}).click();await until(async()=> (await change.locator('#providerStatus').textContent()).includes('changed-remote-model'));await change.close();
       const before = providerRequests.length;await phone.getByRole('button',{name:'Refresh',exact:true}).click();await phone.getByRole('button',{name:'Approve scoped session',exact:true}).click();
@@ -516,6 +590,7 @@ try {
       console.log('PASS: production remote adapter over real HTTPS; phone-bound provider, no pre-approval egress, local hard redaction, final action approval, profile-change blocker; no native model required.');
     }
     console.log('PASS: '+(remoteFixture?'remote inference with synthetic HTTPS provider':automaticFixture?'automatic runtime with supplied test-only model decisions':'native automatic session')+' — phone approval → own tab → filtered view → read navigation → second owned tab → filtered answer. Review page closed; no manual binding, publishing or per-task enable step.');
+    }
   }
   for(const connection of [chatgptProtocol,claudeProtocol]) {
     const refreshed=await connection.exchange({grant_type:'refresh_token',client_id:connection.registration.client_id,refresh_token:connection.access.refresh_token,resource:'http://127.0.0.1:8788/mcp'}); assert.equal(refreshed.status,200);
@@ -525,8 +600,8 @@ try {
     assert.equal((await connection.replay()).status,400);
   }
   mcp=stdio;
-  const hasAutomatic = nativeAutomatic || automaticFixture || remoteFixture;
-  const revokedBrowserTask = await tool('request_browser_session',{goal:'Read the synthetic email draft subject.',origins:['http://127.0.0.1:8080'],permissions:['read'],ttl_seconds:300,...(purposeLocal?{}:{disclosure:'local_planner'})});
+  const hasAutomatic = nativeAutomatic || automaticFixture || remoteFixture || pairedInbox;
+  const revokedBrowserTask = await tool('request_browser_session',{goal:'Read the synthetic email draft subject.',origins:['http://127.0.0.1:8080'],permissions:['read'],ttl_seconds:300,...(purposeLocal||pairedInbox||setupOnly?{}:{disclosure:'local_planner'})});
   await phone.getByRole('button',{name:'Refresh',exact:true}).click(); await phone.getByRole('button',{name:'Approve scoped session',exact:true}).click(); await until(async () => (await status(revokedBrowserTask.id)).status === 'active');
   let revokedTab;
   if (hasAutomatic) {
@@ -548,7 +623,7 @@ try {
   for (const size of [192, 512]) { await iconPage.setViewportSize({width: size, height: size}); await iconPage.goto('http://127.0.0.1:8788/icon.svg'); await iconPage.locator('svg').evaluate((svg, size) => { svg.setAttribute('width', size); svg.setAttribute('height', size); }, size); await iconPage.locator('svg').screenshot({path: resolve(root, `public/icon-${size}.png`)}); }
   console.log('PASS: real MCP handshake and extension execution; agent cannot approve; no unrelated synthetic data in MCP transcript; zero JavaScript errors.');
   console.log('PASS: OAuth metadata, DCR, browser-bound phone consent, S256 PKCE, one-use codes, refresh tokens, Streamable HTTP tools, connector isolation and revocation.');
-  await writeFile(resolve(root, 'artifacts/e2e-report.json'), JSON.stringify({scenarios: ['session_audit',...(nativeAutomatic||automaticFixture||remoteFixture?['automatic_owned_tabs',...(automaticFixture||remoteFixture?['automatic_inbox_disclosure']:[]),...(remoteFixture?['remote_inference_provider','remote_profile_consent']:[])]:[])], mcp_tools: tools.tools.length, browser_pairing:'real extension/phone encrypted signed pairing and revocation; QR target opened directly instead of camera scan; no copied keys',remote_mcp:'SDK Streamable HTTP with real OAuth; actual ChatGPT/Claude product setup unverified',remote_inference:remoteFixture?'Production extension adapter over real HTTPS with synthetic responses; real paid-provider inference not exercised':'not exercised',native_inference:nativeAutomatic?'Genuine Gemini Nano in the unpacked Chrome for Testing extension, automatic disclosure and action checks, own tabs, closed review page':automaticFixture?'Automatic browser runtime uses explicit supplied fixture decisions; native model separately checked in chrome-ai-report.json':'not exercised by this suite; automatic publication uses supplied selection IDs; see chrome-ai-report.json for the separate native probe',private_data_leaks: 0, javascript_errors: errors, toolbar_binding: nativeAutomatic||automaticFixture||remoteFixture?'Automatic test opens and binds its own tabs without intervention':'native toolbar gesture not exercised'}, null, 2));
+  await writeFile(resolve(root, 'data/evaluation/e2e-report.json'), JSON.stringify({scenarios: ['session_audit',...(pairedInbox?['automatic_browser_setup','purpose_inbox_read_completion']:[]),...(setupOnly?['provider_setup','provider_key_removal','pause_preservation']:[]),...(nativeAutomatic||automaticFixture||remoteFixture?['automatic_owned_tabs',...(automaticFixture||remoteFixture?['automatic_inbox_disclosure']:[]),...(remoteFixture?['remote_inference_provider','remote_profile_consent']:[])]:[])], mcp_tools: tools.tools.length, browser_pairing:'real extension/phone encrypted signed pairing and revocation; QR target opened directly instead of camera scan; no copied keys',remote_mcp:'SDK Streamable HTTP with real OAuth; actual ChatGPT/Claude product setup unverified',remote_inference:remoteFixture?'Production extension adapter over real HTTPS with synthetic responses; real paid-provider inference not exercised':'not exercised',native_inference:nativeAutomatic?'Genuine Gemini Nano in the unpacked Chrome for Testing extension, automatic disclosure and action checks, own tabs, closed review page':automaticFixture?'Automatic browser runtime uses explicit supplied fixture decisions; native model separately checked in chrome-ai-report.json':'not exercised by this suite; automatic publication uses supplied selection IDs; see chrome-ai-report.json for the separate native probe',private_data_leaks: 0, javascript_errors: errors, toolbar_binding: nativeAutomatic||automaticFixture||remoteFixture?'Automatic test opens and binds its own tabs without intervention':'native toolbar gesture not exercised'}, null, 2));
   await phoneBrowser.close();
 } finally {
   await mcp?.close(); for(const remote of remoteClients) await remote.close(); for(const authContext of authorizationContexts) await authContext.close(); await context?.close(); await phoneContext?.close(); await phoneBrowser?.close();

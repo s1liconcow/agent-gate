@@ -8,7 +8,7 @@ REPO = 'cross-encoder/nli-deberta-v3-small'
 REVISION = 'fa2804872c3b4bd748f38c0185cc85775361e735'
 SIZE = 567605820
 SHA256 = 'ebc79588dd73ccfb6a3f6078519cfbf512c5305384c5ea1845bc71cd32216e86'
-ROOT = Path(__file__).resolve().parent.parent / 'artifacts/decision-model/purpose-encoder-base'
+ROOT = Path(__file__).resolve().parent.parent / 'data/decision-model/purpose-encoder-base'
 
 
 def main():

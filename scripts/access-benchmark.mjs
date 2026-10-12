@@ -5,7 +5,7 @@ import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {cpus, totalmem} from 'node:os';
 import {createHash} from 'node:crypto';
-import {accessCases} from '../tests/fixtures/access-cases.mjs';
+import {accessCases} from '../data/evaluation/fixtures/access-cases.mjs';
 import {prepareSnapshot} from '../extension/disclosure.mjs';
 import {decisionModel} from '../extension/decision-model.mjs';
 
@@ -22,9 +22,9 @@ const report = {created_at:new Date().toISOString(),environment:{cpu:cpus()[0]?.
   method:{synthetic:true,runs,includes:['intent inference','local hard filtering','candidate purpose and privacy inference','loopback HTTP'],excludes:['model startup','phone approval','Chrome DOM capture and freshness proof','coordinator and MCP transport'],threshold_source:'production decision-model.mjs; no fitting on benchmark cases'},samples:[]};
 report.server=await(await fetch(new URL('/health',url),{signal:AbortSignal.timeout(5000)})).json();
 assert.equal(report.server.model,model,'Benchmark server identity must match the requested model.');
-for(const file of ['extension/decision-model.mjs','extension/disclosure.mjs','tests/fixtures/access-cases.mjs']) report.method[file+'_sha256']=createHash('sha256').update(await readFile(resolve(root,file))).digest('hex');
-await mkdir(resolve(root,'artifacts'),{recursive:true});
-const path=resolve(root,`artifacts/${name}.json`), judge=decisionModel({profile,api_key:''},{milliseconds:30000});
+for(const file of ['extension/decision-model.mjs','extension/disclosure.mjs','data/evaluation/fixtures/access-cases.mjs']) report.method[file+'_sha256']=createHash('sha256').update(await readFile(resolve(root,file))).digest('hex');
+await mkdir(resolve(root,'data/evaluation'),{recursive:true});
+const path=resolve(root,`data/evaluation/${name}.json`), judge=decisionModel({profile,api_key:''},{milliseconds:30000});
 const percentile=(values,p)=>values.length?[...values].sort((a,b)=>a-b)[Math.ceil(values.length*p)-1]:null;
 async function persist() {
   const warm=report.samples.filter(s=>s.run>0), times=warm.map(s=>s.milliseconds), released=warm.flatMap(s=>s.released);

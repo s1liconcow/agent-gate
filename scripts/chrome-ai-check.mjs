@@ -13,7 +13,7 @@ try {
   await writeFile(resolve(extension,'ai-check.html'),'<!doctype html><title>AgentGate native AI check</title><button id="start">Check native inference</button><pre id="result"></pre><script type="module" src="ai-check.mjs"></script>');
   await cp(resolve(root,draft?'scripts/native-draft-probe.mjs':'scripts/native-ai-probe.mjs'),resolve(extension,'ai-check.mjs'));
   const fixture=draft?'draft-capture.json':'inbox-capture.json';
-  await cp(resolve(root,'artifacts',fixture),resolve(extension,fixture));
+  await cp(resolve(root,'data/evaluation',fixture),resolve(extension,fixture));
   const ignored=['--disable-background-networking','--disable-component-update','--disable-field-trial-config','--enable-unsafe-swiftshader','--disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion'];
   let target;
   if(branded) {
@@ -23,7 +23,7 @@ try {
       try{response.setHeader('Content-Type',path.endsWith('.mjs')?'text/javascript':path.endsWith('.json')?'application/json':'text/html');response.end(await readFile(resolve(extension,path.slice(1))));}catch{response.writeHead(404).end();}
     });
     await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-    const profile=resolve(root,'artifacts/native-chrome-profile');await mkdir(profile,{recursive:true,mode:0o700});
+    const profile=resolve(root,'data/evaluation/native-chrome-profile');await mkdir(profile,{recursive:true,mode:0o700});
     // Test-only flag exposes the same numerical sampling surface extensions have.
     // The production extension needs no flags. This remains genuine native inference.
     context=await chromium.launchPersistentContext(profile,{channel:'chrome',headless:false,ignoreDefaultArgs:ignored,args:['--enable-blink-features=AIPromptAPILegacyParams,AIPromptAPILegacyIdentifiers']});target='http://127.0.0.1:'+server.address().port+'/ai-check.html';
@@ -43,6 +43,6 @@ try {
     if(!finished){Object.assign(report,JSON.parse(await page.locator('#result').textContent()));report.inference='unverified';report.reason='Native model download/initialization did not complete within the bounded check. Model cache retained in the dedicated synthetic-test profile.';}
   }
   else {report.inference='unverified';report.reason='Native model not ready in this isolated browser profile; no download or cloud fallback was attempted.';}
-  await mkdir(resolve(root,'artifacts'),{recursive:true});await writeFile(resolve(root,'artifacts',draft?'native-draft-report.json':'chrome-ai-report.json'),JSON.stringify(report,null,2));
+  await mkdir(resolve(root,'data/evaluation'),{recursive:true});await writeFile(resolve(root,'data/evaluation',draft?'native-draft-report.json':'chrome-ai-report.json'),JSON.stringify(report,null,2));
   console.log(JSON.stringify(report,null,2));if(attempted&&report.inference!=='passed')process.exitCode=1;
 }finally{await context?.close();server?.closeAllConnections();if(server?.listening)await new Promise(resolve=>server.close(resolve));await rm(temporary,{recursive:true,force:true});}

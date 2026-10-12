@@ -1,6 +1,6 @@
 """Fetch the public, pinned 4B experiment weights with verified bounded ranges.
 
-Resumable parts stay under artifacts. No login, account token, or remote code.
+Resumable parts stay under data/decision-model. No login, account token, or remote code.
 """
 import concurrent.futures
 import hashlib
@@ -17,7 +17,7 @@ REVISION = '0e7ffd5c629ef7719d4cbc04069232580bfa9d9c'
 SIZE = 3034300695
 SHA256 = '5fb9acd0246866381cf8c5c354c6db1019f6498eec4ccb4f5edcc71ffeacb2db'
 CHUNK = 8 * 1024 * 1024
-ROOT = Path(__file__).resolve().parent.parent / 'artifacts/decision-model/qwen-4b-4bit'
+ROOT = Path(__file__).resolve().parent.parent / 'data/decision-model/qwen-4b-4bit'
 
 
 def digest(path):

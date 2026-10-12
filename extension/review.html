@@ -1,13 +1,13 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AgentGate · Browser</title><link rel="stylesheet" href="style.css"><script type="module" src="review.mjs"></script></head>
 <body>
-<header><div class="brand"><img src="icon.svg" width="34" height="34" alt="">AgentGate</div><span id="connection" class="status">Not connected</span></header>
+<header><div class="brand"><img src="icon.svg" width="34" height="34" alt="">AgentGate</div><button id="connection" class="secondary compact">Connect</button></header>
 <main class="browser-page">
   <div class="intro"><h1>Your browser</h1><p id="aiStatus" role="status">Connecting…</p></div>
   <div id="message" class="message" role="status" hidden></div>
   <section class="browser-controls">
       <details id="browserPairing"><summary>Connect this browser</summary>
-        <p class="hint">Add this local browser for tasks. Your cloud browser and shared logins stay connected. Choose the default in the approval app.</p>
+        <p class="hint">To connect or switch accounts, set the Account link under Advanced settings to the account URL shown by your assistant, then scan this browser’s QR code in that account’s approval app. The previous pairing remains until separately revoked.</p>
         <div id="pairingQR" hidden><canvas id="qr" aria-label="Scan to connect this browser"></canvas><p id="pairingStatus" class="hint" role="status"></p></div>
         <button id="pair">Connect</button>
       </details>
@@ -20,8 +20,8 @@
   <details id="localReceipt" hidden><summary>Last shared view</summary><pre id="localView"></pre></details>
   <details id="diagnostics" hidden><summary>Diagnostics</summary><pre id="captureDiagnostics"></pre></details>
       <details id="inferenceSettings"><summary>Advanced settings</summary>
-        <section aria-labelledby="connectionSettingsHeading"><h2 id="connectionSettingsHeading">Connection settings</h2><label>Browser name<input id="browserName" value="My Chrome" maxlength="80" autocomplete="off"></label><label>Account link<input id="url" value="https://agentgate-control.dchalloner.workers.dev" type="url"></label><p id="fingerprint" class="hint"></p></section>
-        <label>AI provider<select id="provider" disabled><option value="purpose_browser" selected>On-device checks</option><option value="local">Chrome AI</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="cloudflare" disabled>Cloudflare AI · unavailable</option><option value="openai_compatible">Custom API</option><option value="purpose_encoder">Desktop classifier</option><option value="openjev">OpenJev · experimental</option></select></label>
+        <section aria-labelledby="connectionSettingsHeading"><h2 id="connectionSettingsHeading">Connection settings</h2><label>Browser name<input id="browserName" value="My Chrome" maxlength="80" autocomplete="off"></label><label>Account link<input id="url" value="https://agentgate-control.dchalloner.workers.dev" type="url"></label><p id="fingerprint" class="hint"></p><p id="connectionIdentity" class="hint"></p></section>
+        <label>AI provider<select id="provider" disabled><option value="purpose_browser" selected>On-device checks</option><option value="local">Chrome AI</option></select></label>
         <div id="chromeAISettings" hidden><p class="hint">Reads, fills and clicks run on this device.</p><button id="prepareChromeAI" class="secondary">Prepare Chrome AI</button></div>
         <div id="remoteSettings" hidden>
           <label>Model<input id="model" maxlength="160" autocomplete="off"></label><label>API endpoint<input id="endpoint" type="url" maxlength="500" autocomplete="off" placeholder="https://provider.example/v1/chat/completions"></label>

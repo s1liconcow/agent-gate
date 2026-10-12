@@ -11,7 +11,7 @@ export async function readDOM(client,sessionId,body,waitMilliseconds=750) {
     let current;
     try{current=await deadline(()=>client.call('sessions/'+sessionId),remaining,'READ_PENDING');}
     catch(error){if(error.code==='READ_PENDING')return pending;throw error;}
-    if(['closed','revoked','expired'].includes(current.status))return current;
+    if(['closed','revoked','expired','awaiting_read'].includes(current.status))return current;
     if(current.dom_access?.request_id===id&&!current.dom_request)return current;
     if(ends-performance.now()<25)break;
     await new Promise(resolve=>setTimeout(resolve,25));

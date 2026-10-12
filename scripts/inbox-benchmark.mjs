@@ -18,7 +18,7 @@ assert.ok(Number.isInteger(runs) && runs >= 1 && runs <= 20, 'Use --runs=1..20.'
 assert.ok(sizes.length > 0 && sizes.length <= 8 && sizes.every(n => Number.isInteger(n) && n >= 1 && n <= 60), 'Use inbox sizes between 1 and 60.');
 assert.match(outputName, /^[a-z0-9-]+$/, 'Output name must use letters, digits and hyphens.');
 const temporary = await mkdtemp(resolve(tmpdir(), 'agentgate-inbox-benchmark-'));
-const artifact = resolve(root, 'artifacts/' + outputName + '.json');
+const artifact = resolve(root, 'data/evaluation/' + outputName + '.json');
 const task = {goal: 'Summarize the visible messages in my Gmail inbox.', origins: ['https://mail.google.com'], permissions: ['read', 'click'], ttl_seconds: 300, disclosure: 'local_planner'};
 const need = 'I need the visible sender names, subjects and snippets to summarize the inbox.';
 const report = {created_at: new Date().toISOString(), agentgate_version: JSON.parse(await readFile(resolve(root, 'package.json'))).version,
@@ -49,7 +49,7 @@ function summarize() {
 }
 async function persist() { summarize(); await writeFile(artifact, JSON.stringify(report, null, 2)); }
 try {
-  await mkdir(resolve(root, 'artifacts'), {recursive: true});
+  await mkdir(resolve(root, 'data/evaluation'), {recursive: true});
   const extension = resolve(temporary, 'capture-extension'); await cp(resolve(root, 'extension'), extension, {recursive: true});
   const manifest = JSON.parse(await readFile(resolve(extension, 'manifest.json'))); manifest.host_permissions.push('https://mail.google.com/*');
   await writeFile(resolve(extension, 'manifest.json'), JSON.stringify(manifest));
@@ -114,7 +114,7 @@ try {
     catch { response.writeHead(404).end(); }
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const profile = resolve(root, 'artifacts/native-chrome-profile'); await mkdir(profile, {recursive: true, mode: 0o700});
+  const profile = resolve(root, 'data/evaluation/native-chrome-profile'); await mkdir(profile, {recursive: true, mode: 0o700});
   const ignored = ['--disable-background-networking', '--disable-component-update', '--disable-field-trial-config', '--enable-unsafe-swiftshader', '--disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion'];
   nativeContext = await chromium.launchPersistentContext(profile, {channel: 'chrome', headless: false, ignoreDefaultArgs: ignored, args: ['--enable-blink-features=AIPromptAPILegacyParams,AIPromptAPILegacyIdentifiers']});
   report.environment.chrome = nativeContext.browser().version();
@@ -150,7 +150,7 @@ try {
     'This measures local filtering up to an eligible task view, not the remote assistant’s final summary. Phone approval, real Gmail navigation/login/network, coordinator/MCP transport, and initial model download are excluded. Capture times and every native stage are included in the JSON report.', '',
     'Completed inference does not imply a complete inbox summary: the current 10,000-character text candidate budget, 32 selected-ID limit and 2,000-character published view can reduce coverage. Fully exposed counts exclude partially truncated message snippets.', '',
     'Reproduce: `npm run benchmark:inbox` (or `npm run benchmark:inbox -- --runs=5 --sizes=2,10,25,50`). Uses only the dedicated synthetic-test profile; no real accounts or secrets.', ''];
-  await writeFile(resolve(root, 'artifacts/' + outputName + '.md'), lines.join('\n'));
+  await writeFile(resolve(root, 'data/evaluation/' + outputName + '.md'), lines.join('\n'));
   console.log(JSON.stringify({report: artifact, summary: report.summary.map(({fresh_sessions_sample, ...s}) => ({...s, fresh_total_ms: fresh_sessions_sample?.total_ms, fresh_startup_ms: fresh_sessions_sample?.startup_ms, fresh_status: fresh_sessions_sample?.status}))}, null, 2));
 } finally {
   await captureContext?.close(); await nativeContext?.close();

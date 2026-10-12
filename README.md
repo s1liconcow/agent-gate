@@ -1,9 +1,14 @@
-# AgentGate 0.7.0
+# AgentGate 0.7.1
 
-AgentGate is a browser gateway for purpose-bound assistant access, with local
-disclosure checks and phone-signed approvals.
+AgentGate gives each account a cloud browser for assistant tasks. Connect through
+OpenAI or another MCP client, choose an engagement level, and tap **Approve and
+connect**. Audit Only is the default. The sign-in browser signs approval; setup
+needs no separate phone app.
 
 - [Setup and operation](docs/SETUP.md)
+- [Cloudflare browser setup and tenant isolation](docs/HOSTED_BROWSER.md)
+- [Engagement: Audit Only, Auto Approve and Aggressive](docs/ENGAGEMENT.md)
+- [One-tap assistant connection](docs/CONNECTION.md)
 - [Public landing page](https://agentgate-7qd.pages.dev)
 - [Purpose-based access adjudication](docs/ACCESS_ADJUDICATION.md)
 - [Chrome classifier: training, build and evaluation](local-decision/BROWSER_CLASSIFIER.md)
@@ -46,7 +51,7 @@ unpacked extension ID; pair that browser with the existing approval phone.
 | `docs/`, `design/` | Setup, research reports and design assets |
 | `legacy/v0.1/` | Archived read-only prototype |
 
-The current package and extension share version **0.7.0**. The coordinator's
+The current package and extension share version **0.7.1**. The coordinator's
 existing deployment name and hosted URLs retain `agentgate-control`.
 
 ## Archived prototype
@@ -59,6 +64,10 @@ sh legacy/v0.1/scripts/check.sh
 ```
 
 ## Local artifacts
+
+Training datasets, model checkpoints, exports, and evaluation results live in
+[`data/`](data/README.md). Frozen evaluation fixtures are versioned under
+`data/evaluation/fixtures/`. The installed Chrome engine stays in `extension/`.
 
 Datasets, downloaded and trained model weights, browser profiles, benchmark
 outputs, logs, databases, credentials, dependency directories, generated

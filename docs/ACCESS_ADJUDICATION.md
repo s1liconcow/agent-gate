@@ -149,7 +149,7 @@ local. The remaining fresh browser errors were a finishing time released for a
 starting-time question, a different activity with a similar name, and an Outbox
 item. The folder kernel now excludes non-Inbox fields before inference; v8 trains
 on general temporal-phase and overlapping-topic counterfactuals, without importing
-the authored reserve. Previous checkpoints and failed reports remain in `artifacts/`.
+the authored reserve. Previous checkpoints and failed reports remain in `data/evaluation/`.
 The 153 perturbations append unrelated facts or authority claims to known useful
 sources; they are regression checks, not a new independent acceptance reserve.
 
@@ -201,11 +201,11 @@ guarantee is made. Sender display labels are observed UI data, not cryptographic
 person identity; contact aliases and unrecognized purpose phrasing need further
 evaluation. Sensitive-pattern exclusions do not establish arbitrary privacy safety.
 
-Final evidence: [result and provenance summary](../artifacts/access-purpose-v17-final-summary.json),
-[fresh browser reserve](../artifacts/access-purpose-browser-v17-fresh.json),
-[stdio MCP](../artifacts/purpose-stdio-v17-final-report.json),
-[OAuth MCP](../artifacts/purpose-oauth-v17-final-report.json), and
-[archived runtime hashes](../artifacts/decision-model/purpose-run-v17/validation-source/sha256.json).
+Final evidence: [result and provenance summary](../data/evaluation/access-purpose-v17-final-summary.json),
+[fresh browser reserve](../data/evaluation/access-purpose-browser-v17-fresh.json),
+[stdio MCP](../data/evaluation/purpose-stdio-v17-final-report.json),
+[OAuth MCP](../data/evaluation/purpose-oauth-v17-final-report.json), and
+[archived runtime hashes](../data/decision-model/purpose-run-v17/validation-source/sha256.json).
 The summary links every selected regression report. Historical failed reports
 remain available alongside these final results.
 
@@ -213,17 +213,17 @@ remain available alongside these final results.
 
 Run commands from the repository root. Existing completed artifact directories
 must not be overwritten. The isolated Python environment is
-`artifacts/decision-model/.venv`; training requires MPS on this machine.
+`data/decision-model/.venv`; training requires MPS on this machine.
 
 ```sh
-artifacts/decision-model/.venv/bin/python local-decision/purpose_data_v17.py \
-  --parent artifacts/decision-model/purpose-data-v16 \
-  --output artifacts/decision-model/purpose-new-data
-artifacts/decision-model/.venv/bin/python local-decision/train_purpose_v5.py \
-  --base artifacts/decision-model/purpose-encoder-base \
-  --initial artifacts/decision-model/purpose-run-v16/model \
-  --data artifacts/decision-model/purpose-new-data \
-  --output artifacts/decision-model/purpose-new-run \
+data/decision-model/.venv/bin/python local-decision/purpose_data_v17.py \
+  --parent data/decision-model/purpose-data-v16 \
+  --output data/decision-model/purpose-new-data
+data/decision-model/.venv/bin/python local-decision/train_purpose_v5.py \
+  --base data/decision-model/purpose-encoder-base \
+  --initial data/decision-model/purpose-run-v16/model \
+  --data data/decision-model/purpose-new-data \
+  --output data/decision-model/purpose-new-run \
   --epochs 1 --batch-size 16 --lr 0.000004 --seed 107 --train-last-layers 2
 ```
 
@@ -232,7 +232,7 @@ local token file and exact `chrome-extension://...` Origin. Desktop setup select
 **Local purpose classifier**, its loopback endpoint, served immutable model ID
 and token, then enables automatic tasks. Request `disclosure=granular` with read
 permission. Each read uses `limit=1`; no `read_grants` appear in the signed scope.
-The accepted finite-target checkpoint is `artifacts/decision-model/purpose-run-v17/model`.
+The accepted finite-target checkpoint is `data/decision-model/purpose-run-v17/model`.
 It passed isolated Chrome and both full MCP transports. Earlier v8c/v9 checkpoints
 failed expanded challenges; the current browser envelope protocol requires the
 v4/v5/v6/v7 source-envelope architecture and cannot replay v8c's earlier plain-context
@@ -244,13 +244,13 @@ To replay the accepted checkpoint, using new report filenames:
 
 ```sh
 node tests/e2e.mjs --purpose-local --purpose-acceptance \
-  --purpose-suite=19 --purpose-model=artifacts/decision-model/purpose-run-v17/model \
+  --purpose-suite=19 --purpose-model=data/decision-model/purpose-run-v17/model \
   --purpose-report=purpose-stdio-replay-unique-name
 node tests/e2e.mjs --purpose-remote --purpose-acceptance \
-  --purpose-suite=19 --purpose-model=artifacts/decision-model/purpose-run-v17/model \
+  --purpose-suite=19 --purpose-model=data/decision-model/purpose-run-v17/model \
   --purpose-report=purpose-mcp-replay-unique-name
 node scripts/purpose-browser-benchmark.mjs \
-  --model=artifacts/decision-model/purpose-run-v17/model \
+  --model=data/decision-model/purpose-run-v17/model \
   --suite=19 --output=purpose-replay-unique-name
 ```
 

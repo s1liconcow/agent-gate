@@ -13,9 +13,9 @@ const modelArgument=arg('model',null),output=arg('output',null);
 assert.ok(modelArgument&&output,'Pass an explicit --model and new --output so benchmark provenance is reviewable.');
 const modelPath=resolve(root,modelArgument);assert.match(output,/^[a-z0-9-]+$/);
 const suite=arg('suite',null);assert.ok(suite,'Pass an explicit --suite; inspected reserves are regressions.');assert.match(suite,/^[1-9][0-9]?$/);
-const suiteFile='tests/fixtures/purpose-authored-v'+suite+'.mjs';
+const suiteFile='data/evaluation/fixtures/purpose-authored-v'+suite+'.mjs';
 const authored=(await import('../'+suiteFile))['purposeAuthoredV'+suite];
-const extraFile='artifacts/decision-model/purpose-metamorphic-v8c.jsonl';
+const extraFile='data/decision-model/purpose-metamorphic-v8c.jsonl';
 const extras=process.argv.includes('--extra')?(await readFile(resolve(root,extraFile),'utf8')).trim().split('\n').map(JSON.parse):[];
 const origin='https://mail.example',xpath='//span[@id="subject"]',runs=3;
 const request={xpath,offset:0,limit:1,need:'Read the needed inbox subject.',idempotency_key:'purpose-benchmark'};
@@ -52,7 +52,7 @@ try {
  const worker=browser.serviceWorkers()[0]||await browser.waitForEvent('serviceworker');
  const workerURL=new URL(worker.url()),extensionOrigin=workerURL.protocol+'//'+workerURL.hostname,token=randomBytes(32).toString('hex'),tokenFile=resolve(temp,'local-token');
  await writeFile(tokenFile,token,{mode:0o600});
- server=spawn(resolve(root,'artifacts/decision-model/.venv/bin/python'),[resolve(root,'local-decision/serve_purpose.py'),'--model',modelPath,'--token-file',tokenFile,'--port','0','--extension-origin',extensionOrigin],{cwd:root,stdio:['ignore','pipe','pipe']});
+ server=spawn(resolve(root,'data/decision-model/.venv/bin/python'),[resolve(root,'local-decision/serve_purpose.py'),'--model',modelPath,'--token-file',tokenFile,'--port','0','--extension-origin',extensionOrigin],{cwd:root,stdio:['ignore','pipe','pipe']});
  let logs='',errors='';server.stdout.on('data',b=>logs+=b);server.stderr.on('data',b=>errors+=b);
  const begun=Date.now();let identity;
  while(Date.now()-begun<30000){try{identity=JSON.parse(logs.trim());break;}catch{}if(server.exitCode!==null)throw new Error('Local classifier failed to start: '+errors.slice(-500));await new Promise(r=>setTimeout(r,100));}
@@ -89,7 +89,7 @@ try {
  report.summary.first_pass_released_necessary=first.filter(s=>s.released&&s.expected).length;
  report.summary.first_pass_necessary=first.filter(s=>s.expected).length;
  report.summary.achieved=report.summary.false_releases===0&&report.summary.released_necessary/necessary.length>=.95&&times.every(t=>t<1000)&&warm.filter(s=>cases.find(c=>c.id===s.case).mutate).every(s=>s.correct)&&report.summary.first_pass_false_releases===0&&report.summary.first_pass_released_necessary/report.summary.first_pass_necessary>=.95&&first.every(s=>s.milliseconds<1000);
- await mkdir(resolve(root,'artifacts'),{recursive:true});const path=resolve(root,'artifacts',output+'.json');await writeFile(path,JSON.stringify(report,null,2)+'\n',{flag:'wx'});
+ await mkdir(resolve(root,'data/evaluation'),{recursive:true});const path=resolve(root,'data/evaluation',output+'.json');await writeFile(path,JSON.stringify(report,null,2)+'\n',{flag:'wx'});
  console.log(JSON.stringify({report:path,...report.summary}));for(const s of warm.filter(s=>!s.correct))console.log(JSON.stringify(s));
  if(!report.summary.achieved)process.exitCode=1;
 }finally{await browser?.close();server?.kill('SIGTERM');if(server&&server.exitCode===null)await new Promise(r=>server.once('exit',r));await rm(temp,{recursive:true,force:true});}
