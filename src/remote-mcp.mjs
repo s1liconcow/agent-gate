@@ -11,6 +11,7 @@ export async function remoteMcp(request, env, ctx) {
   if (!tenant && ctx.props.account_id && (!/^[a-f0-9]{32}$/.test(ctx.props.account_id) || ctx.auth.userId !== ctx.props.account_id || ctx.auth.audience !== publicOrigin(request, env) + '/mcp')) return new Response('Wrong account', {status: 403});
   if (request.method !== 'POST') return new Response(null, {status: 405, headers: {Allow: 'POST'}});
   const accountId = tenant?.id || ctx.props.account_id;
+  const accountUrl = accountId ? tenantBase(request, accountId) : publicOrigin(request, env);
   const gate = env.GATE.getByName(accountId ? 'account:' + accountId : 'single-owner-v1');
   const allowed = await gate.checkConnector(ctx.props.connector_id);
   if (allowed.error) return new Response('Connector revoked or expired', {status: 403});
@@ -18,8 +19,8 @@ export async function remoteMcp(request, env, ctx) {
   const server = createServer({async call(path, data) {
     const answer = await gate.remoteCall(ctx.props.connector_id, path, data);
     if (answer.error) { const error = new Error(answer.error.message); error.code = answer.error.code; throw error; }
-    return answer.result;
-  }}, true, accountId ? tenantBase(request, accountId) : publicOrigin(request, env));
+    return path === 'browsers' ? {...answer.result, account_url: accountUrl + '/'} : answer.result;
+  }}, true, accountUrl);
   const transport = new WebStandardStreamableHTTPServerTransport({sessionIdGenerator: undefined, enableJsonResponse: true, maxRequestBodySize: 20000});
   await server.connect(transport);
   try { const response = await transport.handleRequest(request); const headers = new Headers(response.headers); headers.set('Cache-Control', 'no-store'); return new Response(response.body, {status: response.status, headers}); }
