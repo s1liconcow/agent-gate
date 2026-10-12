@@ -10,6 +10,7 @@ import {SessionRecordings} from './session-recording.mjs';
 import {PairedLocalClassifier} from './local-classifier.mjs';
 const ready = Promise.all([chrome.storage.local.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'}), chrome.storage.session.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'}), chrome.storage.session.remove(['source', 'binding', 'snapshot'])]);
 let socket, heartbeat, reconnectTimer, setupPromise, setupCredential, queue = Promise.resolve(), pairingQueue = Promise.resolve();
+let connectionGeneration = 0;
 const leases = new Map();
 const recordings = new SessionRecordings({audit: auditRecording});
 const automatic = new AutomaticBrowser({call, config, verifySession, audit: auditEvent, recordings});
@@ -26,12 +27,14 @@ async function setupBrowser() {
 }
 async function forget(settings) {
   if ((await config())?.bridge_token !== settings.bridge_token) return;
+  connectionGeneration++;
   clearTimeout(reconnectTimer); clearInterval(heartbeat);
   setupPromise = null; setupCredential = null;
-  if (socket) { socket.onclose = null; socket.close(); socket = null; }
+  if (socket) { socket.onclose = socket.onmessage = socket.onerror = socket.onopen = null; socket.close(); socket = null; }
+  await chrome.storage.local.remove('settings');
   await recordings.stopAll();
   await auditConnectionEnded();
-  await chrome.storage.local.remove('settings'); await chrome.storage.session.remove(['binding', 'bindings', 'agent_tabs', 'guarded', 'snapshot', 'checkout_bindings']); leases.clear();
+  await chrome.storage.session.remove(['binding', 'bindings', 'agent_tabs', 'guarded', 'snapshot', 'checkout_bindings']); leases.clear();
   await automatic.activity.clear();
 }
 async function call(path, value) {
@@ -166,15 +169,19 @@ async function execute(packet) {
 }
 async function connect() {
   if (socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return;
+  const generation = connectionGeneration;
   clearTimeout(reconnectTimer); clearInterval(heartbeat);
   try {
     const settings = await config(); if (!settings) return;
     if (settings.expires_at && settings.expires_at <= Date.now()) { await forget(settings); return; }
     await setupBrowser();
+    if (generation !== connectionGeneration) return;
     const {ticket} = await call('ticket', {}), url = new URL(settings.url + '/api/bridge/socket'); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    socket = new WebSocket(url, 'agentgate-' + ticket);
-    socket.onopen = () => {
-      socket.send('ready'); heartbeat = setInterval(() => { if (socket?.readyState === WebSocket.OPEN) socket.send('ping'); }, 20000);
+    if (generation !== connectionGeneration || (await config())?.bridge_token !== settings.bridge_token || socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return;
+    const connection = socket = new WebSocket(url, 'agentgate-' + ticket);
+    connection.onopen = () => {
+      if (socket !== connection || generation !== connectionGeneration) { connection.close(); return; }
+      connection.send('ready'); heartbeat = setInterval(() => { if (connection.readyState === WebSocket.OPEN) connection.send('ping'); }, 20000);
       // Resume owned task recordings when the worker restarts or reconnects.
       (async () => {
         const {agent_tabs = {}} = await chrome.storage.session.get('agent_tabs');
@@ -186,13 +193,14 @@ async function connect() {
         }
       })().catch(() => {});
     };
-    socket.onmessage = event => {
+    connection.onmessage = event => {
       if (event.data === 'pong') return;
       try {
         const packet = JSON.parse(event.data);
         // Command acknowledgements are not browser assignment snapshots.
         if (!Array.isArray(packet.sessions)) return;
         queue = queue.then(async () => {
+          if (socket !== connection || generation !== connectionGeneration) return;
           await classifier.tick(packet.classifier_requests || []);
           await automatic.stop(packet.sessions);
           for (const check of packet.checks || []) await automatic.check(check);
@@ -200,11 +208,11 @@ async function connect() {
           automatic.tick().catch(() => {});
           auditStatuses(packet.sessions);
         }).catch(() => {});
-      } catch { socket.close(); }
+      } catch { connection.close(); }
     };
-    socket.onclose = event => { clearInterval(heartbeat); automatic.activity.pause(); if (event.code === 4001) { forget(settings).catch(() => {}); } else reconnectTimer = setTimeout(connect, 5000); };
-    socket.onerror = () => socket.close();
-  } catch { reconnectTimer = setTimeout(connect, 5000); }
+    connection.onclose = event => { if (socket !== connection || generation !== connectionGeneration) return; clearInterval(heartbeat); automatic.activity.pause(); if (event.code === 4001) { forget(settings).catch(() => {}); } else reconnectTimer = setTimeout(connect, 5000); };
+    connection.onerror = () => connection.close();
+  } catch { if (generation === connectionGeneration) reconnectTimer = setTimeout(connect, 5000); }
 }
 chrome.alarms.create('agentgate-reconnect', {periodInMinutes: 1});
 chrome.alarms.create('agentgate-audit-prune', {periodInMinutes: 1440});
@@ -229,8 +237,15 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('review.html')) return false;
   (async () => {
     await ready;
-    if (['start_pairing', 'pairing_status'].includes(message.type)) {
-      const operation = async () => message.type === 'start_pairing' ? {ok: true, status: 'requested', ...await startPairing(message.url, message.name)} : {ok: true, ...await pairingStatus()};
+    if (['start_pairing', 'pairing_status', 'disconnect'].includes(message.type)) {
+      const operation = async () => {
+        if (message.type === 'disconnect') {
+          await chrome.storage.session.remove('pending_pairing');
+          const settings = await config(); if (settings) await forget(settings);
+          return {ok: true};
+        }
+        return message.type === 'start_pairing' ? {ok: true, status: 'requested', ...await startPairing(message.url, message.name)} : {ok: true, ...await pairingStatus()};
+      };
       pairingQueue = pairingQueue.then(operation, operation); return pairingQueue;
     }
     if (message.type === 'connect') { socket?.close(); socket = null; await connect(); return {ok: true}; }

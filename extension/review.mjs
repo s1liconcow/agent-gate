@@ -5,24 +5,35 @@ const $ = id => document.getElementById(id);
 let sessions = [];
 let pairingPoll = false, qrUrl = '';
 let setupFailed = false;
-let connected = false, pairingRequest = false;
+let connected = false, paired = false, pairingRequest = false;
+let refreshRequest = 0;
 function message(content, error = false) { $('message').hidden = false; $('message').textContent = content; $('message').className = 'message' + (error ? ' error' : ''); }
 async function bridge(payload) { const result = await chrome.runtime.sendMessage(payload); if (!result?.ok) throw new Error(result?.error || 'Browser unavailable. Try again.'); return result; }
 async function refresh() {
-  const {sessions: items} = await bridge({type: 'sessions'}); sessions = items;
+  const request = ++refreshRequest;
+  const status = await bridge({type: 'status'});
+  if (request !== refreshRequest) return;
+  connected = status.connected; paired = Boolean(status.account_url);
+  $('connection').textContent = paired ? 'Disconnect' : 'Connect';
+  $('connection').className = 'secondary compact' + (connected ? ' connected' : '');
+  $('connection').title = connected ? 'Connected to your account' : paired ? 'Reconnecting to your account' : 'Connect this browser';
+  $('connection').disabled = pairingRequest;
+  $('browserPairing').querySelector('summary').textContent = paired ? (connected ? 'Connected' : 'Reconnecting') + ' · Switch account' : 'Connect this browser';
+  $('pair').textContent = paired ? 'Pair with selected account' : 'Connect'; $('pair').disabled = pairingRequest;
+  const accountId = status.account_url?.match(/\/u\/([a-f0-9]{32})\/?$/)?.[1] || 'owner';
+  $('connectionIdentity').textContent = status.account_url
+    ? 'Account: ' + accountId + ' · Browser: ' + status.browser_id + ' · Coordinator: ' + status.account_url
+    : 'No browser pairing configured.';
+  if (!paired) $('fingerprint').textContent = '';
+  const items = paired ? (await bridge({type: 'sessions'})).sessions : [];
+  if (request !== refreshRequest) return;
+  sessions = items;
   const selected = $('session').value;
   $('session').replaceChildren(...items.map(item => { const option = document.createElement('option'); option.value = item.id; option.textContent = item.goal + ' · ' + item.status; return option; }));
   if (items.some(i => i.id === selected)) $('session').value = selected;
   if (!items.length) { const option = document.createElement('option'); option.textContent = 'No tasks yet'; option.value = ''; $('session').append(option); }
   $('taskPanel').hidden = !items.length;
-  showGoal(); const status = await bridge({type: 'status'}); connected = status.connected;
-  $('connection').textContent = connected ? 'Connected' : 'Reconnecting'; $('connection').className = 'status' + (connected ? ' connected' : '');
-  $('browserPairing').querySelector('summary').textContent = connected ? 'Connected · Switch account' : 'Connect this browser';
-  $('pair').textContent = connected ? 'Pair with selected account' : 'Connect'; $('pair').disabled = pairingRequest;
-  const accountId = status.account_url?.match(/\/u\/([a-f0-9]{32})$/)?.[1] || 'owner';
-  $('connectionIdentity').textContent = status.account_url
-    ? 'Account: ' + accountId + ' · Browser: ' + status.browser_id + ' · Coordinator: ' + status.account_url
-    : 'No browser pairing configured.';
+  showGoal();
   if (setupFailed) await providerStatus();
 }
 function showGoal() { const item = sessions.find(i => i.id === $('session').value); $('goal').textContent = item?.browser_runtime?.state === 'blocked' ? item.next_action || 'Task paused. Check your phone.' : ''; showLocalState().catch(() => {}); }
@@ -91,15 +102,24 @@ async function pair() {
   const result = await bridge({type: 'start_pairing', url, name: $('browserName').value}); await showQR(result);
   message('Scan with your paired phone.');
 }
+async function connection() {
+  if (!paired) { $('browserPairing').open = true; $('pair').focus(); return; }
+  await bridge({type: 'disconnect'});
+  $('pairingQR').hidden = true; qrUrl = '';
+  $('qr').getContext('2d').clearRect(0, 0, $('qr').width, $('qr').height);
+  $('browserPairing').open = true;
+  await refresh(); await providerStatus(); message('Disconnected. Connect again with your phone.');
+}
 async function showQR(result) {
   if (qrUrl !== result.qr_url) { await QRCode.toCanvas($('qr'), result.qr_url, {width: 220, margin: 3, errorCorrectionLevel: 'M'}); qrUrl = result.qr_url; }
   $('pairingQR').hidden = false; $('browserPairing').open = true;
   $('pairingStatus').textContent = 'Waiting for your phone · ' + Math.max(0, Math.ceil((result.expires_at - Date.now()) / 1000)) + 's left';
 }
 async function pollPairing() {
-  if (pairingPoll) return; pairingPoll = true;
+  if (pairingPoll || pairingRequest) return; pairingPoll = true;
   try {
     const result = await bridge({type: 'pairing_status'});
+    if (pairingRequest) return;
     if (result.status === 'requested') await showQR(result);
     if (result.status === 'paired' || result.status === 'connected' && qrUrl) {
       $('pairingQR').hidden = true; qrUrl = ''; $('qr').getContext('2d').clearRect(0, 0, $('qr').width, $('qr').height);
@@ -109,11 +129,12 @@ async function pollPairing() {
   } catch (error) { $('pairingQR').hidden = true; message(error.message, true); }
   finally { pairingPoll = false; }
 }
-for (const [id, handler] of [['pair', pair], ['refresh', refresh], ['saveProvider', saveProvider], ['prepareChromeAI', saveProvider]]) $(id).addEventListener('click', async () => { if (id === 'pair') pairingRequest = true; $(id).disabled = true; try { await handler(); } catch (error) { message(error.message, true); } finally { if (id === 'pair') pairingRequest = false; $(id).disabled = false; } });
+for (const [id, handler] of [['connection', connection], ['pair', pair], ['refresh', refresh], ['saveProvider', saveProvider], ['prepareChromeAI', saveProvider]]) $(id).addEventListener('click', async () => { const pairing = ['pair', 'connection'].includes(id); if (pairing) { pairingRequest = true; $('pair').disabled = true; $('connection').disabled = true; } $(id).disabled = true; try { await handler(); } catch (error) { message(error.message, true); } finally { if (pairing) { pairingRequest = false; $('pair').disabled = false; $('connection').disabled = false; } $(id).disabled = false; } });
 $('provider').addEventListener('change', async () => { providerFields(); if (['local', 'purpose_browser'].includes($('provider').value)) { $('provider').disabled = true; try { await saveProvider(); } catch (error) { await providerStatus().catch(() => {}); message(error.message, true); } finally { $('provider').disabled = false; } } });
 $('session').addEventListener('change', showGoal);
 const {settings} = await chrome.storage.local.get('settings');
-if (settings) { $('url').value = settings.url; if (settings.name) $('browserName').value = settings.name; $('fingerprint').textContent = 'Device key: ' + (await digest(settings.phone_key)).slice(0, 24); try { await refresh(); } catch (error) { $('browserPairing').open = true; message(error.message, true); } } else $('browserPairing').open = true;
+if (settings) { $('url').value = settings.url; if (settings.name) $('browserName').value = settings.name; $('fingerprint').textContent = 'Device key: ' + (await digest(settings.phone_key)).slice(0, 24); } else $('browserPairing').open = true;
+try { await refresh(); } catch (error) { $('browserPairing').open = true; message(error.message, true); }
 await pollPairing(); setInterval(pollPairing, 2000);
 try { await providerStatus(); } catch (error) { setupFailed = true; message(error.message, true); $('aiStatus').textContent = 'Setup failed. Try again.'; }
 $('provider').disabled = false;
