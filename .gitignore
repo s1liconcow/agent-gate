@@ -106,3 +106,6 @@ outputs/
 /node_modules
 /extension/models
 /public/e2e-demo.html
+/public/e2e-demo.css
+/public/e2e-demo.mjs
+/public/e2e-*.png
