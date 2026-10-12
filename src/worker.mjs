@@ -6,7 +6,7 @@ import {Engagement} from './engagement.mjs';
 import {ConnectionSetup} from './connection-setup.mjs';
 import {Connectors} from './connectors.mjs';
 import {Browsers} from './browsers.mjs';
-import {BrowserRouting} from './browser-routing.mjs';
+import {BrowserRouting, summarizeLocalBrowsers} from './browser-routing.mjs';
 import {LocalClassifier} from './local-classifier.mjs';
 import {registerInference, configuredInference} from './inference.mjs';
 import {withOAuth, oauthRoute} from './oauth.mjs';
@@ -198,7 +198,17 @@ export class Gate extends DurableObject {
     if(data!==undefined)await this.dispatch(); return answer;
   }
   async agentCall(path, data, principal='cli') {
-    if (path==='browsers' && data===undefined) return {api_version:apiVersion,browsers:await this.browserRouting.choices(),engagement:await this.engagement.public(),classifier_backends:['chrome_ai','onnx']};
+    if (path === 'browsers' && data === undefined) {
+      const records = [...(await this.ctx.storage.list({prefix: 'browser:'})).values()];
+      return {
+        api_version: apiVersion,
+        account_id: await this.ctx.storage.get('account_id') || 'owner',
+        browsers: await this.browserRouting.choices(),
+        engagement: await this.engagement.public(),
+        classifier_backends: ['chrome_ai', 'onnx'],
+        local_diagnostics: summarizeLocalBrowsers(records, id => this.ctx.getWebSockets('browser:' + id).some(ws => ws.readyState === 1))
+      };
+    }
     if (path==='sessions' && data!==undefined) {
       const parsed=toolContract.request_browser_session.schema.safeParse(data);
       if (!parsed.success) fail('INVALID_SCOPE','Use the advertised request schema with explicit browser and classifier_backend.');
@@ -427,7 +437,15 @@ export class Gate extends DurableObject {
         await this.ensureHosted(url.origin);
         return json(await this.hostedConsent.status());
       }
-      if (path === '/api/owner/browsers' && method === 'GET') return json({browsers: (await this.browsers.list()).filter(item => item.kind !== 'hosted').map(item => this.browsers.public(item)), choices: await this.browserRouting.choices(), default_browser_id: (await this.browserRouting.current())?.id || null});
+      if (path === '/api/owner/browsers' && method === 'GET') return json({
+        account_id: await this.ctx.storage.get('account_id') || 'owner',
+        browsers: (await this.browsers.list()).filter(item => item.kind !== 'hosted').map(item => ({
+          ...this.browsers.public(item),
+          socket_connected: item.status === 'active' && this.ctx.getWebSockets('browser:' + item.id).some(ws => ws.readyState === 1)
+        })),
+        choices: await this.browserRouting.choices(),
+        default_browser_id: (await this.browserRouting.current())?.id || null
+      });
       if (path === '/api/owner/browsers/default' && method === 'POST') {
         const input = await body(request); exact(input, ['browser_id']);
         await this.browserRouting.pinSessions(await this.engine.list());
