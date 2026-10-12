@@ -71,22 +71,7 @@ async function pairingStatus() {
   const connection = await pairingCall(pending, '/' + pending.item.id + '/claim', {});
   if (connection.id !== item.id || connection.status !== 'active' || !Number.isSafeInteger(connection.expires_at) || connection.expires_at > Date.now() + pending.item.challenge.connection_ttl_seconds * 1000 || connection.expires_at <= Date.now()) throw new Error('The browser access duration changed.');
   const previous = await config(); if (previous) await forget(previous);
-  const previous = await config();
-  const switched = Boolean(previous && (previous.url !== pending.url || previous.browser_id !== item.id));
-  // Close task-owned tabs, recordings and cached action authority from the old account.
-  if (switched) {
-    await automatic.stop([]);
-    await automatic.activity.pause();
-    await chrome.storage.session.remove(['bindings', 'agent_tabs', 'guarded', 'checkout_bindings', 'capture_diagnostics']);
-    leases.clear();
-  }
   await chrome.storage.local.set({settings: {url: pending.url, bridge_token: pending.credential, phone_key, browser_id: item.id, name: pending.item.name, expires_at: connection.expires_at}});
-  // Switching accounts must close the old socket before reconnecting with the new pairing.
-  if (switched) {
-    clearInterval(heartbeat); clearTimeout(reconnectTimer);
-    const old = socket; socket = null;
-    if (old) { old.onopen = null; old.onmessage = null; old.onclose = null; old.onerror = null; old.close(1000, 'AgentGate account switched'); }
-  }
   await chrome.storage.session.remove(['pending_pairing', 'binding', 'snapshot']);
   await setupBrowser(); await connect();
   return {status: 'paired', fingerprint: (await digest(phone_key)).slice(0, 24), name: pending.item.name};
@@ -249,7 +234,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       pairingQueue = pairingQueue.then(operation, operation); return pairingQueue;
     }
     if (message.type === 'connect') { socket?.close(); socket = null; await connect(); return {ok: true}; }
-    if (message.type === 'status') { const settings = await config(); return {ok: true, connected: socket?.readyState === WebSocket.OPEN, account_url: settings?.url || null, browser_id: settings?.browser_id || null, automation: (await chrome.storage.local.get('automation')).automation || null}; }
+    if (message.type === 'status') return {ok: true, connected: socket?.readyState === WebSocket.OPEN, automation: (await chrome.storage.local.get('automation')).automation || null};
     if (message.type === 'inference_status') { await setupBrowser(); return {ok: true, ...inferencePresentation(await inferenceSettings())}; }
     if (message.type === 'save_inference') { const presentation = await saveInference(message, value => call('inference', value)); await setupBrowser(); automatic.tick().catch(() => {}); return {ok: true, ...presentation}; }
     if (message.type === 'test_inference') return {ok: true, ...await testInference()};
