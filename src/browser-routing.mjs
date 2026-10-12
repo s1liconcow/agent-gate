@@ -1,5 +1,17 @@
 import {fail} from '../shared/protocol.mjs';
 
+// Read-only summary for an authorized account. No pairing credentials or
+// inactive device identifiers are exposed to the assistant.
+export function summarizeLocalBrowsers(records, isOnline = () => false, now = Date.now()) {
+  const locals = [...records].filter(item => item.kind !== 'hosted');
+  const active = locals.filter(item => item.status === 'active' && item.expires_at > now);
+  return {
+    active_pairings: active.length,
+    connected_sockets: active.filter(item => isOnline(item.id)).length,
+    pending_pairings: locals.filter(item => ['requested', 'approved'].includes(item.status) && item.expires_at > now).length
+  };
+}
+
 export class BrowserRouting {
   constructor(storage, now = Date.now) { this.db = storage; this.now = now; }
   async choices() {
