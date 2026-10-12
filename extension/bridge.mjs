@@ -72,9 +72,17 @@ async function pairingStatus() {
   if (connection.id !== item.id || connection.status !== 'active' || !Number.isSafeInteger(connection.expires_at) || connection.expires_at > Date.now() + pending.item.challenge.connection_ttl_seconds * 1000 || connection.expires_at <= Date.now()) throw new Error('The browser access duration changed.');
   const previous = await config(); if (previous) await forget(previous);
   const previous = await config();
+  const switched = Boolean(previous && (previous.url !== pending.url || previous.browser_id !== item.id));
+  // Close task-owned tabs, recordings and cached action authority from the old account.
+  if (switched) {
+    await automatic.stop([]);
+    await automatic.activity.pause();
+    await chrome.storage.session.remove(['bindings', 'agent_tabs', 'guarded', 'checkout_bindings', 'capture_diagnostics']);
+    leases.clear();
+  }
   await chrome.storage.local.set({settings: {url: pending.url, bridge_token: pending.credential, phone_key, browser_id: item.id, name: pending.item.name, expires_at: connection.expires_at}});
   // Switching accounts must close the old socket before reconnecting with the new pairing.
-  if (previous && (previous.url !== pending.url || previous.browser_id !== item.id)) {
+  if (switched) {
     clearInterval(heartbeat); clearTimeout(reconnectTimer);
     const old = socket; socket = null;
     if (old) { old.onopen = null; old.onmessage = null; old.onclose = null; old.onerror = null; old.close(1000, 'AgentGate account switched'); }
