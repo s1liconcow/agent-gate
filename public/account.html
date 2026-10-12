@@ -1,0 +1,5 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Your account · AgentGate</title><link rel="stylesheet" href="/style.css"><script type="module" src="/account.mjs"></script></head>
+<body><header><a class="brand" href="/" id="home">AgentGate</a><a id="admin" href="/admin.html" hidden>Administration</a></header><main class="phone">
+<h1>Your account</h1><p>Give this account a name you can recognize.</p><p id="status" role="status">Loading your account…</p>
+<form id="profile" hidden><label for="name">Account name<input id="name" maxlength="80" autocomplete="organization"></label><label for="email">Contact email <span class="hint">optional</span><input id="email" type="email" maxlength="254" autocomplete="email" aria-describedby="emailNote"></label><p class="hint" id="emailNote">This email is entered by you and is unverified. It does not change your sign-in or permissions.</p><button id="save">Save account details</button></form>
+<details><summary>Account ID</summary><p id="accountId"></p></details></main></body></html>

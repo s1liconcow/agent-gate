@@ -1,87 +1,36 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
-import {Client} from '@modelcontextprotocol/sdk/client/index.js';
-import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
-import {createServer} from '../mcp/tools.mjs';
-import {remoteMcp} from '../src/remote-mcp.mjs';
+import test from 'node:test';import assert from 'node:assert/strict';import {Client} from '@modelcontextprotocol/sdk/client/index.js';import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';import {createServer} from '../mcp/tools.mjs';import {tools as contract,apiVersion} from '../mcp/contract.mjs';import {remoteMcp} from '../src/remote-mcp.mjs';
+const names=Object.keys(contract).sort();
+async function discovery(remote){const server=createServer({url:'https://gate.example',call:async()=>{throw new Error('Discovery must not start browser work');}},remote),client=new Client({name:'discovery',version:apiVersion}),[a,b]=InMemoryTransport.createLinkedPair();await Promise.all([server.connect(a),client.connect(b)]);try{return (await client.listTools()).tools;}finally{await client.close();await server.close();}}
+const check=tools=>{assert.deepEqual(tools.map(t=>t.name).sort(),names);for(const t of tools){assert.deepEqual(Object.keys(t.inputSchema.properties).sort(),Object.keys(contract[t.name].schema.shape).sort());assert.equal(t.inputSchema.additionalProperties,false);}const request=tools.find(t=>t.name==='request_browser_session');assert.deepEqual(request.inputSchema.properties.browser.enum,['local','cloud']);assert.deepEqual(request.inputSchema.properties.classifier_backend.enum,['chrome_ai','onnx']);for(const removed of ['disclosure','interaction','validation','inference','engagement','action_policy'])assert.equal(request.inputSchema.properties[removed],undefined);};
+test('local and remote SDK discovery are generated from the same strict five-tool contract',async()=>{for(const remote of [false,true]){const tools=await discovery(remote);check(tools);if(remote)for(const t of tools)assert.deepEqual(t._meta.securitySchemes,[{type:'oauth2',scopes:['browser:delegate']}]);}});
+test('HTTP root and tenant discovery retain identical schemas and enforce OAuth authorization',async()=>{const account='a'.repeat(32),connector='b'.repeat(32),origin='https://gate.example',gate={checkConnector:async()=>({allowed:true}),remoteCall:async()=>{throw new Error('No browser discovery effects');}},env={PUBLIC_ORIGIN:origin,GATE:{getByName:()=>gate}};for(const base of [origin,origin+'/u/'+account]){const response=await remoteMcp(new Request(base+'/mcp',{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list'})}),env,{auth:{scope:['browser:delegate'],userId:account,audience:base+'/mcp'},props:{account_id:account,connector_id:connector}});assert.equal(response.status,200);check((await response.json()).result.tools);}assert.equal((await remoteMcp(new Request(origin+'/mcp',{method:'POST'}),env,{auth:{scope:[]}})).status,403);});
+test('legacy request fields and owner-authority overrides fail contract validation',()=>{const request={goal:'Read the synthetic task site.',origins:['https://shop.example'],permissions:['read'],browser:'local',classifier_backend:'chrome_ai',start_url:'https://shop.example'};for(const key of ['disclosure','interaction','inference','engagement','action_policy','purpose_guard'])assert.equal(contract.request_browser_session.schema.safeParse({...request,[key]:'legacy'}).success,false);});
 
-const names = ['request_browser_session', 'list_browser_runtimes', 'get_browser_session', 'read_browser_view', 'request_browser_disclosure', 'read_browser_dom', 'perform_browser_action', 'close_browser_session', 'checkout'].sort();
-const check = tools => {
-  assert.deepEqual(tools.map(tool => tool.name).sort(), names);
-  const dom = tools.find(tool => tool.name === 'read_browser_dom');
-  assert.ok(dom.inputSchema.required.includes('xpath'));
-  assert.ok(dom.inputSchema.required.includes('idempotency_key'));
-  assert.equal(dom.inputSchema.properties.wait_ms.maximum, 1000);
-  assert.equal(dom.annotations.idempotentHint, true);
-  const request = tools.find(tool => tool.name === 'request_browser_session');
-  assert.equal(request.inputSchema.properties.engagement, undefined);
-  assert.equal(request.inputSchema.properties.inference, undefined);
-  assert.deepEqual(request.inputSchema.properties.browser.enum, ['local', 'cloud']);
-  assert.equal(request.inputSchema.properties.validation.const, 'on_device');
-  assert.deepEqual(request.inputSchema.properties.classifier_backend.enum, ['chrome_ai', 'onnx']);
-  assert.equal(request.inputSchema.properties.ttl_seconds.maximum, 600);
-};
-test('local and remote discovery advertise all nine tools with explicit on-device routing and bounded reads', async () => {
-  for (const remote of [false, true]) {
-    const server = createServer({url: 'https://gate.example', call: async () => {throw new Error('Discovery must not read page content');}}, remote);
-    const client = new Client({name: 'discovery-test', version: '1.0.0'});
-    const [a, b] = InMemoryTransport.createLinkedPair();
-    await Promise.all([server.connect(a), client.connect(b)]);
-    try {
-      const {tools} = await client.listTools(); check(tools);
-      if (remote) for (const tool of tools) assert.deepEqual(tool._meta.securitySchemes, [{type: 'oauth2', scopes: ['browser:delegate']}]);
-    } finally {await client.close(); await server.close();}
+test('runtime listing identifies the exact OAuth account without disclosing credentials',async()=>{
+  const origin='https://gate.example', connector='b'.repeat(32), tenant='a'.repeat(32);
+  for(const account of [null, tenant]){
+    const base=account?origin+'/u/'+account:origin;
+    const gate={
+      checkConnector:async()=>({allowed:true}),
+      remoteCall:async(_connector,path)=>{
+        assert.equal(path,'browsers');
+        return {result:{account_id:account||'owner',browsers:[],
+          local_diagnostics:{active_pairings:0,connected_sockets:0,pending_pairings:0},
+          classifier_backends:['chrome_ai','onnx']}};
+      }
+    };
+    const response=await remoteMcp(new Request(base+'/mcp',{method:'POST',
+      headers:{'Content-Type':'application/json',Accept:'application/json, text/event-stream'},
+      body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',
+        params:{name:'list_browser_runtimes',arguments:{}}})}),
+      {PUBLIC_ORIGIN:origin,GATE:{getByName:()=>gate}},
+      {auth:{scope:['browser:delegate'],userId:account||'owner',audience:base+'/mcp'},
+        props:{...(account?{account_id:account}:{}),connector_id:connector}});
+    assert.equal(response.status,200);
+    const result=(await response.json()).result.structuredContent;
+    assert.equal(result.account_id,account||'owner');
+    assert.equal(result.account_url,base+'/');
+    assert.equal(result.local_diagnostics.connected_sockets,0);
+    assert.equal(JSON.stringify(result).includes('credential'),false);
   }
-});
-test('stateless HTTP discovery preserves the full tool list across root and tenant MCP routes', async () => {
-  const account = 'a'.repeat(32), connector = 'b'.repeat(32), origin = 'https://gate.example';
-  let checks = 0;
-  const gate = {checkConnector: async id => {assert.equal(id, connector); checks++; return {allowed: true};}, remoteCall: async () => {throw new Error('Discovery must not start browser work');}};
-  const env = {PUBLIC_ORIGIN: origin, GATE: {getByName: name => {assert.equal(name, 'account:' + account); return gate;}}};
-  for (const base of [origin, origin + '/u/' + account]) {
-    const ctx = {auth: {scope: ['browser:delegate'], userId: account, audience: base + '/mcp'}, props: {account_id: account, connector_id: connector}};
-    for (let id = 1; id <= 2; id++) {
-      const request = new Request(base + '/mcp', {method: 'POST', headers: {'Content-Type': 'application/json', Accept: 'application/json, text/event-stream'}, body: JSON.stringify({jsonrpc: '2.0', id, method: 'tools/list'})});
-      const response = await remoteMcp(request, env, ctx);
-      assert.equal(response.status, 200); assert.equal(response.headers.get('Cache-Control'), 'no-store');
-      const body = await response.json(); assert.equal(body.id, id); check(body.result.tools);
-    }
-  }
-  assert.equal(checks, 4);
-  assert.equal((await remoteMcp(new Request(origin + '/mcp', {method: 'POST'}), env, {auth: {scope: []}})).status, 403);
-  gate.checkConnector = async () => ({error: {code: 'REVOKED'}});
-  assert.equal((await remoteMcp(new Request(origin + '/mcp', {method: 'POST'}), env, {auth: {scope: ['browser:delegate'], userId: account, audience: origin + '/mcp'}, props: {account_id: account, connector_id: connector}})).status, 403);
-});
-
-test('existing status tool returns an account-specific diagnostic link on a blocker or missing task', async () => {
-  const sessionId = 'c'.repeat(32), account = 'a'.repeat(32);
-  for (const base of ['https://gate.example', 'https://gate.example/u/' + account]) for (const missing of [false, true]) {
-    const server = createServer({call: async () => {
-      if (missing) throw Object.assign(new Error('Unknown session.'), {code: 'NOT_FOUND'});
-      return {id: sessionId, status: 'closed', browser_runtime: {state: 'blocked', code: 'BROWSER_RATE_LIMITED'}};
-    }}, true, base), client = new Client({name: 'diagnostic-link-test', version: '1.0.0'});
-    const [a, b] = InMemoryTransport.createLinkedPair(); await Promise.all([server.connect(a), client.connect(b)]);
-    try {
-      const result = await client.callTool({name: 'get_browser_session', arguments: {session_id: sessionId}});
-      const data = JSON.parse(result.content[0].text), link = result.content.find(item => item.type === 'resource_link');
-      const expected = base + '/browser-diagnostics.html?' + (base.includes('/u/') ? '' : 'account=owner&') + 'session_id=' + sessionId;
-      assert.equal(link.uri, expected); assert.equal(missing ? data.error.diagnostics_url : data.diagnostics_url, expected);
-    } finally {await client.close(); await server.close();}
-  }
-});
-
-test('existing status tool exposes live registered inputs and current owner engagement without opening a browser', async () => {
-  const engagement = {mode: 'AUDIT_ONLY', enabled: true, expires_at: Date.now() + 100000};
-  const calls = [], server = createServer({call: async path => {calls.push(path); if (path === 'browsers') return {engagement}; throw Object.assign(new Error('Unknown session'), {code: 'NOT_FOUND'});}}, true, 'https://gate.example');
-  const client = new Client({name: 'status-metadata-test', version: '1.0.0'}), [a,b] = InMemoryTransport.createLinkedPair(); await Promise.all([server.connect(a), client.connect(b)]);
-  try {
-    const result = await client.callTool({name: 'get_browser_session', arguments: {session_id: 'c'.repeat(32)}});
-    const metadata = JSON.parse(result.content[0].text).server_metadata;
-    assert.equal(metadata.version, '0.9.1'); assert.deepEqual(metadata.engagement, engagement);
-    assert.deepEqual(Object.keys(metadata.tool_inputs).sort(), names);
-    assert.deepEqual(metadata.tool_inputs.request_browser_session.classifier_backends, ['chrome_ai','onnx']);
-    assert.deepEqual(metadata.tool_inputs.request_browser_session.browsers, ['local','cloud']);
-    assert.ok(metadata.tool_inputs.request_browser_session.fields.includes('validation'));
-    assert.deepEqual(calls, ['browsers','sessions/' + 'c'.repeat(32)]);
-  } finally {await client.close(); await server.close();}
 });

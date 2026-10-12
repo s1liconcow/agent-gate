@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {prepareSnapshot, selectedView, sanitizeForTask, intersectReview} from '../extension/disclosure.mjs';
 import {LocalPlanner} from '../extension/planner.mjs';
-import {scope} from '../shared/protocol.mjs';
+import {scope as checkedScope} from '../shared/protocol.mjs';
+const scope=value=>checkedScope(value.purpose_guard?value:{...value,disclosure:'local_planner',interaction:'automatic',engagement:'AUTO_APPROVE',start_url:value.origins[0],browser_id:'d'.repeat(32),execution_browser:'local',purpose_guard:{version:1,browser_id:'d'.repeat(32),model:'chrome_ai'}});
 import {sanitizeText} from '../shared/policy.mjs';
 const task = scope({goal: 'Send 200 USD to Ali for doggie daycare.', origins: ['https://bank.example'], permissions: ['read', 'fill', 'click'], ttl_seconds: 300, disclosure: 'local_planner'});
 const id = n => n.toString(16).padStart(32, '0');
@@ -55,7 +56,7 @@ test('no native inference API fails closed without a network fallback', async ()
 });
 test('signed scopes allow only automatic disclosure', () => {
   assert.equal(task.disclosure,'local_planner');
-  assert.equal(scope({...task, disclosure: undefined}).disclosure, 'local_planner');
+  assert.throws(()=>scope({...task,disclosure:undefined}),{code:'INVALID_SCOPE'});
   for (const disclosure of ['manual', 'cloud_model', '', null]) assert.throws(()=>scope({...task,disclosure}), {code: 'INVALID_SCOPE'});
 });
 test('an exact amount already in the signed purpose can appear in a payment confirmation',()=>{

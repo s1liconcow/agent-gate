@@ -22,7 +22,7 @@ export async function buildHosted(root, manifest) {
     collector = collector.replace(before, after);
   }
   await writeFile(resolve(root, 'extension/login-storage.js'), 'globalThis.__agentgateCollectLogin = async selection => { const module = {};\n' + collector + '\nreturn new (module.exports.StorageScript())(false).collect(selection.indexed_db.length > 0); };\n');
-  for (const name of ['content.js', 'checkout-content.js']) scripts[name] = await readFile(resolve(root, 'extension', name), 'utf8');
+  for (const name of ['content.js']) scripts[name] = await readFile(resolve(root, 'extension', name), 'utf8');
   await writeFile(resolve(root, 'src/generated-hosted.mjs'), 'export const hostedModel = ' + JSON.stringify(manifest?.model || null) + ';\nexport const hostedScripts = ' + JSON.stringify(scripts) + ';\n');
   await copyFile(resolve(root, 'shared/hosted-browser.mjs'), resolve(root, 'public/hosted-browser.mjs'));
   if (!manifest) return;

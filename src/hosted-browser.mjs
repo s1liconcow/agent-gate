@@ -1,11 +1,6 @@
 import {canonical, fail} from '../shared/protocol.mjs';
 import {verifyBrowserSession} from '../shared/hosted-browser.mjs';
 import {AutomaticBrowser} from '../extension/automatic.mjs';
-import {CheckoutRunner} from '../extension/checkout-runner.mjs';
-import {purposeBrowserModel} from '../extension/purpose-browser-model.mjs';
-import {remoteModelAPI} from '../extension/remote-model.mjs';
-import {LocalPlanner} from '../extension/planner.mjs';
-import {ModelRuntime} from '../extension/model-runtime.mjs';
 import {HostedState} from './hosted-state.mjs';
 import {HostedAdapter} from './hosted-adapter.mjs';
 import {hostedAPI} from './hosted-api.mjs';
@@ -58,7 +53,7 @@ export class HostedBrowser {
         context = browser.contexts()[0];
         if (!context) throw new Error('Persistent browser context unavailable.');
         await this.reset(); this.privateSession.clear();
-        for (const name of ['agent_tabs', 'bindings', 'guarded', 'checkout_bindings']) await store.delete('session:' + name);
+        for (const name of ['agent_tabs', 'bindings', 'guarded']) await store.delete('session:' + name);
       }
       const modelUrl = new URL('/hosted-inference.html?model=' + config.model, config.coordinator).href;
       const adapter = new HostedAdapter(browser, context, {scripts: this.scripts, modelUrl, store});
@@ -90,17 +85,12 @@ export class HostedBrowser {
           }
           fail('MODEL_TIMEOUT', 'The local classifier did not finish before its deadline.');
         }
-        const current = await settings();
-        if (!current || canonical(input.task?.inference) !== canonical(current.profile) || !beforeInference) throw new Error('Inference differs from its approval.');
-        const runtime = new ModelRuntime(new LocalPlanner(remoteModelAPI(current, {authorize: beforeInference})));
-        try { return await runtime.request(type, input, onStage); } finally { runtime.planner.destroy(); }
+        fail('LOCAL_CLASSIFIER_REFUSED','Every task requires a paired local classifier.');
       };
       const verifySession = (packet, phoneKey) => verifyBrowserSession(packet, phoneKey, Date.now(), config.coordinator);
-      const automatic = new AutomaticBrowser({api, settings, call, config: () => this.config(config), verifySession, model, activity,
-        browserModel: (inference, {authorize: approved}) => purposeBrowserModel(inference, {authorize: approved, ready: () => adapter.warmup(inference.profile.model), send: message => adapter.modelRequest(message)})});
-      const checkout = new CheckoutRunner({api, call, config: () => this.config(config), verifySession, model});
+      const automatic = new AutomaticBrowser({api, call, config: () => this.config(config), verifySession, model, activity});
       await api.storage.local.set({automation: {enabled: true, grants_enabled: true}});
-      const answer = await operation({adapter, api, automatic, checkout, authorize, config});
+      const answer = await operation({adapter, api, automatic, authorize, config});
       // Saved authentication data is never copied into engine views or MCP output.
       if ((await this.consent.current())?.browser_id === config.browser_id) {
         await this.saveLogin(adapter, store);
@@ -117,7 +107,7 @@ export class HostedBrowser {
       const store = await this.store();
       const tasks = state.sessions.filter(session => !['closed', 'revoked', 'expired', 'requested'].includes(session.status));
       const viewUntil = Math.max(await store.get('login-view-until') || 0, await store.get('live-view-until') || 0);
-      const pending = ['commands', 'checks', 'checkouts'].some(name => state[name]?.length) ||
+      const pending = ['commands', 'checks'].some(name => state[name]?.length) ||
         tasks.some(session => session.status === 'active' && (session.dom_request || !session.view &&
           (session.browser_runtime?.state !== 'blocked' || !setupBlockers.has(session.browser_runtime.code) || viewUntil > this.now())));
       // Housekeeping must not reconnect an idle process and reset its provider
@@ -136,27 +126,17 @@ export class HostedBrowser {
         return;
       }
       await this.connected(async runtime => {
-        const {adapter, api, automatic, checkout, authorize, config} = runtime;
+        const {adapter, api, automatic, authorize, config} = runtime;
         const current = await this.snapshot();
         const {agent_tabs = {}} = await api.storage.session.get('agent_tabs');
         for (const [id, tabs] of Object.entries(agent_tabs)) if (!current.sessions.some(session => session.id === id && !['closed', 'revoked', 'expired'].includes(session.status))) for (const tab of tabs.ids) await adapter.closeTab(tab);
-        await automatic.stop(current.sessions); await checkout.stop(current.sessions);
-        for (const packet of current.checkouts) await checkout.run(packet);
+        await automatic.stop(current.sessions);
         for (const packet of current.checks) await automatic.check(packet);
         for (const packet of (await this.snapshot()).commands) {
           let result;
           try { result = await executeHosted(packet, {api, automatic, authorize, phoneKey: config.phone_key}); }
           catch { result = {command_id: packet.command.id, ok: false, code: 'BRIDGE_ERROR'}; }
           await this.call('sessions/' + packet.session_id + '/result', result).catch(() => {});
-        }
-        // A cold classifier loads before publishing the first view, so a field
-        // request keeps its existing 30-second budget for actual adjudication.
-        for (const item of (await this.snapshot()).sessions) if (item.status === 'active' && !item.view && !item.dom_request && item.scope.inference?.provider === 'purpose_browser' && item.scope.engagement !== 'AUDIT_ONLY') {
-          await automatic.receipt(item); await automatic.ownedTab(item);
-          await automatic.runtime(item.id, 'planning', null, 'model_availability');
-          try { await adapter.warmup(item.scope.inference.model); }
-          catch (error) { if (!item.scope.engagement) throw error; }
-          await automatic.receipt(item);
         }
         await automatic.tick();
       });

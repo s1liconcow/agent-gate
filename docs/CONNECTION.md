@@ -32,8 +32,23 @@ slot. Private keys and owner credentials are never returned through MCP.
 The cloud browser starts when an assistant requests a task. Website sign-in/MFA
 uses its Live View or a selected login transfer from the desktop extension.
 
+## Missing local browser in ChatGPT
+
+`list_browser_runtimes` reports `account_id`, `account_url`, and `local_diagnostics`
+(active pairings, online sockets, pending pairings). These are read-only,
+account-scoped diagnostics without browser credentials. Local execution requires
+a paired browser in the same account as the MCP connector and a live bridge socket.
+Device details in the approval PWA and Advanced settings in the extension show
+their coordinator/account. The PWA distinguishes online and offline pairings.
+
+If the MCP `account_url` differs from the extension's Account link, set the
+extension's Account link to that exact URL, select **Pair with selected account**,
+and approve the new QR pairing in that account's PWA. Re-pairing clears
+task-owned state and reconnects the socket. Revoke the old pairing in its
+original account when no longer needed. Account migration is never implicit.
 Validation: `npm test` covers signed setup, changed receipts, ownership, expiry,
-replay and preserving existing cloud consent. Against a local Wrangler server at
-`127.0.0.1:8790`, `node tests/connection-live.mjs` exercises real Chrome consent,
-OAuth/PKCE, two accounts, shared and account MCP endpoints, automatic cloud
-browsing, a field read, and reconnection.
+replay, account-scoped MCP discovery and preserving existing cloud consent.
+`npm run demo:flow` exercises the current browser/MCP contract in an isolated
+local Worker; `npm run test:extension` verifies signed pairing, disconnect,
+browser restart and fresh reconnection. Cloud acquisition is emulated in that
+local flow.

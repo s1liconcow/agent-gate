@@ -1,0 +1,74 @@
+{
+  "status": "passed",
+  "synthetic_site": true,
+  "cloud_acquisition": "fixture; real HostedBrowser/HostedAdapter in isolated local Chromium",
+  "unit_tests": 206,
+  "flow_cases": 16,
+  "failure_cases": 18,
+  "real_models": [
+    {
+      "backend": "onnx",
+      "status": "executed",
+      "successful_action_inferences": 4,
+      "scope": "AUDIT_ONLY; semantic observations remain advisory"
+    },
+    {
+      "backend": "chrome_ai",
+      "status": "setup_blocked",
+      "successful_action_inferences": 0,
+      "scope": "AUDIT_ONLY; semantic observations remain advisory",
+      "reason": "The offscreen native model is not ready: unknown. AUDIT actions proceeded with unavailable observations, not native inference."
+    }
+  ],
+  "native_extension_readiness": {
+    "browser_version": "153.0.8010.12",
+    "offscreen": {
+      "ok": false,
+      "code": "MODEL_TIMEOUT"
+    },
+    "api_transport": "production extension service worker -> production offscreen ModelRuntime",
+    "profile": "fresh temporary profile",
+    "model_copy": false,
+    "security_settings_changed": false,
+    "model_download_requested": false,
+    "non_audit_observations": [
+      {
+        "route": "local",
+        "runtime": {
+          "state": "blocked",
+          "code": "MODEL_TIMEOUT",
+          "phase": "model_availability",
+          "extension_version": "0.7.1",
+          "updated_at": 1791824050565
+        },
+        "view_published": false,
+        "command_created": false
+      },
+      {
+        "route": "cloud",
+        "runtime": {
+          "state": "blocked",
+          "code": "MODEL_TIMEOUT",
+          "phase": "model_availability",
+          "extension_version": "0.7.1",
+          "updated_at": 1791824141027
+        },
+        "view_published": false,
+        "command_created": false
+      }
+    ]
+  },
+  "native_component": {
+    "component": "production ModelRuntime with real Chrome web Prompt API",
+    "full_extension_flow": false,
+    "cases": [],
+    "profile": "fresh temporary profile",
+    "model_copy": false,
+    "chrome_version": "154.0.8037.98",
+    "availability": "downloadable",
+    "status": "unavailable",
+    "reason": "The native model is not ready in the fresh profile; no model setup gesture was requested."
+  },
+  "screenshots": 18,
+  "external_effects": 0
+}

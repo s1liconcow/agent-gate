@@ -259,7 +259,7 @@ test('saving a login waits for running work, checkpoints refreshed logins and ne
 });
 test('saving ends approved tasks and invalidates old browser state while cleanup failures preserve the encrypted vault', async () => {
   const f = await fixture(), engine = new Engine(f.db);
-  const task = await engine.create({goal: 'Read GitHub project.', origins: ['https://github.com'], permissions: ['read'], ttl_seconds: 300});
+  const task=await engine.create({goal:'Read GitHub project.',origins:['https://github.com'],permissions:['read'],ttl_seconds:300,start_url:'https://github.com'},'cli',null,'d'.repeat(32),{guard:{version:1,browser_id:'d'.repeat(32),model:'chrome_ai'},execution:'local'});
   await engine.approveSession(task.id, await f.sign((await engine.get(task.id)).challenge));
   const active = await engine.get(task.id); active.view = {origin: 'https://github.com', text: 'old identity'}; await engine.save(active);
   await f.store.put('connection', {account_id: account, browser_id: f.config.browser_id, sessionId: 'old'});

@@ -1,5 +1,7 @@
 # Hosted OpenJev purpose evaluation
 
+Historical research record. Commands and API descriptions below refer to the pre-flow implementation preserved in Git history at `18bf0c8`. Current operation and verification use [BASIC_BROWSER_FLOW.md](BASIC_BROWSER_FLOW.md) and [SETUP.md](SETUP.md).
+
 The supplied key works with OpenJev's documented public API. The hosted experiment does not meet the goal: at the fixed 0.98 release threshold, both tested formulations released zero of seven clearly necessary reads in the new reserve. Successful comparison calls were fast, but two rate-limit failures and a recovery lasting over a minute prevent a claim of reliable subsecond service. The experiment used synthetic data only and made 58 HTTP calls; AgentGuard's actual enforcement settings were not changed.
 
 Choice selected the correct category on all 17 fresh cases when considering its selected option alone. Its scores stayed below the fixed prototype release gate; that gate is not a proof of safety. That distinction is preserved in the report; categorical accuracy on this small sample does not establish disclosure safety. The local classifier work continues independently.

@@ -2,6 +2,11 @@ import {DurableObject} from 'cloudflare:workers';
 import {b64url, digest, random} from '../shared/protocol.mjs';
 
 export class Registry extends DurableObject {
+  async adminAccountIds() {
+    const records = await this.ctx.storage.list({prefix: 'account:', limit: 101});
+    if (records.size > 100) throw new Error('The account registry exceeds its configured bound.');
+    return [...records].filter(([key, value]) => /^account:[a-f0-9]{32}$/.test(key) && value === true).map(([key]) => key.slice(8));
+  }
   async hasAccount(id) {
     return /^[a-f0-9]{32}$/.test(id) && await this.ctx.storage.get('account:' + id) === true;
   }

@@ -1,78 +1,63 @@
-# AgentGate 0.7.1
+# AgentGate
 
-AgentGate gives each account a cloud browser for assistant tasks. Connect through
-OpenAI or another MCP client, choose an engagement level, and tap **Approve and
-connect**. Audit Only is the default. The sign-in browser signs approval; setup
-needs no separate phone app.
+AgentGate runs scoped browser tasks with owner consent and a paired local classifier. The assistant selects the goal, exact origins, local or cloud browser, and classifier backend. Signed scope, credential filtering, replay protection and final-commit boundaries remain enforced.
 
 - [Setup and operation](docs/SETUP.md)
-- [Cloudflare browser setup and tenant isolation](docs/HOSTED_BROWSER.md)
-- [Engagement: Audit Only, Auto Approve and Aggressive](docs/ENGAGEMENT.md)
-- [One-tap assistant connection](docs/CONNECTION.md)
-- [Public landing page](https://agentgate-7qd.pages.dev)
-- [Purpose-based access adjudication](docs/ACCESS_ADJUDICATION.md)
-- [Chrome classifier: training, build and evaluation](local-decision/BROWSER_CLASSIFIER.md)
-- [Local classifier research and reproduction](local-decision/PURPOSE_RESEARCH.md)
-- [Product goals](docs/PRODUCT.md) and [design](docs/DESIGN.md)
-- [Shared beta setup](docs/BETA.md) and [privacy architecture](docs/MULTI_USER_PRIVACY_ARCHITECTURE.md)
+- [Browser flow and evidence](docs/BASIC_BROWSER_FLOW.md)
+- [Assistant connection and account diagnostics](docs/CONNECTION.md)
+- [Owner administration](docs/ADMIN.md)
+- [Classifier training and evaluation](local-decision/BROWSER_CLASSIFIER.md)
+- [Local research and provenance](local-decision/PURPOSE_RESEARCH.md)
 
 ## Development
 
-Run from the repository root. Development requires Node 24+, Python 3 and `zip`.
+Work in the primary checkout on `main`. Reconcile existing work into that checkout, verify it, and push `main`; [AGENTS.md](AGENTS.md) defines the workflow.
+
+Run from the repository root with Node 24+, Python 3 and `zip`:
 
 ```sh
 npm ci
-npm run build
-npm test
+npx playwright install chromium
+npm run check
+npm run demo:flow
 ```
 
-`npm run dev` starts the local coordinator and synthetic demos. Developers load
-the root `extension/` folder in Chrome after building.
+The demonstration exercises request, conditional approval, browser actions, classifier observations and synthetic completion through a real local Worker, MCP server and isolated Chromium. It covers local and emulated cloud execution, both classifier backends, all engagement modes, rejection, cancellation, revocation, disconnect and replay protection. Real purchases and external messages are blocked.
 
-Cloudflare Pages builds the public landing page from `main` with
-`npm run build:pages` and publishes `dist/pages`. The phone approval app runs on
-the separate `agentgate-control` Worker.
+The fixture matrix is deterministic. Installed ONNX assets run through real browser WASM. Native availability and unresolved runtime readiness are reported separately. The demonstration emulates Cloudflare acquisition; it does not prove live cloud capacity.
 
-After updating to this layout, load `extension/` again in Chrome and update
-local MCP launchers to use `scripts/connect.mjs`. Chrome may assign a new
-unpacked extension ID; pair that browser with the existing approval phone.
+```sh
+npm run test:extension
+npm run test:admin
+npm run api:generate
+npm run bundle:api
+```
+
+The five-tool MCP schema comes from [mcp/contract.mjs](mcp/contract.mjs). `test:contract` rejects discovery drift. Flow reports live under `artifacts/flow/`; optional deployment bundles go to `dist/`. Deployments require approval for the exact release and target.
+
+## One extension folder
+
+`npm run build` updates `extension/` and builds the extension ZIP. Load that same folder in Chrome and click **Reload** after a rebuild. Builds preserve the installed model; **Disconnect** removes the browser pairing and prevents automatic reconnection.
+
+To install an already verified classifier export:
+
+```sh
+npm run build:purpose -- data/decision-model/purpose-browser-v12-fp32
+```
+
+Both local and cloud execution require a connected classifier in the same AgentGate account as the MCP connection. The extension's Account link and `list_browser_runtimes.account_url` identify that account.
 
 ## Repository layout
 
 | Path | Contents |
 | --- | --- |
-| `src/` | Cloudflare coordinator, approvals and session engine |
-| `extension/` | Current Chrome extension |
-| `public/` | Phone approval app and hosted assets |
-| `shared/` | Protocol, redaction policy and read contracts |
-| `mcp/`, `isolation/` | Assistant transport and container isolation |
-| `scripts/`, `tests/`, `demos/` | Build tools, verification and synthetic workflows |
-| `local-decision/` | Local classifier services and training recipes |
-| `docs/`, `design/` | Setup, research reports and design assets |
-| `legacy/v0.1/` | Archived read-only prototype |
+| `src/` | Cloudflare coordinator, accounts, approvals and session engine |
+| `extension/` | Chrome bridge, local classifier and installed model |
+| `public/` | Approval, account and admin UI |
+| `shared/`, `mcp/` | Protocol, signed scope and assistant transport |
+| `scripts/`, `tests/`, `demos/` | Builds, verification and synthetic workflows |
+| `local-decision/` | Classifier training and research tools |
+| `data/` | Local training/evaluation assets and versioned frozen fixtures |
+| `docs/`, `design/` | Operation, research evidence and design |
 
-The current package and extension share version **0.7.1**. The coordinator's
-existing deployment name and hosted URLs retain `agentgate-control`.
-
-## Archived prototype
-
-The original [0.1 prototype](legacy/v0.1/README.md) has its own broker,
-extension and tests. Its dependency-free checks run from the repository root:
-
-```sh
-sh legacy/v0.1/scripts/check.sh
-```
-
-## Local artifacts
-
-Training datasets, model checkpoints, exports, and evaluation results live in
-[`data/`](data/README.md). Frozen evaluation fixtures are versioned under
-`data/evaluation/fixtures/`. The installed Chrome engine stays in `extension/`.
-
-Datasets, downloaded and trained model weights, browser profiles, benchmark
-outputs, logs, databases, credentials, dependency directories, generated
-build files and personal photos are excluded from this repository. Authored
-tests, synthetic test fixtures, and data-generation scripts are included. Local classifier and
-benchmark runs require generating or downloading their artifacts as described
-in the research documentation. Prototype screenshots and raw test logs are
-also excluded.
+Training datasets, checkpoints, model weights, browser profiles, credentials, logs and generated assets stay local. Frozen evaluation fixtures and the compact published V12 result are versioned under [data/](data/README.md). Retired APIs and their obsolete runners are preserved in Git history and reconciliation backups.

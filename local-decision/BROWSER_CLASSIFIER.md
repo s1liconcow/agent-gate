@@ -106,17 +106,19 @@ Export fidelity is verified on the full development partition before evaluating
 a holdout. The verifier checks published model/tokenizer hashes and byte counts.
 Byte-identical FP32 graphs share one complete inference pass; differing graphs
 receive paired inference. Reports record graph hashes and the verification
-method. The real Chrome probe
-uses a fresh synthetic profile and reports per-workflow necessary recall, false
-releases, startup, inference latency, remote requests, and complete DOM field
-capture/freshness. Inspected holdouts become regression evidence. New candidates
-receive fresh holdouts with separate topics and prose.
+method. Historical Chrome probes used fresh synthetic profiles and recorded
+per-workflow recall, false releases, inference latency and DOM freshness. Their
+selector-based API was retired. Inspected holdouts remain regression evidence;
+new candidates need fresh holdouts with separate topics and prose. The current
+flow verifies real ONNX inputs, scores and action observations through the
+five-tool MCP contract:
 
 ```sh
-npm run test:purpose-browser -- extension \
-  data/evaluation/purpose-browser-regression-new.json \
-  data/evaluation/fixtures/purpose-workflow-reserve-v6.mjs
+npm run test:purpose-browser
 ```
+
+Results are written to `artifacts/flow/report.json`. Fixture conformance and real
+ONNX observations are reported separately; cloud acquisition is emulated locally.
 
 Reference comparisons shuffle cases and send opaque identifiers plus only the
 same goal, need, source context and candidate text. Labels and Chrome model

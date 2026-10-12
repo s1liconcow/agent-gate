@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {LocalPlanner} from '../extension/planner.mjs';
 import {validateItemReview} from '../extension/disclosure.mjs';
-import {scope} from '../shared/protocol.mjs';
+import {scope as checkedScope} from '../shared/protocol.mjs';
+const scope=value=>checkedScope(value.purpose_guard?value:{...value,disclosure:'local_planner',interaction:'automatic',engagement:'AUTO_APPROVE',start_url:value.origins[0],browser_id:'d'.repeat(32),execution_browser:'local',purpose_guard:{version:1,browser_id:'d'.repeat(32),model:'chrome_ai'}});
 
 const ref = n => n.toString(16).padStart(32, '0');
 const task = scope({goal: 'Create an unsent draft, no recipient, subject AgentGate test and body This is a test draft created through AgentGate. David’s Assistant.', origins: ['https://mail.google.com'], permissions: ['read', 'fill', 'click'], ttl_seconds: 600, disclosure: 'local_planner', interaction: 'local_gate'});

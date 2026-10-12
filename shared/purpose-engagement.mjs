@@ -1,6 +1,5 @@
 import {action} from './protocol.mjs';
 import {engagementDecision} from './engagement.mjs';
-import {purchaseBoundary} from './purchase-boundary.mjs';
 
 // Engagement governs semantic judgments. Deterministic authority stays separate.
 export function purposeDecision(task, assessment) {
@@ -12,7 +11,4 @@ export function purposeActionBlocked(task, current, proposed, submit = false) {
   const checked = action(proposed, task, current);
   const label = current?.controls.find(control => control.ref === checked.ref)?.label || '';
   return submit || /\b(?:password|passcode|api key|access token|security code|sign in|log in)\b/i.test(label) || checked.type === 'click' && /^(?:place\s+(?:your\s+)?order|send\b|submit\b|pay\b|purchase\b|buy\s+now|checkout\b|complete\s+(?:purchase|order)|confirm\b|transfer\b|donate\b|delete\b|publish\b|post\b|save\b|book\b|reserve\b|unsubscribe\b|cancel\b|invite\b|share\b|subscribe\b)/i.test(label);
-}
-export function purchaseAssessmentAllowed(task, assessment, review) {
-  return purchaseBoundary(task, review) && assessment.effect === 'payment' && assessment.payment_cents === review.total_cents && purposeDecision(task, assessment) !== 'deny';
 }

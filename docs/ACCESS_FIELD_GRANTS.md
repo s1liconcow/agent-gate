@@ -1,5 +1,7 @@
 # Fast access adjudication
 
+Historical research record. Commands and API descriptions below refer to the pre-flow implementation preserved in Git history at `18bf0c8`. Current operation and verification use [BASIC_BROWSER_FLOW.md](BASIC_BROWSER_FLOW.md) and [SETUP.md](SETUP.md).
+
 **Goal status: unresolved.** The required authorization is a high-level purpose,
 enforced locally against the actual candidate evidence. The owner-signed field
 grant implementation below does not meet that requirement. Its timings measure

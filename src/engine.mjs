@@ -1,125 +1,58 @@
-import {action, actionPolicy, automaticActionAllowed, canonical, checksActionPurpose, digest, domRequest, exact, fail, grantForRead,granularDisclosure,purposeDisclosure,purposeDomRequest, importPhoneKey, needsApproval, stagedFields, random, scope, text, verifyReceipt, view} from '../shared/protocol.mjs';
-import {parseXPath} from '../shared/xpath.mjs';
-import {browserPhases} from '../extension/model-phases.mjs';
-import {sessionDefaults} from './session-defaults.mjs';
+import {action,canonical,checksActionPurpose,digest,exact,fail,importPhoneKey,needsApproval,random,scope,stagedFields,text,verifyReceipt,view} from '../shared/protocol.mjs';
 import {Engagement} from './engagement.mjs';
 import {engagementDecision} from '../shared/engagement.mjs';
-import {checkoutEnvelope, checkoutRequest, checkoutSnapshot, checkoutStates} from '../shared/checkout.mjs';
-import {PurchasePolicies} from './purchase-policies.mjs';
-import {purposeActionBlocked, purposeDecision, purchaseAssessmentAllowed} from '../shared/purpose-engagement.mjs';
-import {purchaseBoundary} from '../shared/purchase-boundary.mjs';
-
-const terminal = new Set(['revoked', 'expired', 'closed']);
+import {purposeActionBlocked,purposeDecision} from '../shared/purpose-engagement.mjs';
+import {browserPhases} from '../extension/model-phases.mjs';
+const terminal=new Set(['revoked','expired','closed']);
 export class Engine {
-  constructor(storage, now = Date.now) { this.db = storage; this.now = now; this.purchasePolicies = new PurchasePolicies(storage, now); }
+  constructor(storage,now=Date.now) {this.db=storage; this.now=now;}
   async register(publicKey) {
     await importPhoneKey(publicKey);
     if (await this.db.get('phone')) fail('ALREADY_PAIRED', 'A phone is already paired. Reset the deployment to replace it.', 409);
     await this.db.put('phone', publicKey);
   }
   async create(input, principal = 'cli', inference = null, browserId = null, localPurpose = null) {
-    if (Object.hasOwn(input || {}, 'purpose_guard') || Object.hasOwn(input || {}, 'execution_browser')) fail('INVALID_SCOPE', 'The coordinator binds the selected browser and local classifier.');
-    if (Object.hasOwn(input || {}, 'browser_id')) fail('INVALID_SCOPE', 'The task browser is selected by the owner.');
-    if (Object.hasOwn(input || {}, 'inference')) fail('INVALID_SCOPE', 'Inference is configured by the browser owner.');
-    if (Object.hasOwn(input || {}, 'action_policy')) fail('INVALID_SCOPE', 'Communications and payments are selected by the owner during purpose approval.');
-    if (Object.hasOwn(input || {}, 'engagement')) fail('INVALID_SCOPE', 'Engagement is selected by the browser owner.');
-    if (!await this.db.get('phone')) fail('NOT_PAIRED', 'Pair the owner phone before requesting browser sessions.', 409);
-    const active = (await this.list()).filter(x => !terminal.has(x.status));
-    if (active.length >= 8) fail('QUEUE_FULL', 'Eight requests are already open. Close an existing session first.', 429);
-    let automatic = sessionDefaults(input, inference);
+    exact(input, ['goal','origins','permissions','ttl_seconds','start_url']);
+    if (!localPurpose || !browserId || inference) fail('INVALID_SCOPE', 'Explicit browser and paired local classifier are required.');
+    if (!await this.db.get('phone')) fail('NOT_PAIRED', 'Pair the owner before requesting tasks.', 409);
+    if ((await this.list()).filter(x => !terminal.has(x.status)).length >= 8) fail('QUEUE_FULL', 'Close an existing task before requesting another.', 429);
     const authorization = await new Engagement(this.db, this.now).current();
-    if (localPurpose && !authorization) {delete automatic.action_policy; automatic = {...automatic, engagement: 'AUDIT_ONLY', interaction: 'automatic'};}
-    if (authorization && automatic.disclosure !== 'bounded') {
-      delete automatic.action_policy;
-      automatic = {...automatic, interaction: localPurpose ? 'automatic' : automatic.disclosure === 'local_planner' ? 'local_gate' : 'automatic', engagement: authorization.challenge.mode};
-    }
-    const task = scope({...automatic, ...(['local_planner', 'granular'].includes(automatic.disclosure) && inference ? {inference} : {}), ...(browserId ? {browser_id: browserId} : {}), ...(localPurpose ? {purpose_guard: localPurpose.guard, execution_browser: localPurpose.execution} : {})}), id = random();
-    const item = {id, task, request_scope: input, principal, status: 'requested', created_at: this.now(), expires_at: this.now() + 900000, operations: 0, fills: {}, history: [], keys: {}};
-    if (localPurpose) {item.engagement_receipt = authorization; item.category = task.permissions.some(permission => ['fill', 'click'].includes(permission)) ? 'interactive' : 'read_only';}
+    const engagement = authorization?.challenge.mode || 'AUTO_APPROVE';
+    const task = scope({...input, disclosure:'local_planner', interaction:'automatic', engagement, browser_id:browserId, purpose_guard:localPurpose.guard, execution_browser:localPurpose.execution});
+    const id = random(), item = {id, task, principal, status:'requested', created_at:this.now(), operations:0, fills:{}, history:[], keys:{}, engagement_receipt:authorization};
     item.scope_digest = await digest(task);
-    item.challenge = {version: 1, stage: 'session', session_id: id, nonce: random(), scope_digest: item.scope_digest, scope: task, expires_at: this.now() + task.ttl_seconds * 1000};
-    item.expires_at = item.challenge.expires_at;
-    if (authorization && task.engagement && !localPurpose) {
-      item.challenge.expires_at = item.expires_at = Math.min(item.expires_at, authorization.challenge.expires_at);
-      item.session_receipt = {challenge: item.challenge, authorization}; item.status = 'active';
-      item.runtime = {state: 'starting', code: null, updated_at: this.now()};
-      item.category = task.permissions.some(p => ['fill', 'click'].includes(p)) ? 'interactive' : 'read_only';
-      item.history.push({type: 'session', category: item.category, mode: task.engagement, at: this.now()});
+    item.expires_at = Math.min(this.now()+task.ttl_seconds*1000, authorization?.challenge.expires_at || Infinity);
+    item.challenge = {version:1, stage:'session', session_id:id, nonce:random(), scope_digest:item.scope_digest, scope:task, expires_at:item.expires_at};
+    if (engagement === 'AUDIT_ONLY' && authorization) {
+      item.session_receipt = {challenge:item.challenge, authorization}; item.status='active';
+      item.runtime = {state:'starting', code:null, updated_at:this.now()};
     }
+    item.history.push({type:'session', mode:engagement, approval_required:item.status==='requested', at:this.now()});
     await this.save(item); return this.public(item);
   }
   async get(id) {
-    if (!/^[a-f0-9]{32}$/.test(id)) fail('NOT_FOUND', 'Unknown session.', 404);
-    const item = await this.db.get('session:' + id);
-    if (!item) fail('NOT_FOUND', 'Unknown session.', 404);
-    if (!terminal.has(item.status) && Object.hasOwn(item, 'engagement_receipt') && canonical(item.engagement_receipt) !== canonical(await new Engagement(this.db, this.now).current())) {
-      item.status = 'revoked';
-      for (const key of ['view', 'view_digest', 'pending', 'dom_request', 'dom_access', 'pending_read', 'read_challenge', 'action_challenge', 'action_receipt']) delete item[key];
-      item.fills = {}; this.clearCheckout(item); await this.save(item);
-    }
-    if (!terminal.has(item.status) && item.session_receipt?.authorization && canonical(item.session_receipt.authorization) !== canonical(await new Engagement(this.db, this.now).current())) {
-      item.status = 'revoked';
-      for (const key of ['view', 'view_digest', 'pending', 'dom_request', 'dom_access', 'pending_read', 'read_challenge', 'action_challenge', 'action_receipt']) delete item[key];
-      item.fills = {}; this.clearCheckout(item); await this.save(item);
-    }
-    if (!terminal.has(item.status) && (item.expires_at <= this.now() || !['local_planner', 'granular', 'bounded'].includes(item.task.disclosure))) {
-      if (item.checkout && checkoutStates.includes(item.status)) { item.checkout.status = item.status === 'checkout_executing' ? 'uncertain' : 'expired'; item.checkout.code = item.status === 'checkout_executing' ? 'CHECKOUT_UNCERTAIN' : 'EXPIRED'; }
-      item.status = item.expires_at <= this.now() ? 'expired' : 'revoked'; delete item.view; delete item.pending; delete item.dom_request; delete item.dom_access; delete item.pending_read; delete item.read_challenge; this.clearCheckout(item); item.fills = {}; await this.save(item);
+    if (!/^[a-f0-9]{32}$/.test(id)) fail('NOT_FOUND', 'Unknown task.', 404);
+    const item = await this.db.get('session:'+id);
+    if (!item) fail('NOT_FOUND', 'Unknown task.', 404);
+    if (!terminal.has(item.status) && (!item.task.purpose_guard || item.expires_at <= this.now() || canonical(item.engagement_receipt) !== canonical(await new Engagement(this.db,this.now).current()))) {
+      item.status = item.expires_at <= this.now() ? 'expired' : 'revoked';
+      this.clear(item); await this.save(item);
     }
     return item;
+  }
+  public(item) {
+    const live = !terminal.has(item.status), runtime=item.runtime || null;
+    return {id:item.id, status:item.status, expires_at:item.expires_at, engagement:item.task.engagement, execution_browser:item.task.execution_browser, classifier_backend:item.task.purpose_guard?.model,
+      browser_runtime:runtime, last_command:item.last_command || null,
+      observations:item.history.filter(event=>['action_check','disclosure_check'].includes(event.type)).slice(-24),
+      ...(live && item.view ? {view:item.view, view_digest:item.view_digest} : {}),
+      next_action:!live?'Task ended.':item.status==='requested'?'Show approval_url and wait for owner approval.':item.status==='awaiting_action'?'Show approval_url for this exact action.':item.status==='checking_action'?'Wait for the pinned local classifier.':item.status==='executing'?'Wait for execution; keep the same idempotency key.':runtime?.state==='blocked'?'Inspect browser_runtime; do not recreate this task.':!item.view?'Wait for the scoped browser view.':'Use the published refs and view_digest.'};
   }
   async list() {
     const items = await this.db.list({prefix: 'session:'});
     return Promise.all([...items.values()].map(item => this.get(item.id)));
   }
   async save(item) { await this.db.put('session:' + item.id, item); }
-  public(item) {
-    let runtime = item.runtime || null;
-    // A disconnected desktop must not leave an agent waiting on an old status.
-    const lastUpdate = runtime?.updated_at ?? item.created_at;
-    if (item.status === 'active' && !item.view && item.task.disclosure === 'local_planner' && (!runtime || ['starting', 'planning', 'ready'].includes(runtime.state)) && this.now() - lastUpdate > 150000) runtime = {state: 'blocked', code: 'BROWSER_UNRESPONSIVE', updated_at: lastUpdate};
-    const blockers = {
-      MODEL_TIMEOUT: 'The configured planner timed out; no task view was published. The extension retries while approval is valid. Check inference setup if this repeats.',
-      INFERENCE_CONFIG_CHANGED: 'The approved inference provider no longer matches desktop settings. Request a fresh session and approve its provider on the phone.',
-      INFERENCE_AUTH_FAILED: 'The configured inference provider rejected its API key. Update the key in extension setup, then request a fresh session.',
-      INFERENCE_RATE_LIMITED: 'The configured inference provider is rate limited or has exhausted its quota. Check the provider account; automatic retries are bounded.',
-      INFERENCE_UNAVAILABLE: 'The configured inference provider could not complete the request. Check its endpoint, model and JSON format in extension setup.',
-      INFERENCE_NOT_APPROVED: 'Automatic access is paused, expired or revoked. Check extension setup or request a fresh scoped session.',
-      BROWSER_UNRESPONSIVE: 'The task browser stopped responding. Open it from the approval app or check the desktop extension, then request a fresh session if approval expired.',
-      BROWSER_RATE_LIMITED: 'Cloudflare refused browser acquisition. Check Browser Run usage and recent session close reasons in the owner account; AgentGate retries while approval remains valid.',
-      CONTENT_NOT_READY: 'The page has not provided a stable usable task view. The extension continues automatic retries while approval is valid; do not claim the inbox was read.',
-      MODEL_SETUP_REQUIRED: item.task.disclosure==='bounded'?'Enable exact phone-approved field reads in extension setup. This mode needs no model.':'Enable automatic tasks once in AgentGate extension setup using on-device AI or a remote provider.',
-      MODEL_UNAVAILABLE: 'The Chrome on-device model is unavailable. Check local AI setup in the AgentGate extension.',
-      LOCAL_CLASSIFIER_UNAVAILABLE: 'Reconnect the pinned local Chrome classifier. This task requires its on-device checks.',
-      LOCAL_CLASSIFIER_REFUSED: 'The on-device classifier withheld this request because its purpose or data boundary was uncertain.',
-      LOCAL_CLASSIFIER_STALE: 'The task or view changed before its local classification completed. Read the current task state.',
-      LOCAL_CLASSIFIER_REPLAY: 'This local classification was already consumed. Read the current task state.',
-      PERMISSION_REQUIRED: 'Allow approved tasks on websites once in AgentGate extension setup.',
-      LOGIN_REQUIRED: 'Sign in or complete MFA in the task tab; the approved task resumes automatically.',
-      LOCAL_CHECK_REFUSED: 'The local privacy check withheld this page. No usable task view was published.',
-      PAGE_UNSUPPORTED: 'The local capture found no eligible content on this page.',
-      OUT_OF_SCOPE: 'The task tab left the approved websites. Request a corrected scoped session.',
-      TAB_CLOSED: 'The task tab was closed. Request a fresh scoped session.'
-    };
-    if (runtime?.code === 'BROWSER_RATE_LIMITED' && runtime.browser_limit) {
-      const reasons = {daily_time: 'the daily browser time quota is exhausted', concurrency: 'the concurrent browser limit is reached', acquisition_rate: 'the browser acquisition rate is limited', unknown: 'the limit reason is unconfirmed'};
-      blockers.BROWSER_RATE_LIMITED = 'Cloudflare browser acquisition is blocked: ' + reasons[runtime.browser_limit.reason] + '. AgentGate will retry no earlier than ' + new Date(runtime.browser_limit.retry_at).toISOString() + ' while approval remains valid. Poll this session; the owner can inspect the exact provider error in hosted-browser diagnostics.';
-    }
-    const checkoutNext = item.checkout?.status === 'dispatched' ? item.checkout.confirmation ? 'The merchant reported order confirmation ' + item.checkout.confirmation.order_id + '. The final button was dispatched once; do not submit again.' : 'The final order button was dispatched once. Verify the merchant confirmation before reporting purchase success; do not submit again.' : item.checkout?.status === 'uncertain' ? 'Checkout may have submitted. Verify the merchant order history or existing task tab before any new purchase; do not retry.' : item.checkout?.status === 'failed' ? ({CHECKOUT_UNSUPPORTED: 'The checkout requires owner completion in the existing task tab. Hosted payment frames, redirects and unknown totals are unsupported.', CHECKOUT_CHANGED: 'The cart, fields or total changed. Review the existing cart before a new checkout.', STALE_VIEW: 'The prepared checkout view changed. Review the existing cart before a new checkout.', OUT_OF_SCOPE: 'The checkout did not match the approved purchase purpose or website. Review the intended order.', BRIDGE_ERROR: 'AgentGate could not complete checkout. Check the existing task tab and merchant order history before another purchase.'}[item.checkout.code]) : null;
-    return {id: item.id, status: item.status, goal: item.task.goal, disclosure:item.task.disclosure, expires_at: item.expires_at, operations_remaining: Math.max(0, 24 - item.operations),
-      ...(item.task.browser_id || item.browser_id ? {browser_id: item.task.browser_id || item.browser_id} : {}),
-      browser_selectable: !item.task.purpose_guard && ['requested', 'active'].includes(item.status) && item.operations === 0 && !item.checkout && !Object.keys(item.fills).length,
-      ...(item.task.engagement ? {engagement: item.task.engagement, category: item.category} : {}),
-      ...(item.task.interaction ? {interaction: item.task.interaction} : {}),
-      ...(item.task.action_policy ? {action_policy: item.task.action_policy, payment_remaining_cents: Math.max(0, item.task.action_policy.payment_limit_cents - (item.payment_committed_cents || 0))} : {}),
-      ...(item.view && !terminal.has(item.status) && !checkoutStates.includes(item.status) ? {view: item.view, view_digest: item.view_digest} : {}),
-      ...(item.checkout ? {checkout: {id: item.checkout.id, status: item.checkout.status, merchant: item.checkout.merchant, total_cents: item.checkout.request.total_cents, currency: item.checkout.request.currency, code: item.checkout.code || null, authorization: item.checkout.policy_reference ? 'purchase_policy' : 'owner_checkout', policy: item.checkout.policy_reference || null, site_outcome: item.checkout.confirmation ? 'merchant_confirmed' : 'unverified', ...(item.checkout.confirmation ? {confirmation: item.checkout.confirmation} : {})}} : {}),
-      ...(item.last_command ? {last_command: item.last_command} : {}),
-      disclosure_request: item.disclosure_request || null,
-      ...(granularDisclosure(item.task.disclosure) && !terminal.has(item.status) ? {dom_request: item.dom_request || null, dom_access: item.dom_access || null} : {}),
-      browser_runtime: runtime,
-      next_action: checkoutNext || (item.status === 'active' && runtime?.state === 'blocked' && runtime.code === 'BROWSER_RATE_LIMITED' ? blockers.BROWSER_RATE_LIMITED : item.status === 'awaiting_read' ? 'Wait for phone approval of this exact field read.' : item.status === 'checkout_preparing' ? 'AgentGate is checking the prepared checkout. Poll get_browser_session every five seconds; keep the same checkout idempotency key.' : item.status === 'awaiting_checkout' ? 'Show approval_url. The owner reviews the order and supplies missing checkout fields on the phone.' : item.status === 'checkout_executing' ? 'AgentGate is filling the approved fields and submitting the order once. Poll get_browser_session; do not act on the cart.' : terminal.has(item.status) ? 'This session has ended. Request a fresh scoped session if the task is unfinished.' : item.status === 'requested' ? 'Wait for phone session approval.' : item.status === 'checking_action' ? 'Wait for the local purpose check; do not recreate this action.' : item.status === 'awaiting_action' ? 'Wait for phone approval of this exact consequential action.' : item.status === 'executing' ? 'Wait for the task browser; never retry a click with a new key.' : granularDisclosure(item.task.disclosure) ? item.dom_request ? 'Poll get_browser_session for dom_access; do not replace this pending read.' : runtime?.state === 'blocked' ? blockers[runtime.code] || 'Consult browser_runtime.' : 'Use read_browser_dom for a bounded element read. No whole-page view is planned.' : !item.view ? runtime?.state === 'blocked' ? blockers[runtime.code] || 'The local browser task is blocked. Consult browser_runtime.' : 'The browser automatically opens the approved task in its own tab and publishes a filtered view. Wait; consult browser_runtime for setup or login blockers.' : 'Use only the published control references.')};
-  }
   async active(id) {
     const item = await this.get(id);
     if (item.status !== 'active') fail('SESSION_NOT_ACTIVE', 'The session is awaiting approval, busy, closed, revoked, or expired.', 409);
@@ -130,37 +63,9 @@ export class Engine {
     if (item.status !== 'requested') fail('STALE_APPROVAL', 'This session no longer awaits approval.', 409);
     await verifyReceipt(receipt, await this.db.get('phone'), item.challenge, this.now());
     item.session_receipt = receipt; item.expires_at = receipt.challenge.expires_at; item.status = 'active';
-    if (item.task.disclosure==='local_planner'||granularDisclosure(item.task.disclosure)) item.runtime = {state: 'starting', code: null, updated_at: this.now()};
+    if (item.task.purpose_guard) item.runtime = {state: 'starting', code: null, updated_at: this.now()};
     await this.save(item);
     return this.public(item);
-  }
-  async chooseActionPolicy(id, input) {
-    exact(input, ['scope_digest', 'action_policy']);
-    const item = await this.get(id);
-    if (item.status !== 'requested' || !checksActionPurpose(item.task) || item.task.interaction !== 'automatic' || input.scope_digest !== item.scope_digest) fail('STALE_APPROVAL', 'Review the current session purpose before choosing communications and payments.', 409);
-    item.task = scope({...item.task, action_policy: actionPolicy(input.action_policy)});
-    item.scope_digest = await digest(item.task);
-    item.challenge = {...item.challenge, nonce: random(), scope_digest: item.scope_digest, scope: item.task};
-    await this.save(item);
-    return {...this.public(item), scope: item.task, challenge: item.challenge};
-  }
-  async chooseBrowser(id, browserId, inference) {
-    const item = await this.get(id);
-    if (item.task.purpose_guard) fail('PURPOSE_GUARD_PINNED', 'Request a new purpose-bound session to change its execution or classifier browser.', 409);
-    if (!this.public(item).browser_selectable) fail('SESSION_BUSY', 'Choose a browser before this task starts taking actions.', 409);
-    const {inference: oldInference, engagement, action_policy, browser_id, ...previous} = item.task;
-    const automatic = sessionDefaults(item.request_scope || previous, inference);
-    if (engagement && automatic.disclosure !== 'bounded') {
-      delete automatic.action_policy;
-      Object.assign(automatic, {engagement, interaction: automatic.disclosure === 'local_planner' ? 'local_gate' : 'automatic'});
-    }
-    item.task = scope({...automatic, ...(['local_planner', 'granular'].includes(automatic.disclosure) && inference ? {inference} : {}), browser_id: browserId});
-    item.browser_id = browserId; item.scope_digest = await digest(item.task);
-    item.challenge = {...item.challenge, nonce: random(), scope: item.task, scope_digest: item.scope_digest};
-    item.status = 'requested';
-    for (const key of ['session_receipt', 'view', 'view_digest', 'dom_request', 'dom_access', 'pending_read', 'read_challenge', 'runtime', 'disclosure_request']) delete item[key];
-    await this.save(item);
-    return {...this.public(item), scope: item.task, challenge: item.challenge};
   }
   async publishView(id, candidate) {
     const item = await this.active(id);
@@ -169,103 +74,10 @@ export class Engine {
       exact(assessment, ['decision', 'confidence', 'sensitive']); engagementDecision(item.task.engagement, assessment);
       item.history.push({type: 'disclosure_check', at: this.now(), mode: item.task.engagement, ...assessment, applied: 'published'}); candidate = published;
     }
-    if (granularDisclosure(item.task.disclosure)) fail('OUT_OF_SCOPE', 'Bounded element sessions accept only request-bound DOM results.', 403);
     if (!item.task.permissions.includes('read')) fail('OUT_OF_SCOPE', 'Reading was not approved for this session.', 403);
     if ((item.disclosure_count || 0) >= 12 || (item.disclosure_chars || 0) + candidate.text?.length > 8000) fail('DISCLOSURE_BUDGET', 'The session disclosure limit is reached. Request a new scoped session.', 403);
     item.view = view(candidate, item.task); item.view_digest = await digest(item.view); item.fills = {};
     item.disclosure_count = (item.disclosure_count || 0) + 1; item.disclosure_chars = (item.disclosure_chars || 0) + item.view.text.length;
-    await this.save(item); return this.public(item);
-  }
-  async requestDisclosure(id, input) {
-    exact(input, ['need']); const item = await this.active(id);
-    if (granularDisclosure(item.task.disclosure)) fail('OUT_OF_SCOPE', 'Use read_browser_dom in a bounded element session.', 403);
-    const need = text(input.need, 8, 500);
-    if (!item.view && item.disclosure_request) {
-      if (item.disclosure_request.need === need) return this.public(item);
-      fail('VIEW_PENDING', 'The local agent is already preparing the requested view. Poll read_browser_view; replacing a pending request would restart planning.', 409);
-    }
-    if (Object.keys(item.fills).length) fail('STAGED_VALUES', 'Finish or cancel the current staged action before requesting a new view.', 409);
-    if ((item.disclosure_requests || 0) >= 8) fail('DISCLOSURE_BUDGET', 'Too many information requests for this session.', 403);
-    item.disclosure_requests = (item.disclosure_requests || 0) + 1;
-    item.disclosure_request = {id: random(), need};
-    if (item.task.disclosure === 'local_planner') item.runtime = {state: 'starting', code: null, updated_at: this.now()};
-    delete item.view; delete item.view_digest; await this.save(item); return this.public(item);
-  }
-  async requestDOM(id, input) {
-    const request = domRequest(input), item = await this.get(id);
-    if (item.status !== 'active') {
-      if (item.status === 'awaiting_read' && item.dom_keys?.[request.idempotency_key]?.digest === await digest(request)) return this.public(item);
-      fail('SESSION_NOT_ACTIVE', 'Finish the current confirmation before requesting another field.', 409);
-    }
-    if (!granularDisclosure(item.task.disclosure)) fail('OUT_OF_SCOPE', 'Request and approve a bounded element session first.', 403);
-    if(purposeDisclosure(item.task))purposeDomRequest(request);
-    if(item.task.disclosure==='bounded'&&!item.task.read_grants.some(g=>{try{grantForRead(item.task,request,g.origin);return true;}catch{return false;}}))fail('OUT_OF_SCOPE','Use one field from the signed read grants, within its match bound.',403);
-    const fingerprint = await digest(request), previous = item.dom_keys?.[request.idempotency_key];
-    if (previous) {
-      if (previous.digest !== fingerprint) fail('KEY_REUSED', 'This key identifies a different DOM read.', 409);
-      if (previous.id !== (item.dom_request?.id || item.dom_access?.request_id)) fail('STALE_DOM_REQUEST', 'This earlier read has been replaced. Its content is no longer retained.', 409);
-      return this.public(item);
-    }
-    if (item.dom_request) fail('VIEW_PENDING', 'A DOM read is pending. Poll get_browser_session.', 409);
-    if (item.runtime?.code === 'BROWSER_RATE_LIMITED' && item.runtime.state === 'blocked' && (!item.runtime.browser_limit || item.runtime.browser_limit.retry_at > this.now())) fail('BROWSER_RATE_LIMITED', this.public(item).next_action, 429);
-    if ((item.dom_reads || 0) >= 16 || (item.disclosure_chars || 0) >= 8000) fail('DISCLOSURE_BUDGET', 'The DOM read budget is reached. Request a fresh scoped session.', 403);
-    const idempotentId = random();
-    item.dom_reads = (item.dom_reads || 0) + 1;
-    item.dom_keys ||= {}; item.dom_keys[request.idempotency_key] = {digest: fingerprint, id: idempotentId};
-    const {idempotency_key, ...read} = request;
-    item.dom_request = {id: idempotentId, ...read, deadline: Math.min(item.expires_at, this.now() + 30000)};
-    delete item.dom_access; delete item.view; delete item.view_digest;
-    item.runtime = {state: 'starting', code: null, updated_at: this.now()};
-    await this.save(item); return this.public(item);
-  }
-  async publishDOM(id, input) {
-    exact(input, ['request_id', 'origin', 'items', 'code', ...(Object.hasOwn(input || {}, 'assessment') ? ['assessment'] : [])]); const item = await this.active(id);
-    if (!granularDisclosure(item.task.disclosure) || !item.task.origins.includes(input.origin)) fail('OUT_OF_SCOPE', 'No matching bounded element origin approval.', 403);
-    const request = item.dom_request;
-    if (input.request_id === null) {
-      if (request || item.view || input.items?.length || input.code !== 'READY') fail('STALE_DOM_REQUEST', 'Cannot replace a pending or published DOM read.', 409);
-    } else if (request?.id !== input.request_id || request.deadline <= this.now()) fail('STALE_DOM_REQUEST', 'This DOM read is no longer pending.', 409);
-    if (!['READY', 'WITHHELD', 'MODEL_TIMEOUT', 'CONTENT_NOT_READY', 'INFERENCE_CONFIG_CHANGED', 'INFERENCE_AUTH_FAILED', 'INFERENCE_RATE_LIMITED', 'INFERENCE_UNAVAILABLE', 'INFERENCE_NOT_APPROVED'].includes(input.code) || !Array.isArray(input.items) || input.items.length > (request?.limit || 0) || input.code !== 'READY' && input.items.length) fail('INVALID_RESULT', 'Invalid DOM result.');
-    let grant;
-    if(request&&item.task.disclosure==='bounded')try{grant=grantForRead(item.task,request,input.origin);}catch{fail('OUT_OF_SCOPE','Result origin does not match the signed field grant.',403);}
-    const seen = new Set();
-    for (const entry of input.items) {
-      exact(entry, ['ref', 'xpath', 'text']);
-      if (!/^[a-f0-9]{32}$/.test(entry.ref) || seen.has(entry.ref) || typeof entry.text !== 'string' || !entry.text.length || entry.text.length > (grant?.max_chars||(purposeDisclosure(item.task)?450:500))) fail('INVALID_RESULT', 'Invalid DOM item.');
-      try { const steps = parseXPath(entry.xpath); if (steps.some(s => s.axis !== 'child' || s.tag === '*' || s.predicates.length !== 1 || !s.predicates[0].index)) throw new Error(); } catch { fail('INVALID_RESULT', 'Return only structural element paths.'); }
-      seen.add(entry.ref);
-    }
-    if (request && item.task.engagement) {
-      if (!input.assessment) fail('INVALID_RESULT', 'An engagement read requires its classifier assessment.');
-      exact(input.assessment, ['decision', 'confidence', 'sensitive']);
-      const decision = engagementDecision(item.task.engagement, input.assessment);
-      item.history.push({type: 'read_check', at: this.now(), mode: item.task.engagement, ...input.assessment, applied: decision});
-      if (decision === 'deny') input = {...input, items: [], code: 'WITHHELD'};
-      else if (decision === 'confirm' && input.items.length) {
-        request.deadline = Math.min(item.expires_at, this.now() + 90000);
-        item.pending_read = input;
-        item.read_challenge = {version: 1, stage: 'read', session_id: id, nonce: random(), scope_digest: item.scope_digest, request_id: request.id, origin: input.origin, xpath: request.xpath, need: request.need, assessment: input.assessment, payload_digest: await digest(input.items), expires_at: request.deadline};
-        item.status = 'awaiting_read'; await this.save(item); return this.public(item);
-      }
-    }
-    return this.finishDOM(item, input);
-  }
-  async approveRead(id, receipt) {
-    const item = await this.get(id);
-    if (item.status !== 'awaiting_read' || !item.pending_read || item.read_challenge.payload_digest !== await digest(item.pending_read.items)) fail('STALE_APPROVAL', 'This field read no longer awaits approval.', 409);
-    await verifyReceipt(receipt, await this.db.get('phone'), item.read_challenge, this.now());
-    item.status = 'active';
-    item.history.push({type: 'read_approval', at: this.now(), request_id: item.dom_request.id});
-    return this.finishDOM(item, item.pending_read);
-  }
-  async finishDOM(item, input) {
-    const request = item.dom_request;
-    const candidate = view({origin: input.origin, text: input.items.map(e => e.text).join('\n'), controls: []}, item.task);
-    if ((item.disclosure_chars || 0) + candidate.text.length > 8000) fail('DISCLOSURE_BUDGET', 'The session disclosure limit is reached.', 403);
-    item.view = candidate; item.view_digest = await digest(candidate); item.disclosure_chars = (item.disclosure_chars || 0) + candidate.text.length;
-    if (request) item.dom_access = {request_id: request.id, status: input.code === 'READY' ? 'ready' : 'withheld', code: input.code, items: input.items, complete: false, next_offset: Math.min(101, request.offset + request.limit)};
-    delete item.dom_request;
-    delete item.pending_read; delete item.read_challenge;
     await this.save(item); return this.public(item);
   }
   async propose(id, body) {
@@ -277,7 +89,6 @@ export class Engine {
       return this.public(item);
     }
     if (item.status !== 'active') fail('SESSION_BUSY', 'Finish or cancel the current approval before another action.', 409);
-    if (item.dom_request) fail('VIEW_PENDING', 'Finish the pending DOM read before navigation.', 409);
     if (item.operations >= 24) fail('ACTION_BUDGET', 'The session operation limit is reached. Request a new session.', 403);
     if (body.view_digest !== (item.view_digest || null)) fail('STALE_VIEW', 'The browser view changed. Read the current approved view before acting.', 409);
     const approvedAction = action(body.action, item.task, item.view);
@@ -298,42 +109,35 @@ export class Engine {
     item.status = 'awaiting_action';
   }
   async checkAction(id, input) {
-    exact(input, ['command_id', 'decision', ...['effect', 'payment_cents', 'confidence', 'sensitive', 'hard_boundary'].filter(key => Object.hasOwn(input || {}, key))]);
-    if (Object.hasOwn(input, 'hard_boundary') && typeof input.hard_boundary !== 'boolean') fail('INVALID_RESULT', 'Invalid deterministic boundary result.');
-    const item = await this.get(id);
-    if (item.status !== 'checking_action' || input.command_id !== item.pending?.id || item.pending.deadline <= this.now() || !checksActionPurpose(item.task)) fail('STALE_COMMAND', 'This action no longer awaits a local check.', 409);
-    if (!['allow', 'confirm', 'deny', ...(item.task.engagement ? ['unavailable'] : [])].includes(input.decision)) fail('INVALID_RESULT', 'Invalid local action decision.');
-    let decision = item.task.interaction === 'automatic' && input.decision === 'confirm' ? 'deny' : input.decision;
-    if (item.task.purpose_guard) {
-      decision = purposeDecision(item.task, input);
-      if (!Number.isFinite(input.confidence) || input.confidence < 0 || input.confidence > 1 || input.effect !== 'other' || input.payment_cents !== 0) decision = 'deny';
-      if (input.hard_boundary || purposeActionBlocked(item.task, item.view, item.pending.action)) decision = 'deny';
-    }
-    if (item.task.purpose_guard && item.pending.action.type === 'click' && /^(?:place\s+(?:your\s+)?order|send\b|submit\b|pay\b|purchase\b|buy\s+now|checkout\b|complete\s+(?:purchase|order)|confirm\b|transfer\b|donate\b|delete\b|publish\b|post\b|save\b|book\b|reserve\b|unsubscribe\b|cancel\b|invite\b|share\b|subscribe\b)/i.test(item.view?.controls.find(control => control.ref === item.pending.action.ref)?.label || '')) decision = 'deny';
-    if (item.task.purpose_guard && decision === 'confirm') {item.pending.effect = 'other'; item.pending.payment_cents = 0;}
-    if (item.task.engagement && !item.task.purpose_guard) {
-      if (!Object.hasOwn(input, 'confidence') || !Object.hasOwn(input, 'sensitive')) fail('INVALID_RESULT', 'An engagement action requires its classifier assessment.');
-      decision = engagementDecision(item.task.engagement, input);
-      // Deterministic commitment detection also runs at the coordinator.
-      const target = item.view?.controls.find(c => c.ref === item.pending.action.ref);
-      if (item.task.engagement !== 'AUDIT_ONLY' && decision === 'allow' && item.pending.action.type === 'click' && /\b(?:send|submit|pay|purchase|buy|order|checkout|transfer|delete|remove|publish|post|save|book|reserve|unsubscribe|cancel|invite|share|confirm)\b/i.test(target?.label || '')) decision = 'confirm';
-      item.history.push({type: 'action_check', at: this.now(), mode: item.task.engagement, decision: input.decision, confidence: input.confidence, sensitive: input.sensitive, applied: decision});
-    }
-    if (item.task.interaction === 'automatic' && decision === 'allow') {
-      if (!automaticActionAllowed(item.task, input) || (item.payment_committed_cents || 0) + input.payment_cents > (item.task.action_policy?.payment_limit_cents || 0)) decision = 'deny';
-      else {
-        item.pending.effect = input.effect; item.pending.payment_cents = input.payment_cents;
-        item.payment_committed_cents = (item.payment_committed_cents || 0) + input.payment_cents;
-      }
-    }
-    if (item.task.purpose_guard && item.task.engagement) item.history.push({type: 'action_check', at: this.now(), mode: item.task.engagement, decision: input.decision, confidence: input.confidence, applied: decision});
-    if (decision === 'deny') {
-      item.last_command = {id: item.pending.id, status: 'failed', code: 'OUT_OF_SCOPE', site_outcome: 'unverified'};
-      item.status = 'active'; delete item.pending;
-    } else if (decision === 'confirm') this.challengeAction(item, item.pending, item.view?.controls.find(c => c.ref === item.pending.action.ref), stagedFields(item.view, item.fills));
-    else { item.pending.requires_approval = false; item.status = 'executing'; }
-    item.last_command.status = decision === 'deny' ? 'failed' : item.status;
+    exact(input, ['command_id','decision','effect','payment_cents','confidence',...['hard_boundary'].filter(key=>Object.hasOwn(input,key))]);
+    const item=await this.get(id);
+    if (item.status!=='checking_action' || input.command_id!==item.pending?.id || item.pending.deadline<=this.now()) fail('STALE_COMMAND','This action no longer awaits classification.',409);
+    if (!['allow','confirm','deny','unavailable'].includes(input.decision) || !Number.isFinite(input.confidence) || input.confidence<0 || input.confidence>1 || input.effect!=='other' || input.payment_cents!==0 || Object.hasOwn(input,'hard_boundary') && typeof input.hard_boundary!=='boolean') fail('INVALID_RESULT','Invalid local classifier observation.');
+    const hard = input.hard_boundary || purposeActionBlocked(item.task,item.view,item.pending.action);
+    const decision=hard?'deny':purposeDecision(item.task,input);
+    item.history.push({type:'action_check', at:this.now(), mode:item.task.engagement, decision:input.decision, confidence:input.confidence, hard_boundary:Boolean(hard), applied:decision});
+    item.pending.effect='other'; item.pending.payment_cents=0;
+    if (decision==='deny') {
+      item.last_command={id:item.pending.id,status:'failed',code:'OUT_OF_SCOPE',site_outcome:'unverified'}; item.status='active'; delete item.pending;
+    } else if (decision==='confirm') this.challengeAction(item,item.pending,item.view.controls.find(c=>c.ref===item.pending.action.ref),stagedFields(item.view,item.fills));
+    else {item.pending.requires_approval=false; item.status='executing'; item.last_command.status='executing';}
     await this.save(item); return this.public(item);
+  }
+  clear(item) {
+    item.fills={};
+    for (const key of ['view','view_digest','pending','action_challenge','action_receipt','session_receipt']) delete item[key];
+  }
+  async end(id,status='revoked') {
+    const item=await this.get(id);
+    if (!terminal.has(item.status)) {item.status=status; this.clear(item); await this.save(item);}
+    return this.public(item);
+  }
+  async sweep() {
+    for (const item of await this.list()) if (!terminal.has(item.status) && item.pending?.deadline<=this.now()) {
+      const dispatched=item.status==='executing';
+      item.last_command={id:item.pending.id,status:dispatched?'uncertain':'expired',site_outcome:'unverified'};
+      item.status=dispatched?'revoked':'active'; this.clear(item); await this.save(item);
+    }
   }
   async runtime(id, input) {
     exact(input, ['state', 'code', ...['phase', 'extension_version', 'browser_limit'].filter(key => Object.hasOwn(input || {}, key))]); const item = await this.get(id);
@@ -348,71 +152,6 @@ export class Engine {
   }
   async checks() {
     return (await this.list()).filter(x => x.status === 'checking_action' && x.pending).map(item => ({session_id: item.id, scope: item.task, session_receipt: item.session_receipt, command: item.pending}));
-  }
-  async requestCheckout(id, input) {
-    const request = checkoutRequest(input), item = await this.get(id), fingerprint = await digest(request);
-    if (item.checkout) {
-      if (item.checkout.request.idempotency_key !== request.idempotency_key || item.checkout.request_digest !== fingerprint) fail('CHECKOUT_PENDING', 'This session already has a checkout. Poll its result using the original key.', 409);
-      return this.public(item);
-    }
-    if (item.status !== 'active' || item.dom_request || item.task.disclosure !== 'local_planner' || !['read', 'fill', 'click'].every(p => item.task.permissions.includes(p))) fail('SESSION_NOT_ACTIVE', 'Prepare the cart in an active whole-page session with read, fill and click permissions.', 409);
-    if (request.view_digest !== item.view_digest) fail('STALE_VIEW', 'Read the current checkout view before handing it off.', 409);
-    action({type: 'click', ref: request.submit_ref}, item.task, item.view);
-    item.checkout = {id: random(), request, request_digest: fingerprint, merchant: item.view.origin, status: 'preparing', deadline: Math.min(item.expires_at, this.now() + 300000)};
-    item.status = 'checkout_preparing'; await this.save(item); return this.public(item);
-  }
-  async prepareCheckout(id, input) {
-    exact(input, ['checkout_id', 'snapshot', ...(input.purpose_assessment ? ['purpose_assessment'] : [])]); const item = await this.get(id), checkout = item.checkout;
-    if (item.status !== 'checkout_preparing' || checkout?.id !== input.checkout_id || checkout.deadline <= this.now()) fail('STALE_CHECKOUT', 'This checkout no longer awaits preparation.', 409);
-    checkout.snapshot = checkoutSnapshot(input.snapshot, item.task, checkout.request);
-    if (item.task.purpose_guard && !purchaseBoundary(item.task, checkout.snapshot.review)) fail('OUT_OF_SCOPE', 'The full cart violates a signed task constraint.');
-    checkout.challenge = {version: 1, stage: 'checkout', session_id: id, checkout_id: checkout.id, nonce: random(), scope_digest: item.scope_digest, view_digest: checkout.request.view_digest, submit_ref: checkout.request.submit_ref, snapshot: checkout.snapshot, expires_at: checkout.deadline};
-    checkout.status = 'awaiting_approval'; item.status = 'awaiting_checkout';
-    if (item.task.purpose_guard && input.purpose_assessment) {
-      const result = input.purpose_assessment;
-      exact(result, ['decision', 'effect', 'payment_cents', 'confidence']);
-      if (!['allow', 'confirm', ...(item.task.engagement ? ['deny', 'unavailable'] : [])].includes(result.decision) || !Number.isFinite(result.confidence) || result.confidence < 0 || result.confidence > 1 || !purchaseAssessmentAllowed(item.task, result, checkout.snapshot.review)) fail('OUT_OF_SCOPE', 'A complete local purchase assessment is required.');
-      if (item.task.engagement) item.history.push({type: 'purchase_check', at: this.now(), mode: item.task.engagement, ...result, applied: purposeDecision(item.task, result)});
-      checkout.purpose_assessment = result;
-      checkout.policy_reference = await this.purchasePolicies.select({task: item.task, snapshot: checkout.snapshot, assessment: result});
-      if (checkout.policy_reference) {checkout.status = 'executing'; item.status = 'checkout_executing';}
-    }
-    await this.save(item); return this.public(item);
-  }
-  async claimCheckout(id, input) {
-    exact(input, ['checkout_id', 'snapshot_digest']); const item = await this.get(id), checkout = item.checkout;
-    if (item.status !== 'checkout_executing' || checkout?.id !== input.checkout_id || !checkout.policy_reference || checkout.deadline <= this.now() || input.snapshot_digest !== await digest(checkout.snapshot)) fail('STALE_CHECKOUT', 'This exact policy checkout is no longer executable.', 409);
-    return this.purchasePolicies.claim(checkout.policy_reference, {session_id: id, checkout_id: checkout.id, scope_digest: item.scope_digest, view_digest: checkout.request.view_digest}, {task: item.task, snapshot: checkout.snapshot, assessment: checkout.purpose_assessment});
-  }
-  async approveCheckout(id, input) {
-    exact(input, ['receipt', 'envelope']); const item = await this.get(id), checkout = item.checkout;
-    if (item.status !== 'awaiting_checkout') fail('STALE_APPROVAL', 'This checkout no longer awaits approval.', 409);
-    const envelope = checkoutEnvelope(input.envelope);
-    await verifyReceipt(input.receipt, await this.db.get('phone'), {...checkout.challenge, fields_digest: await digest(envelope)}, this.now());
-    checkout.receipt = input.receipt; checkout.envelope = envelope; checkout.status = 'executing'; item.status = 'checkout_executing';
-    await this.save(item); return this.public(item);
-  }
-  async checkouts() {
-    return (await this.list()).filter(item => ['checkout_preparing', 'checkout_executing'].includes(item.status)).map(item => ({session_id: item.id, scope: item.task, session_receipt: item.session_receipt, checkout: item.checkout}));
-  }
-  clearCheckout(item) {
-    if (!item.checkout) return;
-    for (const field of ['snapshot', 'challenge', 'receipt', 'envelope', 'purpose_assessment']) delete item.checkout[field];
-  }
-  async checkoutResult(id, input) {
-    exact(input, ['checkout_id', 'code', ...(input.confirmation ? ['confirmation'] : [])]); const item = await this.get(id), checkout = item.checkout;
-    if (!['checkout_preparing', 'checkout_executing'].includes(item.status) || checkout?.id !== input.checkout_id) fail('STALE_CHECKOUT', 'This checkout is no longer pending.', 409);
-    if (!['DISPATCHED', 'STALE_VIEW', 'CHECKOUT_CHANGED', 'CHECKOUT_UNSUPPORTED', 'OUT_OF_SCOPE', 'BRIDGE_ERROR', 'CHECKOUT_UNCERTAIN'].includes(input.code) || item.status === 'checkout_preparing' && ['DISPATCHED', 'CHECKOUT_UNCERTAIN'].includes(input.code)) fail('INVALID_RESULT', 'Invalid checkout result.');
-    if (input.confirmation) {
-      exact(input.confirmation, ['origin', 'order_id', 'total_cents', 'currency']);
-      const c = input.confirmation;
-      if (input.code !== 'DISPATCHED' || c.origin !== checkout.merchant || c.total_cents !== checkout.request.total_cents || c.currency !== 'USD' || !/^[A-Za-z0-9-]{1,100}$/.test(c.order_id)) fail('INVALID_RESULT', 'The merchant confirmation differs from the approved order.');
-      checkout.confirmation = {...c};
-    }
-    checkout.status = input.code === 'DISPATCHED' ? 'dispatched' : input.code === 'CHECKOUT_UNCERTAIN' ? 'uncertain' : 'failed'; checkout.code = input.code;
-    if (checkout.policy_reference) await this.purchasePolicies.audit(checkout.policy_reference.id, checkout.status, {checkout_id: checkout.id, total_cents: checkout.request.total_cents, site_outcome: checkout.confirmation ? 'merchant_confirmed' : 'unverified'});
-    this.clearCheckout(item); item.status = 'closed'; delete item.view; delete item.view_digest; item.fills = {};
-    await this.save(item); return this.public(item);
   }
   async approveAction(id, receipt) {
     const item = await this.get(id);
@@ -432,38 +171,10 @@ export class Engine {
     if (item.status !== 'executing' || result.command_id !== item.pending?.id) fail('STALE_COMMAND', 'This command is no longer pending.', 409);
     if (result.ok && !['DISPATCHED', 'ALREADY_DISPATCHED'].includes(result.code)) fail('INVALID_RESULT', 'The bridge result is inconsistent.');
     if (result.ok && item.pending.action.type === 'fill') item.fills[item.pending.action.ref] = item.pending.action.value;
-    if (item.pending.action.type !== 'fill') { delete item.view; delete item.view_digest; delete item.dom_access; item.fills = {}; if ((item.task.disclosure==='local_planner'||granularDisclosure(item.task.disclosure))) item.runtime = {state: 'starting', code: null, updated_at: this.now()}; }
+    if (item.pending.action.type !== 'fill') { delete item.view; delete item.view_digest; item.fills = {}; if (item.task.purpose_guard) item.runtime = {state: 'starting', code: null, updated_at: this.now()}; }
     item.last_command = {id: result.command_id, status: result.ok ? 'dispatched' : 'failed', code: result.code, site_outcome: 'unverified'};
     item.history.push({id: result.command_id, type: item.pending.action.type, at: this.now(), code: result.code});
     item.status = 'active'; delete item.pending; delete item.action_challenge; delete item.action_receipt;
     await this.save(item); return this.public(item);
-  }
-  async end(id, status = 'revoked') {
-    const item = await this.get(id);
-    if (item.checkout && checkoutStates.includes(item.status)) item.checkout.status = item.status === 'checkout_executing' ? 'uncertain' : 'cancelled';
-    item.status = status; item.fills = {};
-    this.clearCheckout(item);
-    for (const key of ['view', 'pending', 'action_challenge', 'action_receipt', 'session_receipt', 'dom_request', 'dom_access', 'pending_read', 'read_challenge']) delete item[key];
-    await this.save(item); return this.public(item);
-  }
-  async sweep() {
-    for (const item of await this.list()) {
-      if (terminal.has(item.status) && this.now() - item.created_at > 86400000) await this.db.delete('session:' + item.id);
-      else if (checkoutStates.includes(item.status) && item.checkout.deadline <= this.now()) {
-        item.checkout.status = item.status === 'checkout_executing' ? 'uncertain' : 'expired'; item.checkout.code = item.status === 'checkout_executing' ? 'CHECKOUT_UNCERTAIN' : 'EXPIRED';
-        item.status = 'closed'; this.clearCheckout(item); delete item.view; delete item.view_digest; item.fills = {}; await this.save(item);
-      }
-      else if (item.dom_request && item.dom_request.deadline <= this.now()) {
-        if (item.status === 'awaiting_read') item.status = 'active';
-        delete item.pending_read; delete item.read_challenge;
-        item.dom_access = {request_id: item.dom_request.id, status: 'withheld', code: 'MODEL_TIMEOUT', items: [], complete: false};
-        delete item.dom_request; item.runtime = {state: 'blocked', code: 'MODEL_TIMEOUT', updated_at: this.now()}; await this.save(item);
-      } else if (item.pending && item.pending.deadline <= this.now()) {
-        const wasSent = item.status === 'executing';
-        item.status = wasSent ? 'revoked' : 'active';
-        item.last_command = {id: item.pending.id, status: wasSent ? 'uncertain' : 'expired', site_outcome: 'unverified'};
-        delete item.pending; delete item.action_challenge; delete item.action_receipt; delete item.view; item.fills = {}; await this.save(item);
-      }
-    }
   }
 }

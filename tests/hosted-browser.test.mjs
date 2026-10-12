@@ -105,20 +105,18 @@ test('large encrypted profiles survive chunking, reject relocation and erase all
   await assert.rejects(a.put('login', {data: 'x'.repeat(5760001)}));
 });
 test('a signed command interrupted after its page effect is never dispatched twice', async () => {
-  const storage = new Memory(), sign = await phone(storage), engine = new Engine(storage);
-  const origin = 'https://calendar.example';
-  const created = await engine.create({goal: 'Read my calendar.', origins: [origin], permissions: ['read', 'navigate'], disclosure: 'bounded', ttl_seconds: 300,
-    read_grants: [{label: 'Meeting time', origin, xpath: '//p[@id="meeting"]', context: 'Calendar', max_chars: 120, max_offset: 0}]});
-  await engine.approveSession(created.id, await sign((await engine.get(created.id)).challenge));
-  const ready = await engine.publishDOM(created.id, {request_id: null, origin, items: [], code: 'READY'});
-  await engine.propose(created.id, {action: {type: 'navigate', url: origin + '/next'}, view_digest: ready.view_digest, idempotency_key: 'single-navigation-effect'});
-  await engine.approveAction(created.id, await sign((await engine.get(created.id)).action_challenge));
+  const f=await (await import('./flow/fixture.mjs')).fixture('AUTO_APPROVE','cloud');
+  const {engine,db:storage,phone:signer}=f,sign=signer.sign,created={id:f.id},origin='https://shop.example';
+  await f.approve();const ready=await f.publish();
+  await engine.propose(f.id,{action:{type:'navigate',url:origin+'/next'},view_digest:ready.view_digest,idempotency_key:'single-navigation-effect'});
+  await f.check({...((await import('./flow/fixture.mjs')).observation),decision:'confirm'});
+  await engine.approveAction(f.id,await sign((await engine.get(f.id)).action_challenge));
   const [packet] = await engine.commands(), store = new HostedState(storage, tenant, browser);
   let effects = 0;
   const adapter = {tab: async () => ({id: 'owned-tab', url: origin}), navigate: async () => { effects++; throw new Error('Connection lost after navigation.'); }};
   const api = hostedAPI(adapter, store);
   await api.storage.session.set({agent_tabs: {[created.id]: {ids: ['owned-tab'], current: 'owned-tab'}}, bindings: {[created.id]: {session_id: created.id, tab_id: 'owned-tab', view: ready.view, view_digest: ready.view_digest, fills: {}}}});
-  const options = {api, automatic: {}, phoneKey: await storage.get('phone'), authorize: async (candidate, status) => {
+  const options = {api, automatic: {allowed:async()=>true}, phoneKey: await storage.get('phone'), authorize: async (candidate, status) => {
     await verifyBrowserSession(candidate, await storage.get('phone'));
     assert.equal((await engine.get(candidate.session_id)).status, status);
   }};

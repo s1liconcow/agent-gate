@@ -17,17 +17,17 @@ test('pending MCP requests link directly to the matching phone approval', async 
   const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
   try {
-    const requested = await client.callTool({name: 'request_browser_session', arguments: {goal: 'Read my inbox summary.', origins: ['https://mail.example'], permissions: ['read']}});
+    const requested = await client.callTool({name: 'request_browser_session', arguments: {goal: 'Read my inbox summary.', origins: ['https://mail.example'], permissions:['read'],browser:'local',classifier_backend:'chrome_ai',start_url:'https://mail.example'}});
     const url = `https://agentgate.example/#session=${id}`;
     assert.equal(requested.structuredContent.approval_url, url);
-    assert.deepEqual(requested.content[1], {type: 'resource_link', uri: url, name: 'Open approval page', description: 'Review this request on the paired phone.'});
+    assert.deepEqual(requested.content[1], {type:'resource_link',uri:url,name:'Review task approval'});
     assert.equal(JSON.parse(requested.content[0].text).approval_url, url);
 
     status = 'awaiting_action';
-    const action = await client.callTool({name: 'perform_browser_action', arguments: {session_id: id, action: {type: 'navigate', url: 'https://mail.example/inbox'}, view_digest: null, idempotency_key: 'open-inbox'}});
+    const action = await client.callTool({name: 'perform_browser_action', arguments: {session_id: id, action: {type: 'navigate', url: 'https://mail.example/inbox'}, view_digest: 'v'.repeat(43), idempotency_key: 'open-inbox'}});
     assert.equal(action.structuredContent.approval_url, url);
 
-    status = 'awaiting_read';
+    status = 'awaiting_action';
     const read = await client.callTool({name: 'get_browser_session', arguments: {session_id: id}});
     assert.equal(read.structuredContent.approval_url, url);
 

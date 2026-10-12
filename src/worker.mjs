@@ -1,11 +1,12 @@
 import {DurableObject} from 'cloudflare:workers';
 import {buildPushPayload} from '@block65/webcrypto-web-push';
+import {tools as toolContract, apiVersion} from '../mcp/contract.mjs';
 import {Engine} from './engine.mjs';
 import {Engagement} from './engagement.mjs';
 import {ConnectionSetup} from './connection-setup.mjs';
 import {Connectors} from './connectors.mjs';
 import {Browsers} from './browsers.mjs';
-import {BrowserRouting} from './browser-routing.mjs';
+import {BrowserRouting, summarizeLocalBrowsers} from './browser-routing.mjs';
 import {LocalClassifier} from './local-classifier.mjs';
 import {registerInference, configuredInference} from './inference.mjs';
 import {withOAuth, oauthRoute} from './oauth.mjs';
@@ -18,6 +19,8 @@ import {HostedConsent} from './hosted-consent.mjs';
 import {HostedBrowser} from './hosted-browser.mjs';
 import {cloudflareBrowserFactory} from './hosted-cloudflare.mjs';
 import {HostedState} from './hosted-state.mjs';
+import {accountProfile, readAccountProfile, isAdminAccount} from './account-profile.mjs';
+import {requireAdmin, adminPageQuery, adminAccountPage, accountAdminSummary} from './admin.mjs';
 import {hostedAsset} from './hosted-assets.mjs';
 import {hostedModel, hostedScripts} from './generated-hosted.mjs';
 import {LoginSync} from './login-sync.mjs';
@@ -79,7 +82,7 @@ export class Gate extends DurableObject {
     for (const item of items) if (await this.browserRouting.owns(item, browserId)) sessions.push(item);
     const ids = new Set(sessions.map(item => item.id));
     return {sessions, commands: (await this.engine.commands()).filter(item => ids.has(item.session_id)),
-      checks: (await this.engine.checks()).filter(item => ids.has(item.session_id)), checkouts: (await this.engine.checkouts()).filter(item => ids.has(item.session_id)), classifier_requests: await this.classifier.pending(browserId)};
+      checks: (await this.engine.checks()).filter(item => ids.has(item.session_id)), classifier_requests: await this.classifier.pending(browserId)};
   }
   hostedSnapshot() { return this.hostedLock(async () => {
     const current = await this.hostedConsent.current();
@@ -94,7 +97,7 @@ export class Gate extends DurableObject {
     if (!current) fail('INFERENCE_NOT_APPROVED', 'Hosted browser access ended.', 403);
     await this.engine.sweep();
     if (path === 'sessions' && data === undefined) return {sessions: (await this.browserTasks(current.browser_id)).sessions.map(item => ({...this.engine.public(item), scope: item.task, session_receipt: item.session_receipt}))};
-    const route = path.match(/^sessions\/([a-f0-9]{32})\/(view|dom|runtime|check|result|checkout-prepare|checkout-result|checkout-claim|classifier-request|classifier-read)$/);
+    const route = path.match(/^sessions\/([a-f0-9]{32})\/(view|runtime|check|result|classifier-request|classifier-read)$/);
     if (!route || data === undefined) fail('NOT_FOUND', 'Unknown hosted browser operation.', 404);
     await this.requireTaskBrowser(route[1], current.browser_id);
     if (route[2] === 'classifier-request') {
@@ -104,15 +107,14 @@ export class Gate extends DurableObject {
     if (route[2] === 'classifier-read') { exact(data, ['request_id']); return this.classifier.read(route[1], data.request_id); }
     const item = await this.engine.get(route[1]);
     let proof;
-    if (item.task.purpose_guard && ['view', 'check', 'checkout-prepare'].includes(route[2])) {
+    if (item.task.purpose_guard && ['view', 'check'].includes(route[2])) {
       const {classifier_proof, ...payload} = data;
-      proof = await this.classifier.proof(item.id, {view: 'plan', check: 'check_action', 'checkout-prepare': 'check_purchase'}[route[2]], classifier_proof, payload); data = payload;
+      proof = await this.classifier.proof(item.id, {view: 'plan', check: 'check_action'}[route[2]], classifier_proof, payload); data = payload;
     }
-    const methods = {view: 'publishView', dom: 'publishDOM', runtime: 'runtime', check: 'checkAction', result: 'result', 'checkout-prepare': 'prepareCheckout', 'checkout-result': 'checkoutResult', 'checkout-claim': 'claimCheckout'};
+    const methods = {view: 'publishView', runtime: 'runtime', check: 'checkAction', result: 'result'};
     const answer = await this.engine[methods[route[2]]](route[1], data);
     if (proof) await this.classifier.used(proof);
-    if (route[2] === 'checkout-prepare' && answer.status === 'checkout_executing') this.ctx.waitUntil(this.dispatch());
-    if (['awaiting_action', 'awaiting_checkout', 'awaiting_read'].includes(answer.status)) this.ctx.waitUntil(this.notify());
+    if (['awaiting_action'].includes(answer.status)) this.ctx.waitUntil(this.notify());
     return answer;
   }); }
   kickHosted() {
@@ -147,6 +149,33 @@ export class Gate extends DurableObject {
       if (await this.ctx.storage.get('account_id')) throw new Error('Account already initialized.');
       await this.ctx.storage.put({account_id: id, pairing_hash: pairingHash});
     });
+  }
+  adminSummary() {
+    return accountAdminSummary(this.ctx.storage, id => this.ctx.getWebSockets('browser:' + id).some(ws => ws.readyState === 1));
+  }
+  async ownerProfile(request) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      try {
+        await this.auth(request, 'owner');
+        const id = await this.ctx.storage.get('account_id') || 'owner';
+        if (request.method === 'POST') await this.ctx.storage.put('account:profile', {...accountProfile(await body(request)), updated_at: Date.now()});
+        return json({...await readAccountProfile(this.ctx.storage, id), admin: isAdminAccount(id, this.env.ADMIN_ACCOUNT_ID)});
+      } catch (error) {return errorResponse(error);}
+    });
+  }
+  async adminAccounts(request) {
+    await this.auth(request, 'owner');
+    const account = await this.ctx.storage.get('account_id') || 'owner';
+    requireAdmin(account, this.env.ADMIN_ACCOUNT_ID);
+    const query = adminPageQuery(new URL(request.url).searchParams);
+    const ids = await this.env.REGISTRY.getByName('beta-registry-v1').adminAccountIds();
+    const page = await adminAccountPage(ids, query, id => id === account ? this.adminSummary() : this.env.GATE.getByName(id === 'owner' ? 'single-owner-v1' : 'account:' + id).adminSummary());
+    const [limits, history] = query.cursor ? [null, null] : await Promise.all([
+      this.env.BROWSER ? this.hosted.factory.inspectLimits() : null,
+      this.env.BROWSER ? this.hosted.factory.inspectHistory() : null
+    ]);
+    await this.auth(request, 'owner');
+    return json({admin_account_id: account, ...page, cloud_capacity: {limits, history}, observed_at: Date.now()});
   }
   async locked(callback) {
     return this.ctx.blockConcurrencyWhile(async () => { try { return {result: await callback()}; } catch (error) { return {error: apiFailure(error)}; } });
@@ -197,36 +226,44 @@ export class Gate extends DurableObject {
     // read wait polls often; dispatching each poll caused a websocket/tick storm.
     if(data!==undefined)await this.dispatch(); return answer;
   }
-  async agentCall(path, data, principal = 'cli') {
-    if (path === 'browsers' && data === undefined) return {browsers: await this.browserRouting.choices(), engagement: await this.engagement.public(), validation: 'on_device', classifier_backends: ['chrome_ai', 'onnx'], backend_capabilities: {chrome_ai: {disclosure: true, staging: 'owner_engagement', purchase: 'exact_cart_and_policy_or_owner_approval'}, onnx: {disclosure: true, staging: 'owner_engagement', purchase: 'exact_cart_and_policy_or_owner_approval', score: 'evidence_relevance_not_action_safety'}}};
-    if (path === 'sessions' && data !== undefined) {
-      const {browser: kind, validation, classifier_browser_id: classifierId, classifier_backend: backend = 'chrome_ai', ...input} = data;
-      if (validation !== undefined && validation !== 'on_device' || (classifierId || data.classifier_backend) && validation !== 'on_device' || !['chrome_ai', 'onnx'].includes(backend)) fail('INVALID_SCOPE', 'Choose validation=on_device with an explicit paired local backend.');
-      const browser = kind ? await this.browserRouting.choose(kind, kind === 'local' ? classifierId : undefined) : await this.browserRouting.current();
-      let localPurpose = null;
-      if (validation === 'on_device') {
-        if (!kind || input.disclosure && input.disclosure !== 'local_planner' || input.interaction && input.interaction !== 'automatic') fail('INVALID_SCOPE', 'On-device shopping requires explicit browser=local or cloud, local_planner disclosure and automatic routine actions.');
-        const classifier = kind === 'local' ? browser : await this.browserRouting.choose('local', classifierId);
-        if (classifierId && classifierId !== classifier.id || !await this.classifier.allowed(classifier.id)) fail('LOCAL_CLASSIFIER_UNAVAILABLE', 'Connect the explicitly selected paired local Chrome classifier.');
-        input.disclosure = 'local_planner'; input.interaction = 'automatic';
-        const profile = backend === 'onnx' ? await configuredInference(this.ctx.storage, classifier.id) : null;
-        if (backend === 'onnx' && profile?.provider !== 'purpose_browser') fail('LOCAL_CLASSIFIER_UNAVAILABLE', 'Prepare and register the local ONNX bundle on this device.');
-        localPurpose = {guard: {version: 1, browser_id: classifier.id, model: backend, ...(profile ? {model_id: profile.model} : {})}, execution: kind};
-      }
-      const result = await this.engine.create(input, principal, localPurpose ? null : await configuredInference(this.ctx.storage, browser?.id), browser?.id, localPurpose);
-      if (result.status === 'requested') this.ctx.waitUntil(this.notify()); return result;
+  async agentCall(path, data, principal='cli') {
+    if (path === 'browsers' && data === undefined) {
+      const records = [...(await this.ctx.storage.list({prefix: 'browser:'})).values()];
+      return {
+        api_version: apiVersion,
+        account_id: await this.ctx.storage.get('account_id') || 'owner',
+        browsers: await this.browserRouting.choices(),
+        engagement: await this.engagement.public(),
+        classifier_backends: ['chrome_ai', 'onnx'],
+        local_diagnostics: summarizeLocalBrowsers(records, id => this.ctx.getWebSockets('browser:' + id).some(ws => ws.readyState === 1))
+      };
     }
-    const match = path.match(/^sessions\/([a-f0-9]{32})(?:\/(actions|close|revoke|disclosure|dom|checkout))?$/);
-    if (!match) fail('NOT_FOUND', 'Unknown assistant endpoint.', 404);
-    const [, id, operation] = match, item = await this.engine.get(id);
-    if ((item.principal || 'cli') !== principal) fail('NOT_FOUND', 'Unknown session for this assistant connection.', 404);
-    if (!operation && data === undefined) return this.engine.public(item);
-    if (operation === 'actions' && data !== undefined) { const result = await this.engine.propose(id, data); if (result.status === 'awaiting_action') this.ctx.waitUntil(this.notify()); return result; }
-    if (operation === 'disclosure' && data !== undefined) return this.engine.requestDisclosure(id, data);
-    if (operation === 'dom' && data !== undefined) return this.engine.requestDOM(id, data);
-    if (operation === 'checkout' && data !== undefined) return this.engine.requestCheckout(id, data);
-    if (['revoke', 'close'].includes(operation) && data !== undefined) { exact(data, []); return this.engine.end(id, operation === 'close' ? 'closed' : 'revoked'); }
-    fail('NOT_FOUND', 'Unknown assistant operation.', 404);
+    if (path==='sessions' && data!==undefined) {
+      const parsed=toolContract.request_browser_session.schema.safeParse(data);
+      if (!parsed.success) fail('INVALID_SCOPE','Use the advertised request schema with explicit browser and classifier_backend.');
+      const {browser:kind,classifier_backend:backend,classifier_browser_id:classifierId,...input}=parsed.data;
+      const browser=await this.browserRouting.choose(kind,kind==='local'?classifierId:undefined);
+      const classifier=kind==='local'?browser:await this.browserRouting.choose('local',classifierId);
+      if (classifierId && classifierId!==classifier.id || !await this.classifier.allowed(classifier.id)) fail('LOCAL_CLASSIFIER_UNAVAILABLE','Connect the selected paired local classifier.');
+      const profile=backend==='onnx'?await configuredInference(this.ctx.storage,classifier.id):null;
+      if (backend==='onnx' && profile?.provider!=='purpose_browser') fail('LOCAL_CLASSIFIER_UNAVAILABLE','Install and register the pinned local ONNX bundle.');
+      const guard={version:1,browser_id:classifier.id,model:backend,...(profile?{model_id:profile.model}:{})};
+      const result=await this.engine.create(input,principal,null,browser.id,{guard,execution:kind});
+      if(result.status==='requested')this.ctx.waitUntil(this.notify()); return result;
+    }
+    const match=path.match(/^sessions\/([a-f0-9]{32})(?:\/(actions|close))?$/);
+    if(!match)fail('NOT_FOUND','Unknown task operation.',404);
+    const [,id,operation]=match,item=await this.engine.get(id);
+    if(item.principal!==principal)fail('NOT_FOUND','Unknown task for this assistant connection.',404);
+    if(!operation && data===undefined)return this.engine.public(item);
+    if(operation==='actions' && data!==undefined) {
+      const parsed=toolContract.perform_browser_action.schema.safeParse({session_id:id,...data});
+      if(!parsed.success)fail('INVALID_REQUEST','Use the advertised action schema.');
+      const {session_id,...body}=parsed.data,result=await this.engine.propose(id,body);
+      if(result.status==='awaiting_action')this.ctx.waitUntil(this.notify());return result;
+    }
+    if(operation==='close' && data!==undefined){exact(data,[]);return this.engine.end(id,'closed');}
+    fail('NOT_FOUND','Unknown task operation.',404);
   }
   async auth(request, role) {
     const site = new URL(request.url).origin, requestOrigin = request.headers.get('Origin');
@@ -243,9 +280,14 @@ export class Gate extends DurableObject {
   }
   async fetch(request) {
     try {
+      const path = new URL(request.url).pathname;
       const account = request.headers.get('X-AgentGate-Account');
       if (account && account !== await this.ctx.storage.get('account_id')) fail('NOT_FOUND', 'Unknown account.', 404);
-      const path = new URL(request.url).pathname;
+      if (path === '/api/owner/admin/accounts') {
+        if (request.method !== 'GET') return new Response('Use GET for account administration.', {status: 405, headers: {Allow: 'GET'}});
+        return await this.adminAccounts(request);
+      }
+      if (path === '/api/owner/profile' && ['GET', 'POST'].includes(request.method)) return await this.ownerProfile(request);
       // Browser work must acquire the hosted queue before the short Gate lock.
       // Waiting for that queue while holding blockConcurrencyWhile deadlocks ticks.
       const loginOperation = path.match(/^\/api\/(login-source\/transfers\/([a-f0-9]{32})\/import|owner\/login-connections\/([a-f0-9]{32})\/(disconnect|live-view))$/);
@@ -287,7 +329,7 @@ export class Gate extends DurableObject {
       }
       // Handle expected policy failures inside the lock: an uncaught exception here resets a DO.
       const result = await this.ctx.blockConcurrencyWhile(async () => { try { return await this.route(request); } catch (error) { return errorResponse(error); } });
-      if (path.endsWith('/actions') || path.endsWith('/approve') || path.endsWith('/check') || path.endsWith('/revoke') || path.endsWith('/close') || path.endsWith('/checkout') || path.endsWith('/checkout-prepare') || path.endsWith('/checkout-result') || request.method==='POST'&&(/^\/api\/agent\/sessions\/[a-f0-9]{32}\/(?:dom|disclosure)$/.test(path)||path==='/api/agent/sessions')) await this.dispatch();
+      if (path.endsWith('/actions') || path.endsWith('/approve') || path.endsWith('/check') || path.endsWith('/revoke') || path.endsWith('/close') || request.method==='POST'&&path==='/api/agent/sessions') await this.dispatch();
       return result;
     } catch (error) { return errorResponse(error); }
   }
@@ -429,7 +471,15 @@ export class Gate extends DurableObject {
         await this.ensureHosted(url.origin);
         return json(await this.hostedConsent.status());
       }
-      if (path === '/api/owner/browsers' && method === 'GET') return json({browsers: (await this.browsers.list()).filter(item => item.kind !== 'hosted').map(item => this.browsers.public(item)), choices: await this.browserRouting.choices(), default_browser_id: (await this.browserRouting.current())?.id || null});
+      if (path === '/api/owner/browsers' && method === 'GET') return json({
+        account_id: await this.ctx.storage.get('account_id') || 'owner',
+        browsers: (await this.browsers.list()).filter(item => item.kind !== 'hosted').map(item => ({
+          ...this.browsers.public(item),
+          socket_connected: item.status === 'active' && this.ctx.getWebSockets('browser:' + item.id).some(ws => ws.readyState === 1)
+        })),
+        choices: await this.browserRouting.choices(),
+        default_browser_id: (await this.browserRouting.current())?.id || null
+      });
       if (path === '/api/owner/browsers/default' && method === 'POST') {
         const input = await body(request); exact(input, ['browser_id']);
         await this.browserRouting.pinSessions(await this.engine.list());
@@ -456,12 +506,8 @@ export class Gate extends DurableObject {
       }
       if (path === '/api/owner/sessions' && method === 'GET') {
         const items = await this.engine.list(), hosted = await this.hostedConsent.current();
-        return json({purchase_policies: await this.engine.purchasePolicies.list(), sessions: await Promise.all(items.map(async item => ({...this.engine.public(item), scope: item.task, browser_id: await this.browserRouting.sessionBrowser(item), hosted: Boolean(hosted && await this.browserRouting.owns(item, hosted.browser_id)), audit: item.history.filter(event => ['session', 'action_check', 'read_check', 'read_approval', 'disclosure_check', 'purchase_check'].includes(event.type)), read_preview: item.status === 'awaiting_read' ? item.pending_read?.items : undefined, challenge: item.status === 'requested' ? item.challenge : item.status === 'awaiting_action' ? item.action_challenge : item.status === 'awaiting_read' ? item.read_challenge : item.status === 'awaiting_checkout' ? item.checkout.challenge : null})))});
+        return json({sessions: await Promise.all(items.map(async item => ({...this.engine.public(item), scope: item.task, browser_id: await this.browserRouting.sessionBrowser(item), hosted: Boolean(hosted && await this.browserRouting.owns(item, hosted.browser_id)), audit: item.history.filter(event => ['session', 'action_check', 'disclosure_check'].includes(event.type)), challenge: item.status === 'requested' ? item.challenge : item.status === 'awaiting_action' ? item.action_challenge : null})))});
       }
-      if (path === '/api/owner/purchase-policies' && method === 'POST') {const result = await this.engine.purchasePolicies.request(await body(request)); this.ctx.waitUntil(this.notify()); return json(result);}
-      if (path === '/api/owner/purchase-policies/approve' && method === 'POST') return json(await this.engine.purchasePolicies.approve(await body(request)));
-      const purchasePolicyRoute = path.match(/^\/api\/owner\/purchase-policies\/([a-f0-9]{32})\/revoke$/);
-      if (purchasePolicyRoute && method === 'POST') {exact(await body(request), []); return json(await this.engine.purchasePolicies.revoke(purchasePolicyRoute[1]));}
       if (path === '/api/owner/push-key' && method === 'GET') return json({public_key: this.env.VAPID_PUBLIC_KEY || null});
       if (path === '/api/owner/push' && method === 'POST') {
         const input = await body(request); exact(input, ['endpoint', 'expirationTime', 'keys']); exact(input.keys, ['p256dh', 'auth']);
@@ -469,16 +515,11 @@ export class Gate extends DurableObject {
         if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password || endpoint.port || !['fcm.googleapis.com', 'updates.push.services.mozilla.com', 'web.push.apple.com'].includes(endpoint.hostname) || input.endpoint.length > 2000 || !/^[A-Za-z0-9_-]{80,100}$/.test(input.keys.p256dh) || !/^[A-Za-z0-9_-]{20,30}$/.test(input.keys.auth)) fail('INVALID_PUSH', 'Unsupported push subscription.');
         await this.ctx.storage.put('push', input); return json({subscribed: true});
       }
-      const route = path.match(/^\/api\/owner\/sessions\/([a-f0-9]{32})\/(approve|revoke|policy|browser)$/);
+      const route = path.match(/^\/api\/owner\/sessions\/([a-f0-9]{32})\/(approve|revoke)$/);
       if (route && method === 'POST') {
-        if (route[2] === 'browser') {
-          const input = await body(request); exact(input, ['browser_id']); await this.browserRouting.select(input.browser_id);
-          return json(await this.engine.chooseBrowser(route[1], input.browser_id, await configuredInference(this.ctx.storage, input.browser_id)));
-        }
-        if (route[2] === 'policy') return json(await this.engine.chooseActionPolicy(route[1], await body(request)));
         if (route[2] === 'revoke') { exact(await body(request), []); return json(await this.engine.end(route[1])); }
         const item = await this.engine.get(route[1]), receipt = await body(request);
-        return json(item.status === 'requested' ? await this.engine.approveSession(item.id, receipt) : item.status === 'awaiting_read' ? await this.engine.approveRead(item.id, receipt) : item.status === 'awaiting_checkout' ? await this.engine.approveCheckout(item.id, receipt) : await this.engine.approveAction(item.id, receipt));
+        return json(item.status === 'requested' ? await this.engine.approveSession(item.id, receipt) : await this.engine.approveAction(item.id, receipt));
       }
     }
     if (role === 'bridge') {
@@ -491,18 +532,14 @@ export class Gate extends DurableObject {
       }
       if (path === '/api/bridge/classifier/requests' && method === 'GET') return json({requests: await this.classifier.pending(browserId)});
       if (path === '/api/bridge/classifier/result' && method === 'POST') return json(await this.classifier.submit(browserId, await body(request)));
-      if (path === '/api/bridge/sessions' && method === 'GET') return json({sessions: (await this.browserTasks(browserId)).sessions.filter(i => ['active', 'checking_action', 'awaiting_action', 'awaiting_read', 'executing', 'checkout_preparing', 'awaiting_checkout', 'checkout_executing'].includes(i.status)).map(i => ({...this.engine.public(i), scope: i.task, session_receipt: i.session_receipt}))});
-      const route = path.match(/^\/api\/bridge\/sessions\/([a-f0-9]{32})\/(view|check|runtime|dom|checkout-prepare|checkout-result|checkout-claim)$/);
+      if (path === '/api/bridge/sessions' && method === 'GET') return json({sessions: (await this.browserTasks(browserId)).sessions.filter(i => ['active', 'checking_action', 'awaiting_action', 'executing'].includes(i.status)).map(i => ({...this.engine.public(i), scope: i.task, session_receipt: i.session_receipt}))});
+      const route = path.match(/^\/api\/bridge\/sessions\/([a-f0-9]{32})\/(view|check|runtime)$/);
       if (route && method === 'POST') {
         await this.requireTaskBrowser(route[1], browserId);
         const input = await body(request);
         if (route[2] === 'view') return json(await this.engine.publishView(route[1], input));
-        if (route[2] === 'dom') { const result = await this.engine.publishDOM(route[1], input); if (result.status === 'awaiting_read') this.ctx.waitUntil(this.notify()); return json(result); }
         if (route[2] === 'runtime') return json(await this.engine.runtime(route[1], input));
-        if (route[2] === 'checkout-result') return json(await this.engine.checkoutResult(route[1], input));
-        if (route[2] === 'checkout-claim') return json(await this.engine.claimCheckout(route[1], input));
-        if (route[2] === 'checkout-prepare') { const result = await this.engine.prepareCheckout(route[1], input); this.ctx.waitUntil(this.notify()); return json(result); }
-        const result = await this.engine.checkAction(route[1], input);
+            const result = await this.engine.checkAction(route[1], input);
         if (result.status === 'awaiting_action') this.ctx.waitUntil(this.notify());
         return json(result);
       }
@@ -619,7 +656,7 @@ const app = {
     if (url.pathname.startsWith('/api/')) return env.GATE.getByName('single-owner-v1').fetch(request);
     let assetRequest = request;
     if (tenant) {
-      if (!['/', '/index.html', '/try.html', '/connect.html', '/browser-diagnostics.html'].includes(tenant.path)) return new Response('Not found', {status: 404});
+      if (!['/', '/index.html', '/try.html', '/connect.html', '/browser-diagnostics.html', '/admin.html', '/account.html'].includes(tenant.path)) return new Response('Not found', {status: 404});
       url.pathname = tenant.path === '/' ? '/index.html' : tenant.path;
       assetRequest = new Request(url, request);
     } else if (url.pathname === '/') {

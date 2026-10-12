@@ -1,5 +1,7 @@
 # Gmail draft control fix
 
+Historical research record. Commands and API descriptions below refer to the pre-flow implementation preserved in Git history at `18bf0c8`. Current operation and verification use [BASIC_BROWSER_FLOW.md](BASIC_BROWSER_FLOW.md) and [SETUP.md](SETUP.md).
+
 The local fix addresses three reproduced failure paths:
 
 - Capture scanned the main inbox first and stopped at 72 controls, omitting

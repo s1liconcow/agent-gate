@@ -1,0 +1,214 @@
+{
+  "native_extension_inference_verified": false,
+  "security_settings_changed": false,
+  "persistent_credentials_created": false,
+  "model_download_requested": false,
+  "readiness_evidence": [
+    {
+      "name": "original-demo",
+      "channel": "chromium",
+      "headless": true,
+      "cached": false,
+      "browser_version": "153.0.8010.12",
+      "extension_loaded": true,
+      "review": {
+        "api": "function",
+        "availability": "unavailable"
+      },
+      "offscreen": {
+        "ok": true,
+        "availability": "unavailable"
+      },
+      "offscreen_contexts": [
+        {
+          "contextType": "OFFSCREEN_DOCUMENT",
+          "documentUrl": "local-agent.html"
+        }
+      ]
+    },
+    {
+      "name": "cached-headless",
+      "channel": "chromium",
+      "headless": true,
+      "cached": true,
+      "browser_version": "153.0.8010.12",
+      "extension_loaded": true,
+      "review": {
+        "api": "function",
+        "availability": "downloading"
+      },
+      "offscreen": {
+        "ok": true,
+        "availability": "downloading"
+      },
+      "readiness_samples": [
+        "downloading",
+        "downloading",
+        "downloading",
+        "downloading",
+        "downloading",
+        "downloading",
+        "downloading"
+      ],
+      "offscreen_contexts": [
+        {
+          "contextType": "OFFSCREEN_DOCUMENT",
+          "documentUrl": "local-agent.html"
+        }
+      ]
+    },
+    {
+      "name": "cached-headed",
+      "channel": "chromium",
+      "headless": false,
+      "cached": true,
+      "browser_version": "153.0.8010.12",
+      "extension_loaded": true,
+      "review": {
+        "api": "function",
+        "availability": "downloading"
+      },
+      "offscreen": {
+        "ok": true,
+        "availability": "downloading"
+      },
+      "readiness_samples": [
+        "downloading",
+        "downloading",
+        "downloading",
+        "downloading",
+        "downloading",
+        "downloading",
+        "downloading"
+      ],
+      "offscreen_contexts": [
+        {
+          "contextType": "OFFSCREEN_DOCUMENT",
+          "documentUrl": "local-agent.html"
+        }
+      ]
+    },
+    {
+      "name": "installed-chrome",
+      "channel": "chrome",
+      "headless": false,
+      "cached": true,
+      "browser_version": "154.0.8037.98",
+      "error": "browserContext.waitForEvent: Timeout 8000ms exceeded while waiting for event \"serviceworker\"",
+      "code": "EXTENSION_SIDELOAD_UNAVAILABLE"
+    },
+    {
+      "name": "compatible-cft",
+      "channel": "chromium",
+      "headless": true,
+      "cached": true,
+      "browser_version": "154.0.8037.92",
+      "extension_loaded": true,
+      "web": {
+        "api": "function",
+        "availability": "downloading"
+      },
+      "review": {
+        "api": "function",
+        "availability": "downloading"
+      },
+      "offscreen": {
+        "ok": true,
+        "availability": "downloading"
+      },
+      "readiness_samples": [
+        "downloading",
+        "downloading",
+        "downloading",
+        "downloading",
+        "downloading",
+        "downloading",
+        "downloading"
+      ],
+      "guard_request": {
+        "ok": false,
+        "code": "MODEL_UNAVAILABLE"
+      },
+      "offscreen_contexts": [
+        {
+          "contextType": "OFFSCREEN_DOCUMENT",
+          "documentUrl": "local-agent.html"
+        }
+      ]
+    }
+  ],
+  "verified_testing_archive": {
+    "version": "154.0.8037.92",
+    "source": "https://storage.googleapis.com/chrome-for-testing-public/154.0.8037.92/mac-arm64/chrome-mac-arm64.zip",
+    "bytes": 191153086,
+    "sha256": "b62e904b6571c5ff5108ed7812cf93ac6d1c4027f10ae47ac34d8e229ed88001",
+    "integrity": "Matched the official object MD5 over HTTPS; test-build application signature is ad hoc. No signing or quarantine changes."
+  },
+  "blocker": "Native setup is unresolved. Fresh retained profiles receive a pending availability promise; the offscreen request returns MODEL_TIMEOUT. No model-weight transfer was observed. First download initiation requires an explicit owner setup gesture followed by LanguageModel.create(); no such gesture was requested.",
+  "five_tools": [
+    "list_browser_runtimes",
+    "request_browser_session",
+    "get_browser_session",
+    "perform_browser_action",
+    "close_browser_session"
+  ],
+  "retained_profile_observation": {
+    "browser_version": "153.0.8010.12",
+    "elapsed_ms": 597106,
+    "samples": 120,
+    "api": {
+      "pending": true
+    },
+    "offscreen": {
+      "ok": false,
+      "code": "MODEL_TIMEOUT"
+    },
+    "storage_start": {
+      "bytes": 1510938,
+      "files": 3
+    },
+    "storage_end": {
+      "bytes": 1510938,
+      "files": 3
+    },
+    "directories": {
+      "OptGuideOnDeviceModel": {
+        "bytes": 0,
+        "files": 0
+      },
+      "optimization_guide_model_store": {
+        "bytes": 0,
+        "files": 0
+      },
+      "component_crx_cache": {
+        "bytes": 1510938,
+        "files": 3
+      }
+    },
+    "actual_model_download_observed": false,
+    "model_copy": false,
+    "model_create_requested": false,
+    "profile_retained": true,
+    "browser_retained": true,
+    "model_manifest": "Optimization Guide On DeviceModels Manifest - Version: 0.0.0.0 Status - Up-to-date Check for update Optimization Hints - Version: 0.0.0.0 Statu",
+    "normal_launch": {
+      "browser_version": "153.0.8010.12",
+      "samples": 45,
+      "last": {
+        "seconds": 220,
+        "api": {
+          "pending": true
+        },
+        "model_manifest": "Optimization Guide On DeviceModels Manifest - Version: 0.0.0.0 Status - Up-to-date Check for update Optimization Hints - Version: 0.0.0.0 Status - Up-to-date Check for update Origin Trials - Ve"
+      }
+    },
+    "detailed_internals": "Disabled by Chrome; enabling debug pages was not requested or performed.",
+    "hardware": {
+      "ram_bytes": 25769803776,
+      "cpu_cores": 15,
+      "free_profile_volume_gb": 515
+    },
+    "user_setup_requirement": "Prepare Chrome AI invokes LanguageModel.create under user activation. Availability eligibility still needs to resolve.",
+    "evidence": "Local ignored artifacts/native-download/"
+  }
+}

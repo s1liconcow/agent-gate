@@ -40,7 +40,7 @@ test('failed idle close retains ownership for the next cleanup and respects an o
   await f.hosted.tick(); assert.equal(await f.store.get('connection'), undefined);
 });
 test('housekeeping closes idle open tasks after two minutes and never reacquires them', async () => {
-  for (const status of ['active', 'awaiting_action', 'awaiting_read', 'awaiting_checkout']) {
+  for (const status of ['active','awaiting_action']) {
     let now = 100000;
     const closed = [], f = fixture({open: () => assert.fail('Idle housekeeping cannot acquire'), close: async id => closed.push(id)}, undefined, () => now);
     f.hosted.snapshot = async () => ({sessions: [{id: 'task', status, view: {origin: 'https://example.com'}}], commands: [], checks: [], checkouts: []});
@@ -64,7 +64,7 @@ test('housekeeping closes idle open tasks after two minutes and never reacquires
   }
 });
 test('pending reads, initial views, commands, checks and checkouts wake an idle browser', async () => {
-  for (const work of ['initial', 'read', 'commands', 'checks', 'checkouts']) {
+  for (const work of ['initial','commands','checks']) {
     let connected = 0;
     const f = fixture({}, undefined, () => 1000000);
     const session = {id: 'task', status: work === 'initial' || work === 'read' ? 'active' : 'executing', view: work === 'initial' ? null : {origin: 'https://example.com'}};

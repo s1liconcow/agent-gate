@@ -5,11 +5,12 @@ const bytes = value => Uint8Array.from(atob(value.replaceAll('-', '+').replaceAl
 // Every Gate owns its key and records. AAD also prevents moving a ciphertext
 // between accounts, browsers, or storage names.
 export class HostedState {
-  constructor(storage, accountId, browserId) { Object.assign(this, {storage, accountId, browserId}); }
+  constructor(storage, accountId, browserId, {readOnly = false} = {}) { Object.assign(this, {storage, accountId, browserId, readOnly}); }
   async key() {
     this.keyPromise ||= (async () => {
       const create = async storage => {
         let raw = await storage.get('hosted:key');
+        if (!raw && this.readOnly) throw new Error('Encrypted browser metadata is unavailable.');
         if (!raw) { raw = b64url(crypto.getRandomValues(new Uint8Array(32))); await storage.put('hosted:key', raw); }
         return raw;
       };
@@ -46,7 +47,9 @@ export class HostedState {
     const ciphertext = await crypto.subtle.encrypt({name: 'AES-GCM', iv, additionalData: this.aad(name)}, await this.key(), raw);
     return {iv: b64url(iv), ciphertext: b64url(ciphertext)};
   }
+  writable() {if (this.readOnly) throw new Error('This browser metadata is read-only.');}
   async putRecords(records) {
+    this.writable();
     const updates = {};
     for (const [name, value] of Object.entries(records)) {
       const raw = new TextEncoder().encode(JSON.stringify(value));
@@ -57,6 +60,7 @@ export class HostedState {
     await this.storage.put(updates);
   }
   async put(name, value) {
+    this.writable();
     const raw = new TextEncoder().encode(JSON.stringify(value));
     if (raw.length > 5760000) throw new Error('Hosted browser state exceeds its storage bound.');
     const previous = await this.storage.get(this.name(name));
@@ -72,12 +76,14 @@ export class HostedState {
     await this.removeChunks(name, previous);
   }
   async removeChunks(name, item) {
+    this.writable();
     if (!item?.chunked) return;
     const manifest = JSON.parse(new TextDecoder().decode(await this.decrypt(name, item)));
     for (let i = 0; i < manifest.count; i++) await this.storage.delete(this.name(name + ':chunk:' + manifest.token + ':' + i));
   }
-  async delete(name) { const item = await this.storage.get(this.name(name)); await this.storage.delete(this.name(name)); await this.removeChunks(name, item); }
+  async delete(name) { this.writable(); const item = await this.storage.get(this.name(name)); await this.storage.delete(this.name(name)); await this.removeChunks(name, item); }
   async clear() {
+    this.writable();
     const items = await this.storage.list({prefix: this.name()});
     for (const name of items.keys()) await this.storage.delete(name);
   }

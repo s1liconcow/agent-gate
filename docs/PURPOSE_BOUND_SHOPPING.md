@@ -1,5 +1,7 @@
 # Purpose-bound tasks and purchase policies
 
+Historical research record. Commands and API descriptions below refer to the pre-flow implementation preserved in Git history at `18bf0c8`. Current operation and verification use [BASIC_BROWSER_FLOW.md](BASIC_BROWSER_FLOW.md) and [SETUP.md](SETUP.md).
+
 AgentGate source supports an explicit execution browser and an explicit local purpose validator. Changes are ready for deployment review. Production remains unchanged; no real purchase policy or live purchase was activated.
 
 ## Signed backend selection

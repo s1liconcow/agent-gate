@@ -1,49 +1,26 @@
 # Engagement
 
-The assistant connection page has a three-position slider for each account.
-`AUDIT_ONLY` starts selected. **Approve and connect** saves the level and enables
-the cloud browser in one tap. The authorized browser can change the level later
-in the approval app. Model-classified sessions use that standing consent.
+The owner saves an account-level engagement setting during assistant connection
+or in the approval app. The receipt binds the account, coordinator, mode, nonce
+and expiry. Saving a new setting ends open sessions; new tasks use that setting.
+Assistants cannot choose or change the owner's engagement.
 
-| Setting | Behavior |
+| Setting | Current browser flow |
 | --- | --- |
-| `AUDIT_ONLY` | Categorize and record sessions. Record purpose classifications, including denials and unavailable classifiers, and proceed without purpose blocking or confirmation. |
-| `AUTO_APPROVE` | Classify actions against the purpose. Confirm sensitive actions and uncertain assessments. Deny clearly unrelated actions. |
-| `AGGRESSIVE` | Apply the same purpose and sensitivity checks. Require confirmation whenever confidence is missing or below 0.98. |
+| `AUDIT_ONLY` / Record only | Starts scoped tasks under signed standing consent and records semantic concerns as advisory. |
+| `AUTO_APPROVE` / Balanced | Requires initial task approval, permits relevant routine steps, asks about uncertainty and enforces semantic denial. |
+| `AGGRESSIVE` / Careful | Adds confirmation when confidence is missing or below 0.98. |
 
-The slider displays the current level and explanation. Saving ends open sessions;
-new sessions use the saved setting. Changing a level cannot change an existing
-task's authorization. The consent lasts 90 days and is signed by the approval browser
-with the account, exact coordinator, mode, nonce and expiry.
+All modes enforce exact origins, task permissions, expiry, live paired device
+identity, bounded views, credential exclusions, source freshness and replay
+protection. Final commitments, purchases and sending remain blocked by the
+current flow. A model score cannot grant those permissions.
 
-The setting and audit records live in that account's Gate. Assistants cannot select
-or change engagement. Browser dispatch checks the live session again before an
-effect. Origins, task permissions, session expiry, disclosure budgets, source
-freshness and credential redaction continue to apply.
+Both local and cloud execution use the pinned local classifier. Unavailable
+inference stays explicit; there is no remote classifier fallback. The approval
+app records classifier observations separately from applied decisions.
 
-Whole-page actions receive two guardian assessments. Use their lower confidence
-and require confirmation if either assessment identifies sensitivity. Known
-commitment labels and native form submissions also trigger confirmation in
-enforcement modes. Classifier confidence controls this policy; it is a model
-assessment of purpose. Website outcomes require separate verification.
-
-For granular field reads, the browser captures the bounded source and classifies
-it before the Gate applies engagement. Fields needing confirmation stay private
-from MCP. The approval page previews the exact text and signs its payload digest. The Gate
-releases that snapshot only after matching approval. Changed payloads, expired
-requests, repeated approvals and revoked policy versions fail.
-
-Classification history in the approval app records the session category, raw
-classifier decision, confidence, sensitivity and applied decision. Audit mode
-records unavailable inference and proceeds with eligible content.
-
-Existing accounts retain their current approval flow until they save engagement.
-Explicit bounded field-grant sessions keep their signed per-session grant flow.
-Payment checkout that asks the owner to supply missing fields keeps its existing
-exact order approval.
-
-Validation: unit coverage in `tests/engagement.test.mjs`; real Chrome phone UI,
-keyboard slider, OAuth/MCP, signed settings and tenant isolation in
-`tests/engagement-live.mjs` against an isolated local Wrangler server.
-Use `--browser` to verify genuine hosted Chrome capture with unavailable
-classification and exact phone confirmation before releasing a field.
+Validation: `tests/engagement.test.mjs`, the strict MCP contract tests and
+`npm run demo:flow` cover signed settings, changed receipts, task approvals,
+semantic outcomes, both executor routes and all three engagement modes.
+The local demonstration emulates cloud acquisition.

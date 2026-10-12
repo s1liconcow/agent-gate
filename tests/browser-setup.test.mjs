@@ -43,15 +43,15 @@ test('reload migrates old activation settings and refreshes an updated bundled m
   assert.equal(f.data.automation.enabled, true);
 });
 
-test('reload preserves explicit remote providers, desktop-only keys and an intentional pause', async t => {
-  const settings = {profile: {id: 'b'.repeat(32), provider: 'openai', ...inferenceDefaults.openai}, api_key: 'synthetic-private-key'};
+test('reload preserves the pinned local bundle and an intentional pause', async t => {
+  const settings={profile:{id:'b'.repeat(32),provider:'purpose_browser',...defaults.purpose_browser},api_key:''};
   const automation = {enabled: false, grants_enabled: false, setup_version: 1};
   const f = fixture(t, {inference_settings: settings, automation});
   await initializeBrowser(f.register, {defaults, prepare: async () => assert.fail('Paused tasks must stay paused.')});
   assert.deepEqual(f.data.inference_settings, settings);
   assert.deepEqual(f.data.automation, automation);
   assert.deepEqual(f.registered, [{inference: settings.profile}]);
-  assert.ok(!JSON.stringify(f.registered).includes(settings.api_key));
+  assert.equal(Object.hasOwn(f.registered[0],'api_key'),false);
 });
 
 test('an explicit built-in AI preference is preserved', async t => {

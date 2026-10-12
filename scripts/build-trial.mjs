@@ -17,7 +17,7 @@ await writeFile(join(output, 'public/demo.html'), (await readFile(join(root, 'de
 await writeFile(join(output, 'public/bank.html'), (await readFile(join(root, 'demos/bank.html'), 'utf8')).replace('href="/"', 'href="/demo.html"'));
 const generatedAssets = join(output, 'generated-assets.mjs');
 await writeFile(generatedAssets, await assetSource(join(output, 'public')));
-await build({entryPoints: [join(root, 'src/worker.mjs')], bundle: true, format: 'esm', platform: 'browser', target: 'es2022', external: ['cloudflare:workers'], minify: true, outfile: join(output, 'worker.mjs'), plugins: [{name: 'trial-assets', setup(builder) {
+await build({entryPoints: [join(root, 'src/worker.mjs')], bundle: true, format: 'esm', platform: 'browser', target: 'es2022', conditions: ['workerd','worker','browser'], external: ['cloudflare:workers','node:*'], minify: true, outfile: join(output, 'worker.mjs'), plugins: [{name: 'trial-assets', setup(builder) {
   builder.onResolve({filter: /^\.\/generated-assets\.mjs$/}, () => ({path: generatedAssets}));
 }}]});
 console.log(`Trial bundle: ${output}\nPUBLIC_ORIGIN: ${origin}\nUse ${join(root, 'extension')} and set Coordinator URL to ${origin} in extension setup.`);

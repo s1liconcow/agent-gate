@@ -1,7 +1,7 @@
 import {canonical, digest, exact, fail, random} from '../shared/protocol.mjs';
 import {checkClassificationBinding, classificationState, classifierDeadline, classifierInput, classifierResult} from '../shared/local-purpose.mjs';
 import {prepareSnapshot, selectedView} from '../extension/disclosure.mjs';
-import {purposeActionBlocked, purchaseAssessmentAllowed} from '../shared/purpose-engagement.mjs';
+import {purposeActionBlocked} from '../shared/purpose-engagement.mjs';
 
 // Account-local relay. Only the pinned paired bridge can submit a result.
 export class LocalClassifier {
@@ -61,9 +61,6 @@ export class LocalClassifier {
       for (const key of ['decision', 'effect', 'payment_cents', 'confidence']) if (data[key] !== row.result[key]) fail('LOCAL_CLASSIFIER_REFUSED', 'The cloud action differs from its local assessment.');
       if (Boolean(data.hard_boundary) !== Boolean(purposeActionBlocked(item.task, row.input.view, row.input.action, row.input.submit))) fail('LOCAL_CLASSIFIER_REFUSED', 'The deterministic action boundary changed.');
       if (data.command_id !== row.state.operation_id) fail('LOCAL_CLASSIFIER_STALE', 'The command changed.');
-    } else {
-      if (!purchaseAssessmentAllowed(item.task, row.result, row.input.review) || canonical(data.snapshot?.review) !== canonical(row.input.review)) fail('LOCAL_CLASSIFIER_REFUSED', 'The cart differs from its local purpose assessment.');
-      if (data.purpose_assessment) for (const key of ['decision', 'effect', 'payment_cents', 'confidence']) if (data.purpose_assessment[key] !== row.result[key]) fail('LOCAL_CLASSIFIER_REFUSED', 'The purchase assessment changed.');
     }
     return row;
   }
