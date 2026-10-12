@@ -19,3 +19,7 @@ No OpenAI client credentials or additional MCP scopes are created here. `login_h
 Run `npm run check` and `npm run test:admin`. The admin test exercises real local Worker routing and Durable Object RPC, denial of other account/assistant credentials, read-only inspection, profile field validation and desktop/mobile browser rendering. Test credentials and accounts stay in a temporary local instance.
 
 Deploy this code and the approved `ADMIN_ACCOUNT_ID=owner` designation to the existing Worker while retaining its bindings, secrets, namespaces, data, security settings and signed engagement. No Durable Object migration is needed. The original owner must already be authenticated in the browser used to open the admin page.
+
+Use the local release tool: `npm run deploy:release -- --check-bundle`, then `npm run deploy:release -- --inspect`, then `npm run deploy:release -- --deploy`. It reads the prepared release manifest, verified bundle and original deployment settings from `artifacts/`. It uses existing Wrangler authentication or existing Cloudflare credentials from the environment. Token output is captured in memory with Wrangler disk logging disabled.
+
+Inspection checks the uncertain prior upload outcome. A matching uploaded version is reused, existing bindings and secrets are retained, and 100% traffic is confirmed. An uncertain mutation is inspected before any retry. If authentication is absent, complete local Wrangler sign-in before inspection. The tool itself creates no credentials or infrastructure.
