@@ -17,8 +17,12 @@ async function refresh() {
   $('taskPanel').hidden = !items.length;
   showGoal(); const status = await bridge({type: 'status'}); connected = status.connected;
   $('connection').textContent = connected ? 'Connected' : 'Reconnecting'; $('connection').className = 'status' + (connected ? ' connected' : '');
-  $('browserPairing').querySelector('summary').textContent = connected ? 'Connected' : 'Connect this browser';
-  $('pair').textContent = connected ? 'Connected' : 'Connect'; $('pair').disabled = connected || pairingRequest;
+  $('browserPairing').querySelector('summary').textContent = connected ? 'Connected · Switch account' : 'Connect this browser';
+  $('pair').textContent = connected ? 'Pair with selected account' : 'Connect'; $('pair').disabled = pairingRequest;
+  const accountId = status.account_url?.match(/\/u\/([a-f0-9]{32})$/)?.[1] || 'owner';
+  $('connectionIdentity').textContent = status.account_url
+    ? 'Account: ' + accountId + ' · Browser: ' + status.browser_id + ' · Coordinator: ' + status.account_url
+    : 'No browser pairing configured.';
   if (setupFailed) await providerStatus();
 }
 function showGoal() { const item = sessions.find(i => i.id === $('session').value); $('goal').textContent = item?.browser_runtime?.state === 'blocked' ? item.next_action || 'Task paused. Check your phone.' : ''; showLocalState().catch(() => {}); }
@@ -105,7 +109,7 @@ async function pollPairing() {
   } catch (error) { $('pairingQR').hidden = true; message(error.message, true); }
   finally { pairingPoll = false; }
 }
-for (const [id, handler] of [['pair', pair], ['refresh', refresh], ['saveProvider', saveProvider], ['prepareChromeAI', saveProvider]]) $(id).addEventListener('click', async () => { if (id === 'pair') pairingRequest = true; $(id).disabled = true; try { await handler(); } catch (error) { message(error.message, true); } finally { if (id === 'pair') pairingRequest = false; $(id).disabled = id === 'pair' && connected; } });
+for (const [id, handler] of [['pair', pair], ['refresh', refresh], ['saveProvider', saveProvider], ['prepareChromeAI', saveProvider]]) $(id).addEventListener('click', async () => { if (id === 'pair') pairingRequest = true; $(id).disabled = true; try { await handler(); } catch (error) { message(error.message, true); } finally { if (id === 'pair') pairingRequest = false; $(id).disabled = false; } });
 $('provider').addEventListener('change', async () => { providerFields(); if (['local', 'purpose_browser'].includes($('provider').value)) { $('provider').disabled = true; try { await saveProvider(); } catch (error) { await providerStatus().catch(() => {}); message(error.message, true); } finally { $('provider').disabled = false; } } });
 $('session').addEventListener('change', showGoal);
 const {settings} = await chrome.storage.local.get('settings');
