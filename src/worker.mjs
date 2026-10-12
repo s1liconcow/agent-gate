@@ -19,6 +19,8 @@ import {HostedConsent} from './hosted-consent.mjs';
 import {HostedBrowser} from './hosted-browser.mjs';
 import {cloudflareBrowserFactory} from './hosted-cloudflare.mjs';
 import {HostedState} from './hosted-state.mjs';
+import {accountProfile, readAccountProfile, isAdminAccount} from './account-profile.mjs';
+import {requireAdmin, adminPageQuery, adminAccountPage, accountAdminSummary} from './admin.mjs';
 import {hostedAsset} from './hosted-assets.mjs';
 import {hostedModel, hostedScripts} from './generated-hosted.mjs';
 import {LoginSync} from './login-sync.mjs';
@@ -148,6 +150,33 @@ export class Gate extends DurableObject {
       await this.ctx.storage.put({account_id: id, pairing_hash: pairingHash});
     });
   }
+  adminSummary() {
+    return accountAdminSummary(this.ctx.storage, id => this.ctx.getWebSockets('browser:' + id).some(ws => ws.readyState === 1));
+  }
+  async ownerProfile(request) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      try {
+        await this.auth(request, 'owner');
+        const id = await this.ctx.storage.get('account_id') || 'owner';
+        if (request.method === 'POST') await this.ctx.storage.put('account:profile', {...accountProfile(await body(request)), updated_at: Date.now()});
+        return json({...await readAccountProfile(this.ctx.storage, id), admin: isAdminAccount(id, this.env.ADMIN_ACCOUNT_ID)});
+      } catch (error) {return errorResponse(error);}
+    });
+  }
+  async adminAccounts(request) {
+    await this.auth(request, 'owner');
+    const account = await this.ctx.storage.get('account_id') || 'owner';
+    requireAdmin(account, this.env.ADMIN_ACCOUNT_ID);
+    const query = adminPageQuery(new URL(request.url).searchParams);
+    const ids = await this.env.REGISTRY.getByName('beta-registry-v1').adminAccountIds();
+    const page = await adminAccountPage(ids, query, id => id === account ? this.adminSummary() : this.env.GATE.getByName(id === 'owner' ? 'single-owner-v1' : 'account:' + id).adminSummary());
+    const [limits, history] = query.cursor ? [null, null] : await Promise.all([
+      this.env.BROWSER ? this.hosted.factory.inspectLimits() : null,
+      this.env.BROWSER ? this.hosted.factory.inspectHistory() : null
+    ]);
+    await this.auth(request, 'owner');
+    return json({admin_account_id: account, ...page, cloud_capacity: {limits, history}, observed_at: Date.now()});
+  }
   async locked(callback) {
     return this.ctx.blockConcurrencyWhile(async () => { try { return {result: await callback()}; } catch (error) { return {error: apiFailure(error)}; } });
   }
@@ -251,9 +280,14 @@ export class Gate extends DurableObject {
   }
   async fetch(request) {
     try {
+      const path = new URL(request.url).pathname;
       const account = request.headers.get('X-AgentGate-Account');
       if (account && account !== await this.ctx.storage.get('account_id')) fail('NOT_FOUND', 'Unknown account.', 404);
-      const path = new URL(request.url).pathname;
+      if (path === '/api/owner/admin/accounts') {
+        if (request.method !== 'GET') return new Response('Use GET for account administration.', {status: 405, headers: {Allow: 'GET'}});
+        return await this.adminAccounts(request);
+      }
+      if (path === '/api/owner/profile' && ['GET', 'POST'].includes(request.method)) return await this.ownerProfile(request);
       // Browser work must acquire the hosted queue before the short Gate lock.
       // Waiting for that queue while holding blockConcurrencyWhile deadlocks ticks.
       const loginOperation = path.match(/^\/api\/(login-source\/transfers\/([a-f0-9]{32})\/import|owner\/login-connections\/([a-f0-9]{32})\/(disconnect|live-view))$/);
@@ -622,7 +656,7 @@ const app = {
     if (url.pathname.startsWith('/api/')) return env.GATE.getByName('single-owner-v1').fetch(request);
     let assetRequest = request;
     if (tenant) {
-      if (!['/', '/index.html', '/try.html', '/connect.html', '/browser-diagnostics.html'].includes(tenant.path)) return new Response('Not found', {status: 404});
+      if (!['/', '/index.html', '/try.html', '/connect.html', '/browser-diagnostics.html', '/admin.html', '/account.html'].includes(tenant.path)) return new Response('Not found', {status: 404});
       url.pathname = tenant.path === '/' ? '/index.html' : tenant.path;
       assetRequest = new Request(url, request);
     } else if (url.pathname === '/') {

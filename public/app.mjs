@@ -277,6 +277,8 @@ async function showDevice() {
   $('intro').hidden = true; $('pairing').hidden = true; $('inbox').hidden = false; $('device').hidden = false;
   $('fingerprint').textContent = 'Device key: ' + (await digest(device.publicKey)).slice(0, 24);
   $('accountIdentity').textContent = 'Account: ' + (account || 'owner') + ' · Coordinator: ' + location.origin + base;
+  $('accountSettings').href = base + '/account.html'; $('adminLink').href = base + '/admin.html';
+  try {const profile = await api('owner/profile'); if (profile.account_id === (account || 'owner')) $('adminLink').hidden = !profile.admin;} catch { $('adminLink').hidden = true; }
   await refresh();
 }
 $('pairForm').addEventListener('submit', async event => {

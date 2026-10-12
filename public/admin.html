@@ -1,0 +1,13 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Administration · AgentGate</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/admin.css"><script type="module" src="/admin.mjs"></script></head>
+<body><header><a class="brand" id="home" href="/">AgentGate <span class="admin-tag">Administration</span></a><a id="profileLink" href="/account.html">Your account</a></header><main class="admin-page">
+<div class="admin-heading"><div><h1>Accounts and browsers</h1><p>See who is connected and where cloud browsers are being used.</p></div><button class="secondary" id="refresh">Refresh</button></div>
+<p id="status" role="status">Checking administration access…</p>
+<section id="dashboard" hidden>
+<div class="admin-stats"><article><span>Accounts</span><strong id="total">—</strong></article><article><span>Local browsers online · this page</span><strong id="online">—</strong></article><article><span>Open cloud tasks · this page</span><strong id="running">—</strong></article></div>
+<section class="cloud-capacity"><h2>Shared Cloudflare capacity</h2><p id="capacity">Capacity unavailable.</p><p class="hint" id="history"></p></section>
+<div class="admin-toolbar"><label for="search">Find on this page<input id="search" type="search" placeholder="Account name, email or ID" autocomplete="off"></label><p class="hint" id="updated"></p></div>
+<div class="account-table-wrap"><table class="account-table"><caption class="sr-only">Accounts, connected browsers and cloud activity</caption><thead><tr><th scope="col">Account</th><th scope="col">Local browsers</th><th scope="col">Cloud browser</th><th scope="col">Last 24 hours</th><th scope="col">Assistants</th></tr></thead><tbody id="accounts"></tbody></table></div>
+<p id="empty" class="empty" hidden>No accounts match your search.</p>
+<nav class="admin-pagination" aria-label="Account pages"><button id="previous" class="secondary" disabled>Previous</button><p class="hint" id="pageLabel"></p><button id="next" class="secondary" disabled>Next</button></nav>
+<p class="hint">Cloud connection status reflects saved metadata. Cloud task counts cover stored tasks; browser time is the shared provider’s recent sample.</p>
+</section></main></body></html>

@@ -28,7 +28,8 @@
     "test:contract": "node scripts/api-schema.mjs --check",
     "test:flow": "node scripts/demo-flow.mjs",
     "check:source": "node scripts/check-source.mjs",
-    "test:native-extension": "node scripts/native-extension-probe.mjs"
+    "test:native-extension": "node scripts/native-extension-probe.mjs",
+    "test:admin": "npm run build && node tests/admin-browser.mjs"
   },
   "dependencies": {
     "@block65/webcrypto-web-push": "2.0.0",
