@@ -30,7 +30,9 @@ await copyFile(new URL('shared/policy.mjs', root), new URL('extension/policy.mjs
 for (const name of ['style.css', 'icon.svg']) await copyFile(new URL('public/' + name, root), new URL('extension/' + name, root));
 const archive = fileURLToPath(new URL('public/agentgate-extension.zip', root));
 await rm(archive, {force: true});
-if (!purpose) await promisify(execFile)('zip', ['-q', '-r', archive, '.', '-x', '*.DS_Store'], {cwd: fileURLToPath(new URL('extension/', root))});
+// Ship the extension code update; keep existing local model assets in place.
+// Large model weights and WASM are installed separately and stay out of Worker assets.
+await promisify(execFile)('zip', ['-q', '-r', archive, '.', '-x', '*.DS_Store', 'models/*', 'purpose-vendor/*.wasm'], {cwd: fileURLToPath(new URL('extension/', root))});
 // An API-upload fallback keeps deployment possible with the connected Cloudflare app.
 // Wrangler deployments still use the normal ASSETS binding.
 await writeFile(new URL('src/generated-assets.mjs', root), await assetSource(fileURLToPath(new URL('public/', root))));

@@ -267,6 +267,10 @@
       "path": "scripts/build.mjs"
     },
     {
+      "status": "M",
+      "path": "scripts/bundle.mjs"
+    },
+    {
       "status": "A",
       "path": "scripts/check-source.mjs"
     },
@@ -289,6 +293,10 @@
     {
       "status": "A",
       "path": "scripts/native-normal-status.mjs"
+    },
+    {
+      "status": "A",
+      "path": "scripts/package-flow-demo.mjs"
     },
     {
       "status": "A",

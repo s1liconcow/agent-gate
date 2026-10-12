@@ -105,3 +105,4 @@ outputs/
 # Local refactor dependencies and cached model mounts.
 /node_modules
 /extension/models
+/public/e2e-demo.html

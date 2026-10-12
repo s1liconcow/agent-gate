@@ -1,7 +1,7 @@
 {
   "name":"agentgate-local-flow", "main":"worker.mjs",
   "compatibility_date":"2026-10-01", "compatibility_flags":["nodejs_compat"],
-  "assets":{"directory":"../../public","binding":"ASSETS","run_worker_first":true},
+  "assets":{"directory":"../../public","binding":"ASSETS","html_handling":"none","run_worker_first":true},
   "durable_objects":{"bindings":[{"name":"GATE","class_name":"Gate"},{"name":"REGISTRY","class_name":"Registry"}]},
   "migrations":[{"tag":"flow-v1","new_sqlite_classes":["Gate","Registry"]}],
   "observability":{"enabled":false}

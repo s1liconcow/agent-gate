@@ -7,7 +7,7 @@ export class Memory {
 export async function owner() {
   const keys=await crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']);
   const {kty,crv,x,y}=await crypto.subtle.exportKey('jwk',keys.publicKey);
-  return {public_key:{kty,crv,x,y},sign:async challenge=>({challenge,signature:b64url(await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},keys.privateKey,new TextEncoder().encode(canonical(challenge))))})};
+  return {public_key:{kty,crv,x,y},private_jwk:await crypto.subtle.exportKey('jwk',keys.privateKey),sign:async challenge=>({challenge,signature:b64url(await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},keys.privateKey,new TextEncoder().encode(canonical(challenge))))})};
 }
 export const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 export async function until(callback,timeout=45000) {const start=Date.now();while(Date.now()-start<timeout){const value=await callback();if(value)return value;await wait(100);}throw new Error('Timed out waiting for browser flow.');}
