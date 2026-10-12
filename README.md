@@ -12,7 +12,7 @@ npm run demo:flow
 
 It exercises request → conditional approval → browser actions → classifier observations → synthetic completion through a real local Worker, MCP server and browser. It covers local and emulated-cloud execution, both classifier selections, all engagement modes, rejection, cancellation, revocation, disconnect and replay protection. No real purchases or external messages occur.
 
-The fixture matrix is deterministic. Available ONNX assets are exercised with real browser WASM. Installed Chrome can run a separate native component probe using the existing synthetic model cache. Reports identify unavailable runtimes and emulated components explicitly; live Cloudflare acquisition is outside this local demonstration.
+The fixture matrix is deterministic. Available ONNX assets are exercised with real browser WASM. Native extension readiness is checked through its actual offscreen runtime. Installed Chrome can also run a separate native component probe using the existing synthetic model cache. Reports identify unavailable runtimes and emulated components explicitly; live Cloudflare acquisition is outside this local demonstration.
 
 Read [the flow and evidence contract](docs/BASIC_BROWSER_FLOW.md). Results are saved in `artifacts/flow/report.json`. The five-tool MCP schema is generated from [the authoritative contract](mcp/contract.mjs) into [the discovery artifact](docs/mcp-schema.json).
 

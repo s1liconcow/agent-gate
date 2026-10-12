@@ -1,0 +1,155 @@
+{
+  "native_extension_inference_verified": false,
+  "security_settings_changed": false,
+  "persistent_credentials_created": false,
+  "model_download_requested": false,
+  "readiness_evidence": [
+    {
+      "name": "original-demo",
+      "channel": "chromium",
+      "headless": true,
+      "cached": false,
+      "browser_version": "153.0.8010.12",
+      "extension_loaded": true,
+      "review": {
+        "api": "function",
+        "availability": "unavailable"
+      },
+      "offscreen": {
+        "ok": true,
+        "availability": "unavailable"
+      },
+      "offscreen_contexts": [
+        {
+          "contextType": "OFFSCREEN_DOCUMENT",
+          "documentUrl": "local-agent.html"
+        }
+      ]
+    },
+    {
+      "name": "cached-headless",
+      "channel": "chromium",
+      "headless": true,
+      "cached": true,
+      "browser_version": "153.0.8010.12",
+      "extension_loaded": true,
+      "review": {
+        "api": "function",
+        "availability": "downloading"
+      },
+      "offscreen": {
+        "ok": true,
+        "availability": "downloading"
+      },
+      "readiness_samples": [
+        "downloading",
+        "downloading",
+        "downloading",
+        "downloading",
+        "downloading",
+        "downloading",
+        "downloading"
+      ],
+      "offscreen_contexts": [
+        {
+          "contextType": "OFFSCREEN_DOCUMENT",
+          "documentUrl": "local-agent.html"
+        }
+      ]
+    },
+    {
+      "name": "cached-headed",
+      "channel": "chromium",
+      "headless": false,
+      "cached": true,
+      "browser_version": "153.0.8010.12",
+      "extension_loaded": true,
+      "review": {
+        "api": "function",
+        "availability": "downloading"
+      },
+      "offscreen": {
+        "ok": true,
+        "availability": "downloading"
+      },
+      "readiness_samples": [
+        "downloading",
+        "downloading",
+        "downloading",
+        "downloading",
+        "downloading",
+        "downloading",
+        "downloading"
+      ],
+      "offscreen_contexts": [
+        {
+          "contextType": "OFFSCREEN_DOCUMENT",
+          "documentUrl": "local-agent.html"
+        }
+      ]
+    },
+    {
+      "name": "installed-chrome",
+      "channel": "chrome",
+      "headless": false,
+      "cached": true,
+      "browser_version": "154.0.8037.98",
+      "error": "browserContext.waitForEvent: Timeout 8000ms exceeded while waiting for event \"serviceworker\"",
+      "code": "EXTENSION_SIDELOAD_UNAVAILABLE"
+    },
+    {
+      "name": "compatible-cft",
+      "channel": "chromium",
+      "headless": true,
+      "cached": true,
+      "browser_version": "154.0.8037.92",
+      "extension_loaded": true,
+      "web": {
+        "api": "function",
+        "availability": "downloading"
+      },
+      "review": {
+        "api": "function",
+        "availability": "downloading"
+      },
+      "offscreen": {
+        "ok": true,
+        "availability": "downloading"
+      },
+      "readiness_samples": [
+        "downloading",
+        "downloading",
+        "downloading",
+        "downloading",
+        "downloading",
+        "downloading",
+        "downloading"
+      ],
+      "guard_request": {
+        "ok": false,
+        "code": "MODEL_UNAVAILABLE"
+      },
+      "offscreen_contexts": [
+        {
+          "contextType": "OFFSCREEN_DOCUMENT",
+          "documentUrl": "local-agent.html"
+        }
+      ]
+    }
+  ],
+  "verified_testing_archive": {
+    "version": "154.0.8037.92",
+    "source": "https://storage.googleapis.com/chrome-for-testing-public/154.0.8037.92/mac-arm64/chrome-mac-arm64.zip",
+    "bytes": 191153086,
+    "sha256": "b62e904b6571c5ff5108ed7812cf93ac6d1c4027f10ae47ac34d8e229ed88001",
+    "integrity": "Matched the official object MD5 over HTTPS; test-build application signature is ad hoc. No signing or quarantine changes."
+  },
+  "blocker": "The native model remains downloading in extension-test-compatible Chrome. Installed Chrome has a ready cached web model but rejects command-line extension side-loading. No model create/download is requested while unavailable; no debug/security restriction is bypassed.",
+  "five_tools": [
+    "list_browser_runtimes",
+    "request_browser_session",
+    "get_browser_session",
+    "perform_browser_action",
+    "close_browser_session"
+  ]
+}

@@ -20,6 +20,10 @@
     },
     {
       "status": "A",
+      "path": "docs/native-extension-verification.json"
+    },
+    {
+      "status": "A",
       "path": "docs/refactor-files.json"
     },
     {
@@ -269,6 +273,10 @@
     {
       "status": "A",
       "path": "scripts/demo-flow.mjs"
+    },
+    {
+      "status": "A",
+      "path": "scripts/native-extension-probe.mjs"
     },
     {
       "status": "A",

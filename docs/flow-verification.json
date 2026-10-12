@@ -25,6 +25,7 @@
       "runtime": "explicit deterministic fixture",
       "status": "passed",
       "request_approval": false,
+      "completed_action_inferences": 2,
       "actions": [
         {
           "raw": "deny",
@@ -47,6 +48,7 @@
       "runtime": "explicit deterministic fixture",
       "status": "passed",
       "request_approval": true,
+      "completed_action_inferences": 2,
       "actions": [
         {
           "raw": "confirm",
@@ -69,6 +71,7 @@
       "runtime": "explicit deterministic fixture",
       "status": "passed",
       "request_approval": true,
+      "completed_action_inferences": 2,
       "actions": [
         {
           "raw": "confirm",
@@ -91,6 +94,7 @@
       "runtime": "explicit deterministic fixture",
       "status": "passed",
       "request_approval": false,
+      "completed_action_inferences": 2,
       "actions": [
         {
           "raw": "deny",
@@ -113,6 +117,7 @@
       "runtime": "explicit deterministic fixture",
       "status": "passed",
       "request_approval": true,
+      "completed_action_inferences": 2,
       "actions": [
         {
           "raw": "confirm",
@@ -135,6 +140,7 @@
       "runtime": "explicit deterministic fixture",
       "status": "passed",
       "request_approval": true,
+      "completed_action_inferences": 2,
       "actions": [
         {
           "raw": "confirm",
@@ -157,6 +163,7 @@
       "runtime": "explicit deterministic fixture",
       "status": "passed",
       "request_approval": false,
+      "completed_action_inferences": 2,
       "actions": [
         {
           "raw": "deny",
@@ -179,6 +186,7 @@
       "runtime": "explicit deterministic fixture",
       "status": "passed",
       "request_approval": true,
+      "completed_action_inferences": 2,
       "actions": [
         {
           "raw": "confirm",
@@ -201,6 +209,7 @@
       "runtime": "explicit deterministic fixture",
       "status": "passed",
       "request_approval": true,
+      "completed_action_inferences": 2,
       "actions": [
         {
           "raw": "confirm",
@@ -223,6 +232,7 @@
       "runtime": "explicit deterministic fixture",
       "status": "passed",
       "request_approval": false,
+      "completed_action_inferences": 2,
       "actions": [
         {
           "raw": "deny",
@@ -245,6 +255,7 @@
       "runtime": "explicit deterministic fixture",
       "status": "passed",
       "request_approval": true,
+      "completed_action_inferences": 2,
       "actions": [
         {
           "raw": "confirm",
@@ -267,6 +278,7 @@
       "runtime": "explicit deterministic fixture",
       "status": "passed",
       "request_approval": true,
+      "completed_action_inferences": 2,
       "actions": [
         {
           "raw": "confirm",
@@ -289,6 +301,7 @@
       "runtime": "real installed model",
       "status": "passed",
       "request_approval": false,
+      "completed_action_inferences": 2,
       "actions": [
         {
           "raw": "confirm",
@@ -311,6 +324,7 @@
       "runtime": "real installed model",
       "status": "passed",
       "request_approval": false,
+      "completed_action_inferences": 2,
       "actions": [
         {
           "raw": "confirm",
@@ -330,9 +344,10 @@
       "route": "local",
       "backend": "chrome_ai",
       "mode": "AUDIT_ONLY",
-      "runtime": "real installed model",
+      "runtime": "production runtime unavailable",
       "status": "passed",
       "request_approval": false,
+      "completed_action_inferences": 0,
       "actions": [
         {
           "raw": "unavailable",
@@ -352,9 +367,10 @@
       "route": "cloud",
       "backend": "chrome_ai",
       "mode": "AUDIT_ONLY",
-      "runtime": "real installed model",
+      "runtime": "production runtime unavailable",
       "status": "passed",
       "request_approval": false,
+      "completed_action_inferences": 0,
       "actions": [
         {
           "raw": "unavailable",
@@ -467,6 +483,24 @@
       "name": "paired classifier disconnect revokes task",
       "status": "passed",
       "components": "real Worker/WebSocket shutdown"
+    },
+    {
+      "route": "local",
+      "name": "non-AUDIT native setup blocker prevents publication and action dispatch",
+      "status": "passed",
+      "components": "real Worker/MCP/browser/production offscreen runtime",
+      "availability": "downloading",
+      "code": "MODEL_UNAVAILABLE",
+      "request_approval": true
+    },
+    {
+      "route": "cloud",
+      "name": "non-AUDIT native setup blocker prevents publication and action dispatch",
+      "status": "passed",
+      "components": "real Worker/MCP/browser/production offscreen runtime",
+      "availability": "downloading",
+      "code": "MODEL_UNAVAILABLE",
+      "request_approval": true
     }
   ],
   "real_models": [
@@ -478,10 +512,10 @@
     },
     {
       "backend": "chrome_ai",
-      "status": "unavailable",
+      "status": "setup_blocked",
       "successful_action_inferences": 0,
       "scope": "AUDIT_ONLY; semantic observations remain advisory",
-      "reason": "The installed extension runtime returned no completed action inference."
+      "reason": "The offscreen native model is not ready: downloading. AUDIT actions proceeded with unavailable observations, not native inference."
     }
   ],
   "native_component": {
@@ -492,12 +526,12 @@
         "name": "exact synthetic search preparation",
         "result": {
           "ok": true,
-          "decision": "confirm",
+          "decision": "deny",
           "effect": "other",
           "payment_cents": 0,
           "confidence": 0.95
         },
-        "milliseconds": 8243
+        "milliseconds": 8096
       }
     ],
     "chrome_version": "154.0.8037.98",
@@ -506,9 +540,20 @@
   },
   "cleanup": "Task tab closure asserted for each completed browser case; temporary test browsers, servers, Worker state and profiles removed.",
   "limits": [
-    "Live Cloudflare acquisition was not exercised.",
-    "Chrome built-in AI is unavailable in the test extension Chromium runtime; its installed-Chrome web component executed separately.",
-    "Some unused legacy freshness/authorization helpers remain after automatic approval review rejected their combined removal.",
+    "Live Cloudflare acquisition is emulated in this local deliverable.",
+    "Native API/offscreen transport load, but the model remains downloading in Chrome for Testing 153/154. Full native extension inference is unverified; installed-Chrome web inference is a separate component result.",
+    "Existing freshness and authorization safeguards are retained.",
     "No configured ESLint/TypeScript project; syntax, imports and strict runtime contracts were checked."
-  ]
+  ],
+  "native_extension_readiness": {
+    "browser_version": "153.0.8010.12",
+    "offscreen": {
+      "ok": true,
+      "availability": "downloading"
+    },
+    "api_transport": "production extension service worker -> production offscreen ModelRuntime",
+    "cache_cloned": true,
+    "security_settings_changed": false,
+    "model_download_requested": false
+  }
 }

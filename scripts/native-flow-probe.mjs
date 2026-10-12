@@ -9,24 +9,36 @@ import {scope} from '../shared/protocol.mjs';
 // Optional real native component probe. Only model/cache metadata from an
 // existing synthetic test profile is cloned; Default/, cookies and accounts
 // are excluded. No download or native feature override is requested.
-export async function nativeProbe(root,temp) {
- const report={component:'production ModelRuntime with real Chrome web Prompt API',full_extension_flow:false,cases:[]};
+export async function nativeCache(root) {
  let cache=process.env.AGENTGATE_NATIVE_CACHE;
  if(!cache){try{const {stdout}=await promisify(execFile)('git',['rev-parse','--git-common-dir'],{cwd:root});const candidate=resolve(dirname(resolve(root,stdout.trim())),'data/evaluation/native-chrome-profile');await access(resolve(candidate,'OptGuideOnDeviceModel'));cache=candidate;}catch{}}
- if(!cache){return {...report,status:'unavailable',reason:'Set AGENTGATE_NATIVE_CACHE to a prepared synthetic Chrome model-cache profile to run the separate native component probe.'};}
+ return cache || null;
+}
+export async function prepareNativeProfile(root,profile) {
+ const cache=await nativeCache(root);
+ if(!cache)return false;
+ await mkdir(profile,{recursive:true});
+ for(const name of ['Local State','OptGuideOnDeviceModel','optimization_guide_model_store','OptimizationGuideModelsManifest','OptimizationHints','ChromeFeatureState']){
+  const source=resolve(cache,name);try{await access(source);}catch{continue;}
+  await promisify(execFile)('cp',['-cR',source,resolve(profile,name)]);
+ }
+ return true;
+}
+export async function nativeLaunchOptions(profile,{channel='chrome',headless=false,args=[],executablePath}={}) {
+ const initial=await chromium.launchPersistentContext(profile,{channel,headless,...(executablePath?{executablePath}:{})});let disabled;
+ try{const version=await initial.newPage();await version.goto('chrome://version');disabled=(await version.locator('#command_line').textContent()).match(/--disable-features=[^\s]+/)?.[0];}finally{await initial.close();}
+ if(!disabled)throw new Error('Could not inspect the default native test launch flags.');
+ return {channel,headless,...(executablePath?{executablePath}:{}),args:[disabled.split(',').filter(x=>x!=='OptimizationHints').join(','),...args],ignoreDefaultArgs:[disabled]};
+}
+export async function nativeProbe(root,temp) {
+ const report={component:'production ModelRuntime with real Chrome web Prompt API',full_extension_flow:false,cases:[]};
+ if(!await nativeCache(root)){return {...report,status:'unavailable',reason:'No prepared synthetic Chrome model cache is available.'};}
  let context,server;
  try {
-  const profile=resolve(temp,'native-cache');await mkdir(profile,{recursive:true});
-  for(const name of ['Local State','OptGuideOnDeviceModel','optimization_guide_model_store','OptimizationGuideModelsManifest','OptimizationHints','ChromeFeatureState']){
-   const source=resolve(cache,name);try{await access(source);}catch{continue;}
-   await promisify(execFile)('cp',['-cR',source,resolve(profile,name)]);
-  }
+  const profile=resolve(temp,'native-cache');await prepareNativeProfile(root,profile);
   const bundle=await build({stdin:{contents:"import {ModelRuntime} from './extension/model-runtime.mjs';globalThis.flowNative=new ModelRuntime();",resolveDir:root},bundle:true,format:'iife',platform:'browser',write:false});
   server=createServer((req,res)=>{res.writeHead(200,{'Content-Type':'text/html'});res.end('<h1>Product results</h1><script>'+bundle.outputFiles[0].text+'</script>');});await new Promise(r=>server.listen(0,'127.0.0.1',r));
-  context=await chromium.launchPersistentContext(profile,{channel:'chrome',headless:false});let disabled;
-  try{const version=await context.newPage();await version.goto('chrome://version');disabled=(await version.locator('#command_line').textContent()).match(/--disable-features=[^\s]+/)?.[0];}finally{await context.close();context=null;}
-  if(!disabled)throw new Error('Could not inspect the default native test launch flags.');
-  context=await chromium.launchPersistentContext(profile,{channel:'chrome',headless:false,ignoreDefaultArgs:[disabled],args:[disabled.split(',').filter(x=>x!=='OptimizationHints').join(',')]});
+  context=await chromium.launchPersistentContext(profile,await nativeLaunchOptions(profile));
   const page=await context.newPage();await page.goto('http://127.0.0.1:'+server.address().port);report.chrome_version=context.browser().version();
   report.availability=await page.evaluate(()=>flowNative.planner.availability());
   if(report.availability!=='available')return {...report,status:'unavailable',reason:'The cached native model is not available; no model download was started.'};

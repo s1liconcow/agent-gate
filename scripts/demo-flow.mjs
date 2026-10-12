@@ -13,7 +13,7 @@ import {hostedScripts} from '../src/generated-hosted.mjs';
 import {digest} from '../shared/protocol.mjs';
 import {sealPairing} from '../shared/browser-pairing.mjs';
 import {tools} from '../mcp/contract.mjs';
-import {nativeProbe} from './native-flow-probe.mjs';
+import {nativeProbe,prepareNativeProfile,nativeLaunchOptions} from './native-flow-probe.mjs';
 import {Memory,owner,until,wait} from '../tests/flow/support.mjs';
 const root=resolve(import.meta.dirname,'..'),temp=await mkdtemp(resolve(tmpdir(),'agentgate-flow-'));
 const report={synthetic_site:true,worker:'real local workerd',mcp:'real stdio SDK',owner_approvals:'ephemeral P-256 signatures through production HTTP routes',cloud_acquisition:'fixture; real HostedBrowser/HostedAdapter in isolated local Chromium',cases:[],failure_cases:[],real_models:[],external_effects:0};
@@ -32,8 +32,11 @@ async function approve(id){const {sessions}=await http('/api/owner/sessions');co
 async function tick(route){if(route==='cloud')await hosted.tick();await wait(100);}
 async function state(id,route,predicate){return until(async()=>{await tick(route);const s=await tool('get_browser_session',{session_id:id});if(s.browser_runtime?.state==='blocked'&&s.browser_runtime.code!=='CONTENT_NOT_READY')throw Object.assign(new Error(JSON.stringify(s.browser_runtime)),{code:s.browser_runtime.code});return predicate(s)?s:false;},fixture?45000:120000);}
 async function modelLog(){return local.serviceWorkers()[0].evaluate(async()=> (await chrome.storage.session.get('flow_model_log')).flow_model_log||[]);}
-async function connectBrowser(extension){
-  local=await chromium.launchPersistentContext(resolve(temp,'profile-'+report.real_models.length+(fixture?'-fixture':'-real')), {channel:'chromium',headless:true,args:['--disable-extensions-except='+extension,'--load-extension='+extension]});
+async function connectBrowser(extension,{native=false}={}){
+  const profile=resolve(temp,'profile-'+report.real_models.length+(fixture?'-fixture':'-real')+(native?'-native':'')),args=['--disable-extensions-except='+extension,'--load-extension='+extension];
+  let launch={channel:'chromium',headless:true,args},nativeCacheCloned=false;
+  if(native&&(nativeCacheCloned=await prepareNativeProfile(root,profile)))launch=await nativeLaunchOptions(profile,{channel:'chromium',headless:true,args,executablePath:process.env.AGENTGATE_NATIVE_EXECUTABLE});
+  local=await chromium.launchPersistentContext(profile,launch);
   const worker=local.serviceWorkers()[0]||await local.waitForEvent('serviceworker');extensionId=worker.url().split('/')[2];bridgeCredential=token();
   const paired=await http('/api/browser/pairings',{name:'Isolated flow classifier',credential_hash:await digest(bridgeCredential)},null,true);deviceId=paired.id;
   const secret=token(),envelope=await sealPairing(secret,paired.challenge,signer.public_key,await signer.sign(paired.challenge));
@@ -46,7 +49,7 @@ async function connectBrowser(extension){
   let manifest;try{manifest=JSON.parse(await readFile(resolve(root,'extension/models/purpose/manifest.json')));}catch{manifest={model:'agentgate-purpose-browser-'+'f'.repeat(16)};}
   await http('/api/bridge/inference',{inference:{id:crypto.randomUUID().replaceAll('-',''),provider:'purpose_browser',endpoint:'browser://purpose',model:manifest.model,format:'classifier'}},bridgeCredential,true);
   await until(async()=> (await review.evaluate(()=>chrome.runtime.sendMessage({type:'status'}))).connected);
-  return {worker,review};
+  return {worker,review,nativeCacheCloned};
 }
 async function runCase(route,backend,mode){
   await configureMode(mode);const before=(await modelLog()).length;
@@ -70,7 +73,8 @@ async function runCase(route,backend,mode){
   await tool('close_browser_session',{session_id:id});await tick(route);await until(()=>owned.isClosed());
   const ended=await tool('get_browser_session',{session_id:id});assert.equal(ended.status,'closed');assert.equal(ended.view,undefined);
   const log=(await modelLog()).slice(before);classificationCount+=log.length;
-  report.cases.push({route,backend,mode,model:fixture?'explicit deterministic fixture':'real installed model',request_approval:mode!=='AUDIT_ONLY',observations,inferences:log,status:'passed'});
+  const completed=log.filter(entry=>entry.type==='check_action'&&entry.result?.decision&&entry.result.decision!=='unavailable').length;
+  report.cases.push({route,backend,mode,model:fixture?'explicit deterministic fixture':completed?'real installed model':'production runtime unavailable',completed_action_inferences:completed,request_approval:mode!=='AUDIT_ONLY',observations,inferences:log,status:'passed'});
 }
 async function failures(route){
   const request={goal:'Shop for blue ceramic coffee mugs without placing an order.',origins:[site.origin],start_url:site.origin,permissions:['read','fill','click','navigate'],ttl_seconds:600,browser:route,classifier_backend:'chrome_ai',classifier_browser_id:deviceId};
@@ -123,13 +127,30 @@ try{
   for(const task of disconnected){await until(async()=> (await tool('get_browser_session',{session_id:task.id})).status==='revoked');report.failure_cases.push({route:task.execution_browser,name:'paired classifier disconnect revokes task',status:'passed',components:'real Worker/WebSocket shutdown'});}
   // Real model runs keep the same extension, Worker, MCP and executor.
   await writeFile(resolve(extension,'model-host.mjs'),instrument);
-  await wait(300);fixture=false;const connected=await connectBrowser(extension);
+  await wait(300);fixture=false;let connected=await connectBrowser(extension);
   for(const backend of ['onnx','chrome_ai']){
     try{
+      if(backend==='chrome_ai'){
+        await local.close();local=null;await wait(300);connected=await connectBrowser(extension,{native:true});
+        await connected.worker.evaluate(async()=>{if(!(await chrome.runtime.getContexts({contextTypes:['OFFSCREEN_DOCUMENT']})).length)await chrome.offscreen.createDocument({url:'local-agent.html',reasons:['DOM_SCRAPING','WORKERS','BLOBS','USER_MEDIA'],justification:'Check native classifier readiness in the temporary demo browser.'});});
+        const ready=await connected.worker.evaluate(()=>chrome.runtime.sendMessage({target:'local_agent',type:'availability',request_id:'demo-native-readiness'}));
+        report.native_extension_readiness={browser_version:local.browser().version(),offscreen:ready,api_transport:'production extension service worker -> production offscreen ModelRuntime',cache_cloned:connected.nativeCacheCloned,security_settings_changed:false,model_download_requested:false};
+      }
       if(backend==='onnx'){const manifest=JSON.parse(await readFile(resolve(root,'extension/models/purpose/manifest.json')));const ready=await connected.review.evaluate(model=>chrome.runtime.sendMessage({type:'save_inference',provider:'purpose_browser',endpoint:'browser://purpose',model,format:'classifier'}),manifest.model);if(!ready.ok)throw new Error(ready.error);}
       for(const route of ['local','cloud'])await runCase(route,backend,'AUDIT_ONLY');
+      if(backend==='chrome_ai'&&report.native_extension_readiness.offscreen.availability!=='available'){
+        for(const route of ['local','cloud']){
+          await configureMode('AUTO_APPROVE');
+          const requested=await tool('request_browser_session',{goal:'Search products for blue ceramic coffee mugs without placing an order.',origins:[site.origin],start_url:site.origin,permissions:['read','fill','click'],ttl_seconds:600,browser:route,classifier_backend:'chrome_ai',classifier_browser_id:deviceId});
+          assert.equal(requested.status,'requested');await approve(requested.id);
+          const blocked=await until(async()=>{await tick(route);const s=await tool('get_browser_session',{session_id:requested.id});return s.browser_runtime?.state==='blocked'?s:false;});
+          assert.equal(blocked.browser_runtime.code,'MODEL_UNAVAILABLE');assert.equal(blocked.view,undefined);assert.equal(blocked.last_command,null);
+          report.failure_cases.push({route,name:'non-AUDIT native setup blocker prevents publication and action dispatch',status:'passed',components:'real Worker/MCP/browser/production offscreen runtime',availability:report.native_extension_readiness.offscreen.availability,code:blocked.browser_runtime.code,request_approval:true});
+          await tool('close_browser_session',{session_id:requested.id});await tick(route);
+        }
+      }
       const runs=report.cases.filter(c=>c.model==='real installed model'&&c.backend===backend),successful=runs.flatMap(c=>c.inferences).filter(i=>i.result?.ok&&i.result?.decision&&i.result.decision!=='unavailable').length;
-      report.real_models.push({backend,status:successful?'executed':'unavailable',successful_action_inferences:successful,scope:'AUDIT_ONLY; semantic observations remain advisory',reason:successful?undefined:'The installed extension runtime returned no completed action inference.'});
+      report.real_models.push({backend,status:successful?'executed':'setup_blocked',successful_action_inferences:successful,scope:'AUDIT_ONLY; semantic observations remain advisory',reason:successful?undefined:'The offscreen native model is not ready: '+(report.native_extension_readiness?.offscreen?.availability||'unknown')+'. AUDIT actions proceeded with unavailable observations, not native inference.'});
     }catch(error){report.real_models.push({backend,status:'blocked',code:error.code||'MODEL_UNAVAILABLE',reason:error.message});for(const item of (await http('/api/owner/sessions')).sessions)if(!['closed','revoked','expired'].includes(item.status))await tool('close_browser_session',{session_id:item.id});}
   }
   report.native_component=await nativeProbe(root,temp);
