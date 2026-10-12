@@ -4,6 +4,8 @@
 - Lead with the result. Include only details needed to act on it.
 - Eliminate caveats, hedging, qualifications, and defensive disclaimers.
 - Avoid contrastive phrasing such as “This is X, not Y,” “not X but Y,” and “rather than.”
+- Treat writing appropriate tests and keeping them passing as assumed. Do not announce successful tests or list passing checks in progress updates or final responses.
+- Fix test failures before completing work. Report a failure only when it remains unresolved, with a clear explanation of what failed, why it cannot be fixed, and what is needed to resolve it.
 
 # Completing committed work
 
