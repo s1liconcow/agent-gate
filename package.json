@@ -30,9 +30,7 @@
     "test:admin": "npm run build && node tests/admin-browser.mjs",
     "deploy:release": "node scripts/deploy-release.mjs",
     "test:e2e": "npm run demo:flow",
-    "test:extension": "npm run build && node tests/extension-disconnect-browser.mjs",
-    "benchmark:inbox": "node scripts/inbox-benchmark.mjs",
-    "test:inbox": "npm run build && node tests/inbox-browser.mjs"
+    "test:extension": "npm run build && node tests/extension-disconnect-browser.mjs"
   },
   "dependencies": {
     "@block65/webcrypto-web-push": "2.0.0",
