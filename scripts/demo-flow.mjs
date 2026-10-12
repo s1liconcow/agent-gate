@@ -31,13 +31,13 @@ async function configureMode(mode){const {challenge}=await http('/api/owner/enga
 async function approve(id){const {sessions}=await http('/api/owner/sessions');const item=sessions.find(s=>s.id===id);assert.ok(item?.challenge);return http('/api/owner/sessions/'+id+'/approve',await signer.sign(item.challenge));}
 async function tick(route){if(route==='cloud')await hosted.tick();await wait(100);}
 async function state(id,route,predicate){return until(async()=>{await tick(route);const s=await tool('get_browser_session',{session_id:id});if(s.browser_runtime?.state==='blocked'&&s.browser_runtime.code!=='CONTENT_NOT_READY')throw Object.assign(new Error(JSON.stringify(s.browser_runtime)),{code:s.browser_runtime.code});return predicate(s)?s:false;},fixture?45000:120000);}
-async function modelLog(){return local.serviceWorkers()[0].evaluate(async()=> (await chrome.storage.session.get('flow_model_log')).flow_model_log||[]);}
+async function modelLog(){return local.serviceWorkers().find(w=>w.url().endsWith('/bridge.mjs')).evaluate(async()=> (await chrome.storage.session.get('flow_model_log')).flow_model_log||[]);}
 async function connectBrowser(extension,{native=false}={}){
   const profile=resolve(temp,'profile-'+report.real_models.length+(fixture?'-fixture':'-real')+(native?'-native':'')),args=['--disable-extensions-except='+extension,'--load-extension='+extension];
   let launch={channel:'chromium',headless:true,args},nativeCacheCloned=false;
   if(native&&(nativeCacheCloned=await prepareNativeProfile(root,profile)))launch=await nativeLaunchOptions(profile,{channel:'chromium',headless:true,args,executablePath:process.env.AGENTGATE_NATIVE_EXECUTABLE});
   local=await chromium.launchPersistentContext(profile,launch);
-  const worker=local.serviceWorkers()[0]||await local.waitForEvent('serviceworker');extensionId=worker.url().split('/')[2];bridgeCredential=token();
+  const worker=local.serviceWorkers().find(w=>w.url().endsWith('/bridge.mjs'))||await local.waitForEvent('serviceworker',{predicate:w=>w.url().endsWith('/bridge.mjs')});extensionId=worker.url().split('/')[2];bridgeCredential=token();
   const paired=await http('/api/browser/pairings',{name:'Isolated flow classifier',credential_hash:await digest(bridgeCredential)},null,true);deviceId=paired.id;
   const secret=token(),envelope=await sealPairing(secret,paired.challenge,signer.public_key,await signer.sign(paired.challenge));
   await http('/api/owner/browsers/'+deviceId+'/approve',{receipt:await signer.sign(paired.challenge),envelope});await http('/api/browser/pairings/'+deviceId+'/claim',{},bridgeCredential,true);

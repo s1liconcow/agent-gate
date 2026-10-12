@@ -7,6 +7,10 @@
       "path": ".gitignore"
     },
     {
+      "status": "M",
+      "path": "README.md"
+    },
+    {
       "status": "A",
       "path": "docs/BASIC_BROWSER_FLOW.md"
     },
@@ -116,6 +120,10 @@
     },
     {
       "status": "D",
+      "path": "legacy/v0.1/README.md"
+    },
+    {
+      "status": "D",
       "path": "legacy/v0.1/broker/__init__.py"
     },
     {
@@ -200,10 +208,6 @@
     },
     {
       "status": "D",
-      "path": "legacy/v0.1/README.md"
-    },
-    {
-      "status": "D",
       "path": "legacy/v0.1/requirements-mcp.txt"
     },
     {
@@ -251,10 +255,6 @@
       "path": "public/index.html"
     },
     {
-      "status": "M",
-      "path": "README.md"
-    },
-    {
       "status": "A",
       "path": "scripts/api-schema.mjs"
     },
@@ -276,11 +276,19 @@
     },
     {
       "status": "A",
+      "path": "scripts/native-download-status.mjs"
+    },
+    {
+      "status": "A",
       "path": "scripts/native-extension-probe.mjs"
     },
     {
       "status": "A",
       "path": "scripts/native-flow-probe.mjs"
+    },
+    {
+      "status": "A",
+      "path": "scripts/native-normal-status.mjs"
     },
     {
       "status": "A",

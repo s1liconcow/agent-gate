@@ -18,7 +18,7 @@ try {
    const args=['--disable-extensions-except='+resolve(root,'extension'),'--load-extension='+resolve(root,'extension')];
    const options=cached?await nativeLaunchOptions(profile,{channel,headless,args,executablePath:process.env.AGENTGATE_NATIVE_EXECUTABLE}):{channel,headless,args};
    context=await chromium.launchPersistentContext(profile,options);item.browser_version=context.browser().version();
-   const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker',{timeout:8000});item.extension_loaded=true;
+   const worker=context.serviceWorkers().find(w=>w.url().endsWith('/bridge.mjs'))||await context.waitForEvent('serviceworker',{predicate:w=>w.url().endsWith('/bridge.mjs'),timeout:8000});item.extension_loaded=true;
    const id=worker.url().split('/')[2],review=await context.newPage();await review.goto('chrome-extension://'+id+'/review.html');
    const web=await context.newPage();await web.goto('http://127.0.0.1:'+server.address().port);item.web=await web.evaluate(async()=>({api:typeof LanguageModel,availability:typeof LanguageModel==='undefined'?null:await LanguageModel.availability({expectedInputs:[{type:'text',languages:['en']}],expectedOutputs:[{type:'text',languages:['en']}]})}));
    item.review=await review.evaluate(async()=>({api:typeof LanguageModel,availability:typeof LanguageModel==='undefined'?null:await LanguageModel.availability({expectedInputs:[{type:'text',languages:['en']}],expectedOutputs:[{type:'text',languages:['en']}]})}));
