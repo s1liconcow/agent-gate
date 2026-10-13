@@ -29,7 +29,7 @@ async function refresh() {
   if (request !== refreshRequest) return;
   sessions = items;
   const selected = $('session').value;
-  $('session').replaceChildren(...items.map(item => { const option = document.createElement('option'); option.value = item.id; option.textContent = item.goal + ' · ' + item.status; return option; }));
+  $('session').replaceChildren(...items.map(item => { const option = document.createElement('option'); option.value = item.id; option.textContent = (item.scope?.goal || item.goal || 'Task') + ' · ' + item.status; return option; }));
   if (items.some(i => i.id === selected)) $('session').value = selected;
   if (!items.length) { const option = document.createElement('option'); option.textContent = 'No tasks yet'; option.value = ''; $('session').append(option); }
   $('taskPanel').hidden = !items.length;
