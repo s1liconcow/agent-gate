@@ -32,7 +32,7 @@ export class LocalPlanner {
         const instance = await abortable(() => this.guardian.clone({signal}), signal, dispose); instances.push(instance);
         decisions.push(JSON.parse(await abortable(() => instance.prompt(input, {responseConstraint: purposeGuardSchema, signal}), signal)));
       }
-      const assessment = checkedActionAssessment(task, view, proposed, decisions[0], decisions[1], submit);
+      const assessment = checkedActionAssessment(task, view, proposed, decisions[0], decisions[1]);
       return assessment;
     } finally { instances.forEach(dispose); }
   }

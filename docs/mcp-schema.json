@@ -22,7 +22,7 @@
     },
     {
       "name": "request_browser_session",
-      "description": "Request a task with exact origins, start URL, required permissions, browser=local or cloud and classifier_backend=chrome_ai or onnx. The owner sets engagement: AUDIT_ONLY observes routine actions without semantic blocking; other modes require initial task approval and may require exact action approval. Scope, credential and final-commit boundaries always apply. Both routes use the selected paired local classifier; no backend fallback. Show approval_url when returned. Poll the same session every five seconds; do not recreate pending requests.",
+      "description": "Request a task with exact origins, start URL, required permissions, browser=local or cloud and classifier_backend=chrome_ai or onnx. The owner sets engagement: AUDIT_ONLY records classifier judgments without semantic blocking; other modes require initial task approval and may require exact action approval. Signed scope, credential privacy, freshness and replay checks apply. Both routes use the selected paired local classifier; no backend fallback. Show approval_url when returned. Poll the same session every five seconds; do not recreate pending requests.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -131,7 +131,7 @@
     },
     {
       "name": "perform_browser_action",
-      "description": "Perform one action on the current published view. Supply its view_digest and an opaque ref for fill/click; navigation stays within signed origins. The pinned local classifier monitors the exact action before execution. Show approval_url when awaiting_action. Keep one idempotency_key per intended action; never retry an uncertain click with a new key. Credentials, final purchases, sending and other final commitments are withheld. No selectors, scripts, cookies or screenshots.",
+      "description": "Perform one action on the current published view. Supply its view_digest and an opaque ref for fill/click; navigation stays within signed origins. The pinned local classifier assesses the exact action against the approved goal; the owner engagement mode determines execution or confirmation. Control labels and native form submission do not impose separate action rules. Show approval_url when awaiting_action. Keep one idempotency_key per intended action; never retry an uncertain click with a new key. No selectors, scripts, cookies or screenshots.",
       "inputSchema": {
         "type": "object",
         "properties": {

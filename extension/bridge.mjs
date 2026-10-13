@@ -1,4 +1,4 @@
-import {action, automaticActionAllowed, canonical, checksActionPurpose, digest, exact, coordinator, scope, needsApproval, stagedFields, verifyReceipt} from './protocol.mjs';
+import {action, canonical, checksActionPurpose, digest, exact, coordinator, scope, needsApproval, stagedFields, verifyReceipt} from './protocol.mjs';
 import {verifySessionAuthority} from './engagement.mjs';
 import {openPairing, pairingChallenge} from './browser-pairing.mjs';
 import {AutomaticBrowser} from './automatic.mjs';
@@ -129,10 +129,6 @@ async function execute(packet) {
     if (dispatches[command.id]) {
       result = dispatches[command.id].result || result;
     } else {
-      if (packet.scope.interaction === 'automatic' && checksActionPurpose(packet.scope)) {
-        const committed = Object.values(dispatches).filter(claim => claim.session_id === id).reduce((total, claim) => total + (claim.payment_cents || 0), 0);
-        if (!automaticActionAllowed(packet.scope, command) || committed + command.payment_cents > (packet.scope.action_policy?.payment_limit_cents || 0)) throw new Error('The action exceeds the signed communications or payment allowance.');
-      }
       await authorizeCurrentCommand(packet);
       // Persist the claim BEFORE touching the page. An interrupted claim is never replayed.
       dispatches[command.id] = {at: Date.now(), packet_digest: packetDigest, session_id: id, payment_cents: command.payment_cents || 0};

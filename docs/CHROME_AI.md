@@ -6,7 +6,7 @@ retries native setup. Preparation and download progress appear in the settings
 page. Failed setup preserves the saved provider and reports its blocker.
 
 Chrome AI performs task-relevant view selection and action assessment locally.
-It cannot expand signed origins, permissions, expiry or final-commit authority.
+It cannot expand signed origins, permissions or expiry.
 The alternative `onnx` backend uses the identity-checked bundle already installed
 under `extension/models/purpose/`.
 

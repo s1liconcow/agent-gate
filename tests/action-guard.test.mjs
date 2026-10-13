@@ -1,12 +1,29 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {checkedActionAssessment} from '../extension/action-guard.mjs';import {fixture,origin,ref} from './flow/fixture.mjs';
+import {auditPurpose} from '../extension/purpose-audit.mjs';
+import {classifierResult} from '../shared/local-purpose.mjs';
 const yes={within_purpose:true,decision:'allow',effect:'other',payment_cents:0,confidence:1};
-test('two native judgments retain raw denial and independently enforce final-submit boundary',async()=>{const f=await fixture(),task=(await f.engine.get(f.id)).task,view={origin,text:'Product results',controls:[{ref,role:'button',label:'Search products',approval:'per_action'}]},action={type:'click',ref};assert.equal(checkedActionAssessment(task,view,action,yes,{...yes,within_purpose:false,decision:'deny'}).decision,'deny');assert.equal(checkedActionAssessment(task,view,action,yes,yes,true).decision,'deny');assert.equal(checkedActionAssessment(task,view,action,yes,yes).decision,'allow');});
-test('Delete controls stay blocked even when the goal requests cart cleanup',async()=>{
- const f=await fixture(),original=(await f.engine.get(f.id)).task,task={...original,goal:'Clear the Amazon shopping cart.'};
- const view={origin,text:'Shopping cart',controls:[{ref,role:'button',label:'Delete Sensodyne Fresh Mint Sensitive Toothpaste, 4 Ounces (Pack of 2)',approval:'per_action'}]},action={type:'click',ref};
- for(const submit of [false,true]){
-  assert.equal(checkedActionAssessment(task,view,action,yes,yes,submit).decision,'deny');
-  assert.equal(checkedActionAssessment(original,view,action,yes,yes,submit).decision,'deny');
+test('native judgments govern actions without keyword or submit overrides',async()=>{
+ const f=await fixture(),task=(await f.engine.get(f.id)).task,action={type:'click',ref};
+ for(const label of ['Add to cart','Delete item','Save changes','Send','Place order']) {
+  const view={origin,text:'Observed task context',controls:[{ref,role:'button',label,approval:'per_action'}]};
+  assert.equal(checkedActionAssessment(task,view,action,yes,yes,true).decision,'allow');
+  assert.equal(checkedActionAssessment(task,view,action,yes,{...yes,within_purpose:false}).decision,'deny');
+  assert.equal(checkedActionAssessment(task,view,action,yes,{...yes,decision:'confirm'}).decision,'confirm');
  }
- for(const label of ['Place order','Submit','Delete account password'])assert.equal(checkedActionAssessment(task,{...view,controls:[{...view.controls[0],label}]},action,yes,yes,true).decision,'deny');
+});
+test('audit observes native submissions and cloud relay accepts consequential judgments',async()=>{
+ const f=await fixture(),task=(await f.engine.get(f.id)).task,input={task,submit:true,view:{origin,text:'Order total $23.29',controls:[{ref,role:'button',label:'Place order',approval:'per_action'}]},action:{type:'click',ref}};
+ let requests=0;
+ const expected={ok:true,decision:'confirm',effect:'payment',payment_cents:2329,confidence:1};
+ const observed=await auditPurpose('check_action',input,async()=>{requests++;return expected;});
+ assert.equal(requests,1);assert.deepEqual(observed,expected);
+ assert.deepEqual(classifierResult('check_action',observed,input),expected);
+ assert.deepEqual(classifierResult('check_action',{...expected,decision:'allow'},input),{...expected,decision:'allow'});
+ assert.throws(()=>classifierResult('check_action',{...expected,payment_cents:-1},input),{code:'INVALID_RESULT'});
+});
+test('consequence metadata survives assessment and disagreement requires semantic confirmation',async()=>{
+ const f=await fixture(),task=(await f.engine.get(f.id)).task,view={origin,text:'Order total $23.29',controls:[{ref,role:'button',label:'Place order',approval:'per_action'}]},action={type:'click',ref};
+ const purchase={...yes,effect:'payment',payment_cents:2329};
+ assert.deepEqual(checkedActionAssessment(task,view,action,purchase,purchase),{decision:'allow',effect:'payment',payment_cents:2329,confidence:1});
+ assert.deepEqual(checkedActionAssessment(task,view,action,yes,purchase),{decision:'confirm',effect:'payment',payment_cents:2329,confidence:1});
 });

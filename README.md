@@ -1,6 +1,6 @@
 # AgentGate
 
-AgentGate runs scoped browser tasks with owner consent and a paired local classifier. The assistant selects the goal, exact origins, local or cloud browser, and classifier backend. Signed scope, credential filtering, replay protection and final-commit boundaries remain enforced.
+AgentGate runs scoped browser tasks with owner consent and a paired local classifier. The assistant selects the goal, exact origins, local or cloud browser, and classifier backend. The owner engagement mode governs action judgments. Signed scope, credential filtering, freshness and replay protection remain enforced.
 
 - [Setup and operation](docs/SETUP.md)
 - [Browser flow and evidence](docs/BASIC_BROWSER_FLOW.md)

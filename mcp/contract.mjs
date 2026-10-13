@@ -15,7 +15,7 @@ export const tools = Object.freeze({
     schema: z.object({}).strict(), path: () => 'browsers', readOnly: true
   },
   request_browser_session: {
-    description: 'Request a task with exact origins, start URL, required permissions, browser=local or cloud and classifier_backend=chrome_ai or onnx. The owner sets engagement: AUDIT_ONLY observes routine actions without semantic blocking; other modes require initial task approval and may require exact action approval. Scope, credential and final-commit boundaries always apply. Both routes use the selected paired local classifier; no backend fallback. Show approval_url when returned. Poll the same session every five seconds; do not recreate pending requests.',
+    description: 'Request a task with exact origins, start URL, required permissions, browser=local or cloud and classifier_backend=chrome_ai or onnx. The owner sets engagement: AUDIT_ONLY records classifier judgments without semantic blocking; other modes require initial task approval and may require exact action approval. Signed scope, credential privacy, freshness and replay checks apply. Both routes use the selected paired local classifier; no backend fallback. Show approval_url when returned. Poll the same session every five seconds; do not recreate pending requests.',
     schema: z.object({goal: z.string().min(8).max(500), origins: z.array(z.string()).min(1).max(5), permissions: z.array(z.enum(['read','fill','click','navigate'])).min(1), start_url: z.string().max(1000), browser: z.enum(['local','cloud']), classifier_backend: z.enum(['chrome_ai','onnx']), classifier_browser_id: id.optional(), ttl_seconds: z.number().int().min(60).max(600).default(600)}).strict(), path: () => 'sessions', readOnly: false
   },
   get_browser_session: {
@@ -23,7 +23,7 @@ export const tools = Object.freeze({
     schema: z.object({session_id: id}).strict(), path: input => 'sessions/' + input.session_id, readOnly: true
   },
   perform_browser_action: {
-    description: 'Perform one action on the current published view. Supply its view_digest and an opaque ref for fill/click; navigation stays within signed origins. The pinned local classifier monitors the exact action before execution. Show approval_url when awaiting_action. Keep one idempotency_key per intended action; never retry an uncertain click with a new key. Credentials, final purchases, sending and other final commitments are withheld. No selectors, scripts, cookies or screenshots.',
+    description: 'Perform one action on the current published view. Supply its view_digest and an opaque ref for fill/click; navigation stays within signed origins. The pinned local classifier assesses the exact action against the approved goal; the owner engagement mode determines execution or confirmation. Control labels and native form submission do not impose separate action rules. Show approval_url when awaiting_action. Keep one idempotency_key per intended action; never retry an uncertain click with a new key. No selectors, scripts, cookies or screenshots.',
     schema: z.object({session_id: id, action, view_digest: z.string().regex(/^[A-Za-z0-9_-]{43}$/), idempotency_key: z.string().min(8).max(100)}).strict(), path: input => 'sessions/' + input.session_id + '/actions', readOnly: false
   },
   close_browser_session: {

@@ -58,8 +58,6 @@ export function classifierResult(type, result, input) {
   } else {
     exact(result, ['ok', 'decision', 'effect', 'payment_cents', 'confidence']);
     if (result.ok !== true || !['allow', 'confirm', 'deny', ...(input.task.engagement ? ['unavailable'] : [])].includes(result.decision) || !['other', 'communication', 'payment'].includes(result.effect) || !Number.isSafeInteger(result.payment_cents) || result.payment_cents < 0 || !Number.isFinite(result.confidence) || result.confidence < 0 || result.confidence > 1) fail('INVALID_RESULT', 'Invalid strict purpose assessment.');
-    if (result.decision === 'allow' && ((!input.task.engagement && result.confidence < classifierConfidence) || (result.effect !== 'other' || result.payment_cents !== 0))) fail('LOCAL_CLASSIFIER_REFUSED', 'Uncertain purpose or a commitment cannot run as a routine action.');
-    if (result.decision === 'confirm' && (result.effect !== 'other' || result.payment_cents !== 0 || input.submit)) fail('LOCAL_CLASSIFIER_REFUSED', 'A consequential action needs its separate exact approval flow.');
   }
   return structuredClone(result);
 }

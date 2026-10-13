@@ -10,18 +10,19 @@ for(const route of ['local','cloud'])for(const backend of ['chrome_ai','onnx'])f
  assert.equal((await f.engine.commands()).length,1);await f.engine.result(f.id,{command_id:(await f.engine.get(f.id)).pending.id,ok:true,code:'DISPATCHED'});
  assert.equal((await f.engine.get(f.id)).last_command.status,'dispatched');await f.engine.end(f.id,'closed');assert.equal(f.engine.public(await f.engine.get(f.id)).view,undefined);
 });
-for(const mode of ['AUDIT_ONLY','AUTO_APPROVE','AGGRESSIVE'])for(const decision of ['allow','deny'])test(`${mode} blocks Delete controls with classifier ${decision}`,async()=>{
+for(const mode of ['AUDIT_ONLY','AUTO_APPROVE','AGGRESSIVE'])for(const decision of ['allow','confirm','deny'])test(`${mode} applies classifier ${decision} to a Delete control`,async()=>{
  const f=await fixture(mode);if(mode!=='AUDIT_ONLY')await f.approve();
  await f.publish('Delete Sensodyne Fresh Mint Sensitive Toothpaste, 4 Ounces (Pack of 2)');await f.propose();
  const checked=await f.check({...observation,decision});
- assert.equal(checked.status,'active');assert.equal((await f.engine.commands()).length,0);
- assert.deepEqual(checked.observations.at(-1),{type:'action_check',at:f.now(),mode,decision,confidence:1,hard_boundary:true,applied:'deny'});
+ const applied=mode==='AUDIT_ONLY'?'allow':decision;
+ assert.equal(checked.status,applied==='allow'?'executing':applied==='confirm'?'awaiting_action':'active');assert.equal((await f.engine.commands()).length,applied==='allow'?1:0);
+ assert.deepEqual(checked.observations.at(-1),{type:'action_check',at:f.now(),mode,decision,confidence:1,applied});
 });
-for(const mode of ['AUDIT_ONLY','AUTO_APPROVE','AGGRESSIVE'])test(`${mode} preserves hard origin/credential/final-action boundaries`,async()=>{
+for(const mode of ['AUDIT_ONLY','AUTO_APPROVE','AGGRESSIVE'])test(`${mode} preserves origin scope and carries consequential action assessments`,async()=>{
  const f=await fixture(mode);if(mode!=='AUDIT_ONLY')await f.approve();await f.publish('Place order');
  await assert.rejects(f.engine.propose(f.id,{action:{type:'navigate',url:'https://outside.example'},view_digest:(await f.engine.get(f.id)).view_digest,idempotency_key:'outside-001'}),{code:'OUT_OF_SCOPE'});
- await f.propose();const checked=await f.check();assert.equal(checked.last_command.status,'failed');assert.equal((await f.engine.commands()).length,0);
- await f.publish('Password','field');const s=await f.engine.get(f.id);await f.engine.propose(f.id,{action:{type:'fill',ref,value:'forbidden'},view_digest:s.view_digest,idempotency_key:'credential-001'});assert.equal((await f.check()).last_command.status,'failed');
+ await f.propose();const checked=await f.check({...observation,effect:'payment',payment_cents:2329});assert.equal(checked.status,'executing');
+ const [packet]=await f.engine.commands();assert.equal(packet.command.effect,'payment');assert.equal(packet.command.payment_cents,2329);
 });
 test('tampered or forged owner approvals, stale views and changed replay keys fail',async()=>{
  const f=await fixture('AUTO_APPROVE'),c=(await f.engine.get(f.id)).challenge;

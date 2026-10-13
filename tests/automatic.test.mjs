@@ -57,7 +57,7 @@ test('planning heartbeat reports phase/version and stops when publication finish
  assert.deepEqual(f.calls.at(-1).input,{state:'planning',code:null,phase:'text_verification',extension_version:'0.5.3'});
  finish({ids:[ref]});await operation;assert.equal(f.calls.at(-1).input.state,'ready');const before=f.calls.length;context.mock.timers.tick(10000);await f.browser.runtimeQueue;assert.equal(f.calls.length,before);
 });
-test('audit cart cleanup cannot dispatch a Delete form button through the extension or coordinator',async()=>{
+test('audit cart cleanup can dispatch a Delete form button through the extension and coordinator',async()=>{
  const f=await sessionFixture(),created=await f.engine.create({...f.request,goal:'Clear the Amazon shopping cart.'},'cli',null,f.guard.browser_id,{guard:f.guard,execution:'local'}),sessionId=created.id;
  await f.engine.publishView(sessionId,{origin:shopOrigin,text:'Shopping cart',controls:[{ref:cartRef,role:'button',label:'Delete Sensodyne Fresh Mint Sensitive Toothpaste, 4 Ounces (Pack of 2)',approval:'per_action'}]});
  const current=await f.engine.get(sessionId);
@@ -66,8 +66,23 @@ test('audit cart cleanup cannot dispatch a Delete form button through the extens
  const api={storage:{local:{get:async()=>data},session:{get:async()=>data,set:async value=>Object.assign(data,value)}}};
  const browser=new AutomaticBrowser({api,config:async()=>({phone_key:f.phone.public_key}),verifySession:async()=>{},model:async()=>({...observation,decision:'deny'}),call:async(path,input)=>{assert.equal(path,'sessions/'+sessionId+'/check');return f.engine.checkAction(sessionId,input);}});
  await browser.check({session_id:sessionId,scope:pending.task,command:pending.pending});
- assert.equal((await f.engine.get(sessionId)).status,'active');
- assert.equal(data.guarded[pending.pending.id].decision,'deny');
- assert.equal((await f.engine.commands()).length,0);
- assert.equal((await f.engine.get(sessionId)).history.at(-1).hard_boundary,true);
+ assert.equal((await f.engine.get(sessionId)).status,'executing');
+ assert.equal(data.guarded[pending.pending.id].decision,'allow');
+ assert.equal((await f.engine.commands()).length,1);
+ assert.equal(await browser.allowed((await f.engine.commands())[0]),true);
+ assert.deepEqual((await f.engine.get(sessionId)).history.at(-1),{type:'action_check',at:f.now(),mode:'AUDIT_ONLY',decision:'deny',confidence:1,applied:'allow'});
+});
+for(const decision of ['allow','confirm'])test(`consequential classifier ${decision} remains bound through exact approval and execution readiness`,async()=>{
+ const f=await sessionFixture('AUTO_APPROVE');await f.approve();await f.publish('Place order');await f.propose();
+ const pending=await f.engine.get(f.id),data={automation:{enabled:true},bindings:{[f.id]:{view:pending.view,view_digest:pending.view_digest,fills:{},submit_refs:[cartRef]}}};
+ const api={storage:{local:{get:async()=>data},session:{get:async()=>data,set:async value=>Object.assign(data,value)}}};
+ const browser=new AutomaticBrowser({api,config:async()=>({phone_key:f.phone.public_key}),verifySession:async()=>{},model:async()=>({...observation,decision,effect:'payment',payment_cents:2329}),call:async(path,input)=>f.engine.checkAction(f.id,input)});
+ await browser.check({session_id:f.id,scope:pending.task,command:pending.pending});
+ if(decision==='confirm') {
+  assert.equal((await f.engine.commands()).length,0);
+  await f.engine.approveAction(f.id,await f.phone.sign((await f.engine.get(f.id)).action_challenge));
+ }
+ const [packet]=await f.engine.commands();assert.equal(await browser.allowed(packet),true);
+ assert.equal(await browser.allowed({...packet,command:{...packet.command,payment_cents:2330}}),false);
+ assert.equal(await browser.allowed({...packet,command:{...packet.command,requires_approval:decision==='allow'}}),false);
 });

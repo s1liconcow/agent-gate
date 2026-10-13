@@ -8,7 +8,7 @@ Native probes use fresh temporary profiles. They copy no browser profiles or nat
 
 For the visible demo, run `AGENTGATE_FLOW_CAPTURE=1 npm run demo:flow`, then `node scripts/package-flow-demo.mjs` and `npm run build`. The generated `public/e2e-demo.html` contains screenshots of the actual owner UI, browser actions, real ONNX observations and completion. Both real ONNX routes use signed AUDIT consent. The cloud acquisition is emulated. A separate fixture example exercises conditional task and exact-action approval through the real owner UI, using an ephemeral test key in an isolated browser context. No production owner approval is automated.
 
-The ONNX relevance model withheld the search controls in the attempted non-AUDIT real-model task. Its action-effect accuracy remains unverified. The recorded real-model flow therefore uses the supported AUDIT setting and keeps the deterministic scope, credential and final-commit restrictions. The extension download is a code update; keep existing local model files and WASM when updating an already installed extension.
+The ONNX relevance model withheld the search controls in the attempted non-AUDIT real-model task. Its action-effect accuracy remains unverified. The recorded real-model flow therefore uses the supported AUDIT setting and keeps signed scope, credential privacy, freshness and replay checks. The extension download is a code update; keep existing local model files and WASM when updating an already installed extension.
 
 ```mermaid
 flowchart LR
@@ -21,7 +21,7 @@ flowchart LR
   D --> G[Observed synthetic result and task cleanup]
 ```
 
-The owner chooses engagement. Signed AUDIT consent starts a scoped task without another session approval and records semantic concerns without blocking routine steps. Balanced and Careful require initial task approval. Relevant uncertain actions require exact signed approval; semantic denial is enforced. Careful also confirms scores below 0.98. No model confidence grants origin, credential or final-commit authority. Real purchases, sending, credentials and final submissions remain blocked in this flow.
+The owner chooses engagement. Signed AUDIT consent starts a scoped task without another session approval and records semantic concerns without blocking actions. Balanced and Careful require initial task approval. Relevant uncertain actions require exact signed approval; semantic denial is enforced. Careful also confirms scores below 0.98. Action labels, native form submission and effect categories do not impose separate blockers. Signed origins, permissions, credential privacy and current authorization remain enforced.
 
 Both executors use the paired local classifier. Cloud requests and results are bound to the signed scope, current view, actual action and live device identity. Replayed, modified, expired or revoked results cannot authorize execution. There is no remote classifier fallback.
 
@@ -42,7 +42,7 @@ Test approvals are normal ephemeral P-256 owner signatures through the productio
 | Chrome web Prompt API | Separate real production ModelRuntime component probe; does not prove extension integration |
 | Live Cloudflare acquisition | Unverified by this command |
 
-The failure suite covers initial rejection, stale owner approvals, cancellation during action approval, stale views, changed replay keys, origin escape, final-commit denial in AUDIT, revocation, classifier disconnect on both routes, and task-tab cleanup. Unit tests also verify tampered signatures, classifier-result binding/replay, expired commands, uncertain dispatch and recognized credential/sensitive-data filtering.
+The failure suite covers initial rejection, stale owner approvals, cancellation during action approval, stale views, changed replay keys, origin escape, revocation, classifier disconnect on both routes, and task-tab cleanup. It also verifies AUDIT dispatch of a synthetic order button. Unit tests cover action labels and native submissions under engagement, tampered signatures, classifier-result binding/replay, expired commands, uncertain dispatch and recognized credential/sensitive-data filtering.
 
 The current flow removes purchase policies, cart parsing/checkout encryption and submission, legacy element-disclosure execution, remote classifier selection from the live model host, obsolete tests/scripts, and `legacy/v0.1`. Existing pairing, OAuth/account isolation, encrypted login infrastructure, quota diagnostics, browser acquisition/cleanup and recording remain. Freshness, signed authorization, scope binding and replay safeguards remain enforced. Development runs on `main` in the primary checkout; retired implementations remain recoverable in Git history. Deployment approval is separate from source reconciliation.
 

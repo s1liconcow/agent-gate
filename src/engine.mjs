@@ -1,7 +1,7 @@
 import {action,canonical,checksActionPurpose,digest,exact,fail,importPhoneKey,needsApproval,random,scope,stagedFields,text,verifyReceipt,view} from '../shared/protocol.mjs';
 import {Engagement} from './engagement.mjs';
 import {engagementDecision} from '../shared/engagement.mjs';
-import {purposeActionBlocked,purposeDecision} from '../shared/purpose-engagement.mjs';
+import {purposeDecision} from '../shared/purpose-engagement.mjs';
 import {browserPhases} from '../extension/model-phases.mjs';
 const terminal=new Set(['revoked','expired','closed']);
 export class Engine {
@@ -109,14 +109,13 @@ export class Engine {
     item.status = 'awaiting_action';
   }
   async checkAction(id, input) {
-    exact(input, ['command_id','decision','effect','payment_cents','confidence',...['hard_boundary'].filter(key=>Object.hasOwn(input,key))]);
+    exact(input, ['command_id','decision','effect','payment_cents','confidence']);
     const item=await this.get(id);
     if (item.status!=='checking_action' || input.command_id!==item.pending?.id || item.pending.deadline<=this.now()) fail('STALE_COMMAND','This action no longer awaits classification.',409);
-    if (!['allow','confirm','deny','unavailable'].includes(input.decision) || !Number.isFinite(input.confidence) || input.confidence<0 || input.confidence>1 || input.effect!=='other' || input.payment_cents!==0 || Object.hasOwn(input,'hard_boundary') && typeof input.hard_boundary!=='boolean') fail('INVALID_RESULT','Invalid local classifier observation.');
-    const hard = input.hard_boundary || purposeActionBlocked(item.task,item.view,item.pending.action);
-    const decision=hard?'deny':purposeDecision(item.task,input);
-    item.history.push({type:'action_check', at:this.now(), mode:item.task.engagement, decision:input.decision, confidence:input.confidence, hard_boundary:Boolean(hard), applied:decision});
-    item.pending.effect='other'; item.pending.payment_cents=0;
+    if (!['allow','confirm','deny','unavailable'].includes(input.decision) || !Number.isFinite(input.confidence) || input.confidence<0 || input.confidence>1 || !['other','communication','payment'].includes(input.effect) || !Number.isSafeInteger(input.payment_cents) || input.payment_cents<0) fail('INVALID_RESULT','Invalid local classifier observation.');
+    const decision=purposeDecision(item.task,input);
+    item.history.push({type:'action_check', at:this.now(), mode:item.task.engagement, decision:input.decision, confidence:input.confidence, applied:decision});
+    item.pending.effect=input.effect; item.pending.payment_cents=input.payment_cents;
     if (decision==='deny') {
       item.last_command={id:item.pending.id,status:'failed',code:'OUT_OF_SCOPE',site_outcome:'unverified'}; item.status='active'; delete item.pending;
     } else if (decision==='confirm') this.challengeAction(item,item.pending,item.view.controls.find(c=>c.ref===item.pending.action.ref),stagedFields(item.view,item.fills));

@@ -116,9 +116,14 @@ async function failures(route){
   const action={session_id:id,action:{type:'fill',ref:field.ref,value:'blue ceramic coffee mugs'},view_digest:current.view_digest,idempotency_key:'replay-'+id};await tool('perform_browser_action',action);
   current=await state(id,route,s=>s.last_command?.status==='dispatched');
   await tool('perform_browser_action',action);await assert.rejects(tool('perform_browser_action',{...action,action:{...action.action,value:'changed purpose'}}),{code:'KEY_REUSED'});record('duplicate action idempotent; changed replay refused');
+  const add=current.view.controls.find(c=>c.label==='Add to cart');assert.ok(add);
+  await tool('perform_browser_action',{session_id:id,action:{type:'click',ref:add.ref},view_digest:current.view_digest,idempotency_key:'native-cart-submit-'+id});
+  current=await state(id,route,s=>s.last_command?.status==='dispatched'&&Boolean(s.view));
+  const page=(route==='local'?local:cloudContext).pages().find(page=>page.url().startsWith(site.origin));
+  assert.equal(await page.evaluate(()=>globalThis.cartAdds),1);record('AUDIT dispatches the native cart submit once');
   const final=current.view.controls.find(c=>c.label==='Place order');assert.ok(final);
-  await tool('perform_browser_action',{session_id:id,action:{type:'click',ref:final.ref},view_digest:current.view_digest,idempotency_key:'final-block-'+id});
-  current=await state(id,route,s=>s.last_command?.status==='failed');assert.equal(current.last_command.code,'OUT_OF_SCOPE');assert.equal(current.observations.at(-1).hard_boundary,true);record('AUDIT final commitment remains blocked');
+  await tool('perform_browser_action',{session_id:id,action:{type:'click',ref:final.ref},view_digest:current.view_digest,idempotency_key:'synthetic-submit-'+id});
+  current=await state(id,route,s=>s.last_command?.status==='dispatched');assert.equal(current.observations.filter(event=>event.type==='action_check').at(-1).applied,'allow');record('AUDIT follows engagement for a synthetic order button');
   await http('/api/owner/sessions/'+id+'/revoke',{});await tick(route);assert.equal((await tool('get_browser_session',{session_id:id})).view,undefined);record('revocation clears the view and cancels authority');
 }
 try{

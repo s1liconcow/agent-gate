@@ -1,6 +1,5 @@
 // Phone consent and task scope define authority; the owner engagement policy governs purpose checks.
 export const checksActionPurpose=task=>Boolean(task?.purpose_guard);
-export const automaticActionAllowed=(task,assessment)=>Boolean(task.purpose_guard)&&assessment.effect==='other'&&assessment.payment_cents===0;
 export class GateError extends Error {
   constructor(code, message, status = 400) { super(message); this.code = code; this.status = status; }
 }

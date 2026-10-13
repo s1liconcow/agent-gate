@@ -1,4 +1,4 @@
-import {action, automaticActionAllowed, canonical, checksActionPurpose, digest, exact, needsApproval, stagedFields, verifyReceipt} from '../shared/protocol.mjs';
+import {action, canonical, checksActionPurpose, digest, exact, needsApproval, stagedFields, verifyReceipt} from '../shared/protocol.mjs';
 
 // The command journal is durable and is written before any page effect.
 // An interrupted command is reported as uncertain and never dispatched again.
@@ -29,10 +29,6 @@ export async function executeHosted(packet, {api, automatic, authorize, phoneKey
   }
   const tab = await api.tabs.get(binding.tab_id);
   if (new URL(tab.url).origin !== binding.view.origin || !packet.scope.origins.includes(new URL(tab.url).origin)) throw new Error('The bound tab changed origin.');
-  if (packet.scope.interaction === 'automatic' && checksActionPurpose(packet.scope)) {
-    const committed = Object.values(dispatches).filter(claim => claim.session_id === id).reduce((sum, claim) => sum + (claim.payment_cents || 0), 0);
-    if (!automaticActionAllowed(packet.scope, command) || committed + command.payment_cents > (packet.scope.action_policy?.payment_limit_cents || 0)) throw new Error('The action exceeds its signed allowance.');
-  }
   await authorize(packet, 'executing');
   dispatches[command.id] = {at: now(), packet_digest: packetDigest, session_id: id, payment_cents: command.payment_cents || 0};
   for (const [key, claim] of Object.entries(dispatches)) if (now() - claim.at > 86400000) delete dispatches[key];

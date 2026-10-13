@@ -1,4 +1,4 @@
-import {automaticActionAllowed, canonical, digest, scopedUrl, stagedFields} from './protocol.mjs';
+import {canonical, digest, scopedUrl, stagedFields} from './protocol.mjs';
 import {prepareSnapshot, selectedView} from './disclosure.mjs';
 import {localModel} from './model-host.mjs';
 import {deadline} from './deadline.mjs';
@@ -8,7 +8,7 @@ import {TabActivity} from './activity.mjs';
 import {inferenceSettings} from './inference-settings.mjs';
 import {purposeBrowserModel} from './purpose-browser-model.mjs';
 import {engagementDecision} from './engagement.mjs';
-import {purposeActionBlocked, purposeDecision} from './purpose-engagement.mjs';
+import {purposeDecision} from './purpose-engagement.mjs';
 const enabled=(task,automation)=>Boolean(automation?.enabled);
 
 export class AutomaticBrowser {
@@ -151,8 +151,8 @@ export class AutomaticBrowser {
       const classify = () => this.model('check_action', {task: packet.scope, view: binding.view, action: command.action, staged: stagedFields(binding.view, binding.fills), submit: binding.submit_refs.includes(command.action.ref)}, {session_id: id, beforeInference: () => this.authorizeInference(packet, true)});
       const result = await (packet.scope.engagement === 'AUDIT_ONLY' && !packet.scope.purpose_guard ? deadline(classify, 1000) : classify());
       if (!['allow', 'confirm', 'deny', ...(packet.scope.engagement ? ['unavailable'] : [])].includes(result.decision)) throw new Error('Invalid local decision.');
-      const decision = packet.scope.purpose_guard ? purposeActionBlocked(packet.scope, binding.view, command.action, binding.submit_refs.includes(command.action.ref)) ? 'deny' : purposeDecision(packet.scope, result) : packet.scope.engagement ? engagementDecision(packet.scope.engagement, result) : packet.scope.interaction === 'automatic' && (result.decision === 'confirm' || result.decision === 'allow' && !automaticActionAllowed(packet.scope, result)) ? 'deny' : result.decision;
-      const assessment = packet.scope.purpose_guard ? {effect: result.effect, payment_cents: result.payment_cents, confidence: result.confidence, ...(purposeActionBlocked(packet.scope, binding.view, command.action, binding.submit_refs.includes(command.action.ref)) ? {hard_boundary: true} : {})} : packet.scope.engagement ? {confidence: result.confidence, sensitive: result.sensitive} : packet.scope.interaction === 'automatic' && decision === 'allow' ? {effect: result.effect, payment_cents: result.payment_cents} : {};
+      const decision = packet.scope.purpose_guard ? purposeDecision(packet.scope, result) : packet.scope.engagement ? engagementDecision(packet.scope.engagement, result) : result.decision;
+      const assessment = packet.scope.purpose_guard ? {effect: result.effect, payment_cents: result.payment_cents, confidence: result.confidence} : packet.scope.engagement ? {confidence: result.confidence, sensitive: result.sensitive} : {};
       await this.receipt(packet);
       if (this.ended.has(id)) return;
       const {guarded = {}} = await this.api.storage.session.get('guarded');
@@ -181,6 +181,8 @@ export class AutomaticBrowser {
     if (!(await this.api.storage.local.get('automation')).automation?.enabled) return false;
     const {guarded = {}} = await this.api.storage.session.get('guarded');
     const checked = guarded[packet.command.id];
-    return !this.ended.has(packet.session_id) && checked && checked.digest === await this.commandDigest(packet) && (packet.scope.purpose_guard && checked.decision === 'confirm' ? packet.command.requires_approval === true && checked.effect === 'other' && checked.payment_cents === 0 : packet.scope.interaction === 'automatic' ? checked.decision === 'allow' && packet.command.requires_approval === false && checked.effect === packet.command.effect && checked.payment_cents === packet.command.payment_cents && automaticActionAllowed(packet.scope, checked) : checked.decision === 'allow' || checked.decision === 'confirm' && packet.command.requires_approval === true);
+    if (this.ended.has(packet.session_id) || !checked || checked.digest !== await this.commandDigest(packet)) return false;
+    if (packet.scope.purpose_guard && (checked.effect !== packet.command.effect || checked.payment_cents !== packet.command.payment_cents)) return false;
+    return checked.decision === 'allow' && packet.command.requires_approval === false || checked.decision === 'confirm' && packet.command.requires_approval === true;
   }
 }

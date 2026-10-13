@@ -1,3 +1,13 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {purposeInput,purposeProbability} from '../extension/purpose-browser-input.mjs';import {OnnxValidator} from '../extension/onnx-validator.mjs';import {fixture,origin,ref} from './flow/fixture.mjs';
 test('ONNX receives only the complete normalized purpose/evidence text pair',()=>{const row={goal:'Find the meeting time.',need:'Read the time.',context:'Calendar',text:'Friday at NOON.',label:1,domain:'forbidden-metadata'};assert.deepEqual(purposeInput(row),['User purpose: find the meeting time.\nRequested evidence: read the time.','Observed source context: calendar\nCandidate text: friday at noon.']);assert.throws(()=>purposeInput({...row,text:'x'.repeat(451)}));assert.ok(purposeProbability([0,4],1)>.98);});
-test('ONNX scores source evidence and exact actions without granting final-commit authority',async()=>{const f=await fixture('AUDIT_ONLY','local','onnx'),task=(await f.engine.get(f.id)).task,rows=[],runtime={model:task.purpose_guard.model_id,classify:async row=>{rows.push(row);return {probability:.8};}},v=new OnnxValidator(runtime);const current={origin,text:'Blue ceramic coffee mugs',controls:[{ref,role:'field',label:'Search products',approval:'per_action'}]};const result=await v.request('check_action',{task,view:current,action:{type:'fill',ref,value:'blue ceramic coffee mugs'},submit:false});assert.equal(result.decision,'allow');assert.equal(rows[0].goal,task.goal);assert.match(rows[0].text,/blue ceramic coffee mugs/);assert.equal((await v.request('check_action',{task,view:{...current,controls:[{ref,role:'button',label:'Place order',approval:'per_action'}]},action:{type:'click',ref},submit:true})).decision,'deny');assert.equal(rows.length,1);});
+test('ONNX scores exact actions without label allowlists or submit blockers',async()=>{
+ const f=await fixture('AUDIT_ONLY','local','onnx'),task=(await f.engine.get(f.id)).task,rows=[],runtime={model:task.purpose_guard.model_id,classify:async row=>{rows.push(row);return {probability:.8};}},v=new OnnxValidator(runtime);
+ const current={origin,text:'Blue ceramic coffee mugs',controls:[{ref,role:'field',label:'Search products',approval:'per_action'}]};
+ assert.equal((await v.request('check_action',{task,view:current,action:{type:'fill',ref,value:'blue ceramic coffee mugs'},submit:false})).decision,'allow');
+ assert.equal(rows[0].goal,task.goal);assert.match(rows[0].text,/blue ceramic coffee mugs/);
+ for(const label of ['Add to cart','Delete item','Save preferences','Place order']) {
+  assert.equal((await v.request('check_action',{task,view:{...current,controls:[{ref,role:'button',label,approval:'per_action'}]},action:{type:'click',ref},submit:true})).decision,'allow');
+  assert.equal(JSON.parse(rows.at(-1).text).label,label);
+ }
+ assert.equal(rows.length,5);
+});

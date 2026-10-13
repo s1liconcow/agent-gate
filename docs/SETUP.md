@@ -57,9 +57,9 @@ pin `classifier_browser_id` when selecting a particular paired device. Supply th
 goal, exact allowed origins, start URL, permissions and a 60–600 second lifetime.
 
 The saved owner engagement setting controls initial and semantic approvals.
-AUDIT records semantic concerns; signed origins, credential exclusions,
-scope/result binding and final-commit restrictions remain enforced. The current
-flow blocks real purchases, sending and final submissions. Cloudflare acquisition
+AUDIT records semantic concerns without blocking actions. Action labels, native
+form submission and classifier effect categories have no separate blockers.
+Signed origins, credential exclusions and scope/result binding remain enforced. Cloudflare acquisition
 errors retain their status and retry guidance. Inspect the reported account and
 capacity diagnostics before deciding how to resolve a limit.
 
