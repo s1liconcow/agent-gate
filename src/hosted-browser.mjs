@@ -4,7 +4,8 @@ import {AutomaticBrowser} from '../extension/automatic.mjs';
 import {HostedState} from './hosted-state.mjs';
 import {HostedAdapter} from './hosted-adapter.mjs';
 import {hostedAPI} from './hosted-api.mjs';
-import {executeHosted} from './hosted-executor.mjs';
+import {executeHosted, hostedExecutionFailure} from './hosted-executor.mjs';
+import {deadline} from '../extension/deadline.mjs';
 import {browserLimitReason, reconcileBrowserRetry} from './hosted-browser-limits.mjs';
 import {HOSTED_BROWSER_IDLE_MS} from './hosted-browser-factory.mjs';
 
@@ -13,8 +14,8 @@ const setupBlockers = new Set(['LOGIN_REQUIRED', 'PERMISSION_REQUIRED', 'MODEL_S
   'INFERENCE_CONFIG_CHANGED', 'INFERENCE_AUTH_FAILED', 'INFERENCE_NOT_APPROVED', 'OUT_OF_SCOPE', 'TAB_CLOSED', 'LOCAL_CHECK_REFUSED', 'PAGE_UNSUPPORTED']);
 
 export class HostedBrowser {
-  constructor({storage, consent, factory, scripts, call, snapshot, reset, classifierReady = async () => false, now = Date.now}) {
-    Object.assign(this, {storage, consent, factory, scripts, call, snapshot, reset, classifierReady, now}); this.queue = Promise.resolve(); this.privateSession = new Map();
+  constructor({storage, consent, factory, scripts, call, snapshot, reset, classifierReady = async () => false, now = Date.now, loginCheckpointMilliseconds = 15000, disconnectMilliseconds = 5000}) {
+    Object.assign(this, {storage, consent, factory, scripts, call, snapshot, reset, classifierReady, now, loginCheckpointMilliseconds, disconnectMilliseconds}); this.queue = Promise.resolve(); this.privateSession = new Map();
   }
   serial(operation) { const pending = this.queue.then(operation, operation); this.queue = pending.catch(() => {}); return pending; }
   async config(expected) {
@@ -97,7 +98,7 @@ export class HostedBrowser {
         await store.put('connection', {...connection, last_activity_at: this.now()});
       }
       return answer;
-    } finally { await browser.close().catch(() => {}); }
+    } finally { await deadline(() => browser.close(), this.disconnectMilliseconds, 'BROWSER_UNRESPONSIVE').catch(() => {}); }
   }
   tick() {
     return this.serial(async () => {
@@ -135,7 +136,7 @@ export class HostedBrowser {
         for (const packet of (await this.snapshot()).commands) {
           let result;
           try { result = await executeHosted(packet, {api, automatic, authorize, phoneKey: config.phone_key}); }
-          catch { result = {command_id: packet.command.id, ok: false, code: 'BRIDGE_ERROR'}; }
+          catch (error) { result = hostedExecutionFailure(packet.command.id, error); }
           await this.call('sessions/' + packet.session_id + '/result', result).catch(() => {});
         }
         await automatic.tick();
@@ -144,7 +145,7 @@ export class HostedBrowser {
   }
   async store() { const config = await this.config(); return new HostedState(this.storage, config.account_id, config.browser_id); }
   async saveLogin(adapter, store) {
-    const previous = await store.get('login'), latest = await adapter.loginState();
+    const previous = await store.get('login'), latest = await deadline(() => adapter.loginState(), this.loginCheckpointMilliseconds, 'BROWSER_UNRESPONSIVE');
     latest.origins = [...new Map([...(previous?.origins || []), ...latest.origins].map(item => [item.origin, item])).values()];
     await store.put('login', latest);
   }

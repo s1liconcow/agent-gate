@@ -1,4 +1,7 @@
 import {action, canonical, checksActionPurpose, digest, exact, needsApproval, stagedFields, verifyReceipt} from '../shared/protocol.mjs';
+import {executionError} from '../shared/bridge-result.mjs';
+
+export const hostedExecutionFailure = (commandId, error) => ({command_id: commandId, ok: false, code: 'BRIDGE_ERROR', execution_error: executionError(error)});
 
 // The command journal is durable and is written before any page effect.
 // An interrupted command is reported as uncertain and never dispatched again.

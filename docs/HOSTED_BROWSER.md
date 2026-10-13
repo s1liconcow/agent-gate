@@ -31,6 +31,10 @@ rate-limit response. Cleanup closes owned browser processes, recovers interrupte
 acquisitions and respects backoff. An expired or disconnected local classifier
 revokes tasks on both executor routes.
 
+Cloud command failures include a bounded `last_command.execution_error` identifier
+without website text or credentials. Login-state saves and connection teardown
+have time limits so an unresponsive browser cannot hold the task queue indefinitely.
+
 ```sh
 node --test tests/hosted-browser-factory.test.mjs tests/hosted-browser-limits.test.mjs tests/hosted-browser-lifecycle.test.mjs tests/mcp-discovery.test.mjs
 npm run demo:flow

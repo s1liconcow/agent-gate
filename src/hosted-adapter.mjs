@@ -1,6 +1,6 @@
 import {deadline} from '../extension/deadline.mjs';
 
-const fault = code => Object.assign(new Error(code), {code});
+const fault = (code, execution_error) => Object.assign(new Error(code), {code, ...(execution_error ? {execution_error} : {})});
 const transport = `globalThis.chrome ||= {};chrome.runtime ||= {id:'agentgate-hosted',onMessage:{addListener(f){(globalThis.__agentgateListeners ||= new Set()).add(f)},removeListener(f){globalThis.__agentgateListeners?.delete(f)}}};`;
 
 export class HostedAdapter {
@@ -61,8 +61,10 @@ export class HostedAdapter {
   }
   async evaluate(id, expression) {
     const {cdp, executionContextId} = await this.world(id);
-    const answer = await deadline(() => cdp.send('Runtime.evaluate', {expression, contextId: executionContextId, returnByValue: true, awaitPromise: true}), 15000, 'BROWSER_UNRESPONSIVE');
-    if (answer.exceptionDetails) throw fault('BROWSER_UNRESPONSIVE');
+    let answer;
+    try { answer = await deadline(() => cdp.send('Runtime.evaluate', {expression, contextId: executionContextId, returnByValue: true, awaitPromise: true}), 15000, 'BROWSER_UNRESPONSIVE'); }
+    catch { throw fault('BROWSER_UNRESPONSIVE', 'TRANSPORT_FAILED'); }
+    if (answer.exceptionDetails) throw fault('BROWSER_UNRESPONSIVE', /Reader unavailable/.test(answer.exceptionDetails.exception?.description || '') ? 'READER_UNAVAILABLE' : 'EVALUATION_FAILED');
     return answer.result.value;
   }
   async inject(id, files) {

@@ -3,6 +3,7 @@ import {Engagement} from './engagement.mjs';
 import {engagementDecision} from '../shared/engagement.mjs';
 import {purposeDecision} from '../shared/purpose-engagement.mjs';
 import {browserPhases} from '../extension/model-phases.mjs';
+import {executionErrors} from '../shared/bridge-result.mjs';
 const terminal=new Set(['revoked','expired','closed']);
 export class Engine {
   constructor(storage,now=Date.now) {this.db=storage; this.now=now;}
@@ -164,14 +165,15 @@ export class Engine {
       ...(item.pending.requires_approval ? {action_receipt: item.action_receipt} : {}), command: item.pending}));
   }
   async result(id, result) {
-    exact(result, ['command_id', 'ok', 'code']);
+    exact(result, ['command_id', 'ok', 'code', ...['execution_error'].filter(key => Object.hasOwn(result, key))]);
     if (typeof result.ok !== 'boolean' || !['DISPATCHED', 'STALE_VIEW', 'BRIDGE_ERROR', 'EXPIRED', 'OUT_OF_SCOPE', 'ALREADY_DISPATCHED'].includes(result.code)) fail('INVALID_RESULT', 'Bridge results must use the minimal result contract.');
+    if (Object.hasOwn(result, 'execution_error') && (result.ok || result.code !== 'BRIDGE_ERROR' || !executionErrors.includes(result.execution_error))) fail('INVALID_RESULT', 'Invalid execution diagnostic.');
     const item = await this.get(id);
     if (item.status !== 'executing' || result.command_id !== item.pending?.id) fail('STALE_COMMAND', 'This command is no longer pending.', 409);
     if (result.ok && !['DISPATCHED', 'ALREADY_DISPATCHED'].includes(result.code)) fail('INVALID_RESULT', 'The bridge result is inconsistent.');
     if (result.ok && item.pending.action.type === 'fill') item.fills[item.pending.action.ref] = item.pending.action.value;
     if (item.pending.action.type !== 'fill') { delete item.view; delete item.view_digest; item.fills = {}; if (item.task.purpose_guard) item.runtime = {state: 'starting', code: null, updated_at: this.now()}; }
-    item.last_command = {id: result.command_id, status: result.ok ? 'dispatched' : 'failed', code: result.code, site_outcome: 'unverified'};
+    item.last_command = {id: result.command_id, status: result.ok ? 'dispatched' : 'failed', code: result.code, site_outcome: 'unverified', ...(result.execution_error ? {execution_error: result.execution_error} : {})};
     item.history.push({id: result.command_id, type: item.pending.action.type, at: this.now(), code: result.code});
     item.status = 'active'; delete item.pending; delete item.action_challenge; delete item.action_receipt;
     await this.save(item); return this.public(item);
