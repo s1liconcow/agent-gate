@@ -2,6 +2,8 @@
 
 Historical research record. Commands and API descriptions below refer to the pre-flow implementation preserved in Git history at `18bf0c8`. Current operation and verification use [BASIC_BROWSER_FLOW.md](BASIC_BROWSER_FLOW.md) and [SETUP.md](SETUP.md).
 
+This trial covered Llama and Qwen. The October 12 [Clef and Clef-flash evaluation](CLEF_EVAL.md) records the decision-model comparison.
+
 Run on 2026-10-05 with synthetic AgentGate fixtures only. No browser profile, real inbox content or local API credential was used. Cloudflare's connected API ran the models on the account available to this workspace.
 
 ## Decision

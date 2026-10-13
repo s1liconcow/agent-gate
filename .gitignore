@@ -23,6 +23,7 @@ playwright-report/
 /data/evaluation/*
 !/data/evaluation/fixtures/
 !/data/evaluation/purpose-browser-v12.json
+!/data/evaluation/clef-v1.json
 datasets/
 models/
 checkpoints/
