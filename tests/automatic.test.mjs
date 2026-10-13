@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {AutomaticBrowser} from '../extension/automatic.mjs';
+import {fixture as sessionFixture, origin as shopOrigin, ref as cartRef, observation} from './flow/fixture.mjs';
 const id='a'.repeat(32), ref='b'.repeat(32);
 const item={id,status:'active',scope:{goal:'Summarize my Gmail inbox.',origins:['https://mail.google.com'],permissions:['read','click'],ttl_seconds:300,disclosure:'local_planner'}};
 function fixture({toolbar=false,changed=false,loading=false,unrelated=false}={}) {
@@ -55,4 +56,18 @@ test('planning heartbeat reports phase/version and stops when publication finish
  const operation=f.browser.tick();await ready;context.mock.timers.tick(10000);await f.browser.runtimeQueue;
  assert.deepEqual(f.calls.at(-1).input,{state:'planning',code:null,phase:'text_verification',extension_version:'0.5.3'});
  finish({ids:[ref]});await operation;assert.equal(f.calls.at(-1).input.state,'ready');const before=f.calls.length;context.mock.timers.tick(10000);await f.browser.runtimeQueue;assert.equal(f.calls.length,before);
+});
+test('audit cart cleanup permits a native form button through the extension and coordinator',async()=>{
+ const f=await sessionFixture(),created=await f.engine.create({...f.request,goal:'Clear the Amazon shopping cart.'},'cli',null,f.guard.browser_id,{guard:f.guard,execution:'local'}),sessionId=created.id;
+ await f.engine.publishView(sessionId,{origin:shopOrigin,text:'Shopping cart',controls:[{ref:cartRef,role:'button',label:'Delete Sensodyne Fresh Mint Sensitive Toothpaste, 4 Ounces (Pack of 2)',approval:'per_action'}]});
+ const current=await f.engine.get(sessionId);
+ await f.engine.propose(sessionId,{action:{type:'click',ref:cartRef},view_digest:current.view_digest,idempotency_key:'cart-cleanup-001'});
+ const pending=await f.engine.get(sessionId),data={automation:{enabled:true},bindings:{[sessionId]:{view:pending.view,view_digest:pending.view_digest,fills:{},submit_refs:[cartRef]}}};
+ const api={storage:{local:{get:async()=>data},session:{get:async()=>data,set:async value=>Object.assign(data,value)}}};
+ const browser=new AutomaticBrowser({api,config:async()=>({phone_key:f.phone.public_key}),verifySession:async()=>{},model:async()=>({...observation,decision:'deny'}),call:async(path,input)=>{assert.equal(path,'sessions/'+sessionId+'/check');return f.engine.checkAction(sessionId,input);}});
+ await browser.check({session_id:sessionId,scope:pending.task,command:pending.pending});
+ assert.equal((await f.engine.get(sessionId)).status,'executing');
+ assert.equal(data.guarded[pending.pending.id].decision,'allow');
+ assert.equal((await f.engine.commands()).length,1);
+ assert.equal((await f.engine.get(sessionId)).history.at(-1).hard_boundary,false);
 });
