@@ -31,7 +31,8 @@
     "test:invites": "npm run build && node --test tests/invites.test.mjs && node tests/invites-browser.mjs",
     "deploy:release": "node scripts/deploy-release.mjs",
     "test:e2e": "npm run demo:flow",
-    "test:extension": "npm run build && node tests/extension-disconnect-browser.mjs"
+    "test:extension": "npm run build && node tests/extension-disconnect-browser.mjs",
+    "test:control-capture": "npm run build && node tests/control-capture-browser.mjs"
   },
   "dependencies": {
     "@block65/webcrypto-web-push": "2.0.0",

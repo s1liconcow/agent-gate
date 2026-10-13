@@ -1,6 +1,6 @@
 // Runs in Chrome's isolated extension world. The web page cannot access the reference map.
 (() => {
-  const version = '0.7.0-purpose-5-draft-1-checkout-1-heading-1';
+  const version = '0.7.0-purpose-5-draft-1-checkout-1-heading-1-controls-1';
   if (globalThis.__agentgateReader?.version === version) return;
   globalThis.__agentgateReader?.dispose?.();
   let references = new Map(), capturedAt = 0, captureId;
@@ -10,10 +10,12 @@
   const labelledBy = node => (node.getAttribute('aria-labelledby') || '').trim().split(/\s+/).map(id => {
     const target = document.getElementById(id); return target ? renderedText(target) : '';
   }).filter(Boolean).join(' ');
-  const label = node => (node.labels?.[0] && renderedText(node.labels[0]) || node.getAttribute('aria-label') || labelledBy(node) || (node.isContentEditable ? '' : renderedText(node)) || node.getAttribute('placeholder') || node.getAttribute('name') || '').trim().slice(0, 200);
+  const inputButton = node => node.tagName === 'INPUT' && ['button', 'submit', 'reset', 'image'].includes(node.type);
+  // Button values are visible captions; editable field values remain private.
+  const label = node => (node.labels?.[0] && renderedText(node.labels[0]) || node.getAttribute('aria-label') || labelledBy(node) || (inputButton(node) ? node.type === 'image' ? node.alt : node.value : node.isContentEditable ? '' : renderedText(node)) || node.getAttribute('placeholder') || node.getAttribute('name') || '').trim().slice(0, 200);
   const visible = node => node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden' && getComputedStyle(node).display !== 'none';
-  const pendingCheckout = node => node.tagName === 'BUTTON' && /^(?:place (?:your )?order|submit order|buy now|pay(?: now|\s+\$)|complete (?:purchase|order)|confirm (?:purchase|order))/i.test(label(node));
-  const allowedField = node => (['INPUT', 'TEXTAREA'].includes(node.tagName) || node.isContentEditable && node.getAttribute('role') === 'textbox') && !['password', 'hidden', 'file', 'submit', 'button', 'checkbox', 'radio'].includes(node.type) && !/(?:password|one-time-code|username|cc-|webauthn)/i.test(node.autocomplete || '') && !/(?:password|passcode|\botp\b|security code|\bpin\b|\b(?:cvv|cvc|card number|credit card|cardholder|expiration|expiry)\b)/i.test(label(node));
+  const pendingCheckout = node => (node.tagName === 'BUTTON' || inputButton(node)) && /^(?:place (?:your )?order|submit order|buy now|pay(?: now|\s+\$)|complete (?:purchase|order)|confirm (?:purchase|order))/i.test(label(node));
+  const allowedField = node => (['INPUT', 'TEXTAREA'].includes(node.tagName) || node.isContentEditable && node.getAttribute('role') === 'textbox') && !inputButton(node) && !['password', 'hidden', 'file', 'checkbox', 'radio'].includes(node.type) && !/(?:password|one-time-code|username|cc-|webauthn)/i.test(node.autocomplete || '') && !/(?:password|passcode|\botp\b|security code|\bpin\b|\b(?:cvv|cvc|card number|credit card|cardholder|expiration|expiry)\b)/i.test(label(node));
   const fingerprint = node => JSON.stringify([node.tagName, node.type, node.id, node.name, node.getAttribute('href'), node.getAttribute('target'), node.getAttribute('role'), node.isContentEditable, node.readOnly, node.autocomplete, label(node)]);
   const context = (node, complete = false) => {
     // Purpose reads cannot authorize a prefix of an oversized heading. Other
@@ -141,22 +143,22 @@
         const main = document.querySelector('[role="main"],main');
         // Dense message lists previously exhausted all 72 slots before sidebar
         // Compose or floating editor controls outside main could be considered.
-        // Reserve the bounded capture for fields and dialog/navigation affordances
-        // first. Ordering is discovery only; no candidate is thereby authorized.
+        // Reserve the bounded capture for fields, dialog and native form buttons
+        // before global navigation/help. Ordering does not authorize a candidate.
         const priority = node => {
           const dialog = node.closest('[role="dialog"],[role="alertdialog"]');
           if (allowedField(node)) return dialog ? 0 : 1;
-          if (dialog) return 2;
+          if (dialog || node.form && (node.tagName === 'BUTTON' || inputButton(node))) return 2;
           if (node.closest('[role="row"],tr' + (gmail ? ',.zA' : ''))) return 4;
           return 3;
         };
         const candidates = [...document.querySelectorAll(selector)].filter(node => visible(node) && (!node.disabled || pendingCheckout(node)) && !node.readOnly).sort((a, b) => priority(a) - priority(b));
         for (const node of candidates) {
           if (controls.length >= 72) break;
-          if (!visible(node) || node.disabled && !pendingCheckout(node) || node.readOnly || (!allowedField(node) && !['BUTTON', 'A'].includes(node.tagName) && !['button', 'link', 'row'].includes(node.getAttribute('role')) && !(gmail && node.matches('tr.zA')))) continue;
+          if (!visible(node) || node.disabled && !pendingCheckout(node) || node.readOnly || (!allowedField(node) && !inputButton(node) && !['BUTTON', 'A'].includes(node.tagName) && !['button', 'link', 'row'].includes(node.getAttribute('role')) && !(gmail && node.matches('tr.zA')))) continue;
           const name = label(node); if (!name || /(?:password|passcode|\botp\b|sign in|log in)/i.test(name)) continue;
           const ref = crypto.randomUUID().replaceAll('-', ''), role = allowedField(node) ? 'field' : node.tagName === 'A' ? 'link' : 'button';
-          references.set(ref, {node, fingerprint: JSON.stringify([fingerprint(node), context(node)]), role}); controls.push({ref, role, label: name, context: context(node), submit: Boolean(node.form && node.type === 'submit')});
+          references.set(ref, {node, fingerprint: JSON.stringify([fingerprint(node), context(node)]), role}); controls.push({ref, role, label: name, context: context(node), submit: Boolean(node.form && ['submit', 'image'].includes(node.type))});
         }
         const blocks = [], covered = [], texts = new Set(); let total = 0;
         const blockSelector = 'h1,h2,h3,p,li,dt,dd,td,th,[role="status"],[role="heading"],[role="listitem"],div,span';
