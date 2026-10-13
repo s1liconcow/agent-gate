@@ -21,6 +21,7 @@ import {cloudflareBrowserFactory} from './hosted-cloudflare.mjs';
 import {HostedState} from './hosted-state.mjs';
 import {accountProfile, readAccountProfile, isAdminAccount} from './account-profile.mjs';
 import {requireAdmin, adminPageQuery, adminAccountPage, accountAdminSummary} from './admin.mjs';
+import {invitePageQuery, validInviteId} from './invites.mjs';
 import {hostedAsset} from './hosted-assets.mjs';
 import {hostedModel, hostedScripts} from './generated-hosted.mjs';
 import {LoginSync} from './login-sync.mjs';
@@ -177,6 +178,29 @@ export class Gate extends DurableObject {
     await this.auth(request, 'owner');
     return json({admin_account_id: account, ...page, cloud_capacity: {limits, history}, observed_at: Date.now()});
   }
+  async adminInvites(request) {
+    await this.auth(request, 'owner');
+    const account = await this.ctx.storage.get('account_id') || 'owner';
+    requireAdmin(account, this.env.ADMIN_ACCOUNT_ID);
+    const url = new URL(request.url), registry = this.env.REGISTRY.getByName('beta-registry-v1');
+    let answer;
+    if (url.pathname === '/api/owner/admin/invites') {
+      if (request.method === 'GET') answer = await registry.listInvites(invitePageQuery(url.searchParams));
+      else if (request.method === 'POST') {
+        if (url.search) fail('INVALID_REQUEST', 'Invitation creation does not accept query parameters.');
+        answer = await registry.createInvite(await body(request), account);
+        if (answer.token) { answer.invite_url = url.origin + '/join.html#invite=' + answer.token; delete answer.token; }
+      } else return new Response('Use GET or POST for invitations.', {status: 405, headers: {Allow: 'GET, POST'}});
+    } else {
+      const id = url.pathname.slice('/api/owner/admin/invites/'.length).replace(/\/revoke$/, '');
+      if (!url.pathname.endsWith('/revoke') || !validInviteId(id)) fail('NOT_FOUND', 'Unknown invitation endpoint.', 404);
+      if (request.method !== 'POST') return new Response('Use POST to revoke an invitation.', {status: 405, headers: {Allow: 'POST'}});
+      if (url.search) fail('INVALID_REQUEST', 'Invitation revocation does not accept query parameters.');
+      exact(await body(request), []); answer = await registry.revokeInvite(id);
+    }
+    if (answer.error) return json(answer, answer.error.status);
+    return json({admin_account_id: account, ...answer}, request.method === 'POST' && url.pathname === '/api/owner/admin/invites' ? 201 : 200);
+  }
   async locked(callback) {
     return this.ctx.blockConcurrencyWhile(async () => { try { return {result: await callback()}; } catch (error) { return {error: apiFailure(error)}; } });
   }
@@ -287,6 +311,7 @@ export class Gate extends DurableObject {
         if (request.method !== 'GET') return new Response('Use GET for account administration.', {status: 405, headers: {Allow: 'GET'}});
         return await this.adminAccounts(request);
       }
+      if (path === '/api/owner/admin/invites' || path.startsWith('/api/owner/admin/invites/')) return await this.adminInvites(request);
       if (path === '/api/owner/profile' && ['GET', 'POST'].includes(request.method)) return await this.ownerProfile(request);
       // Browser work must acquire the hosted queue before the short Gate lock.
       // Waiting for that queue while holding blockConcurrencyWhile deadlocks ticks.

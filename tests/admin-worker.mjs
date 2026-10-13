@@ -3,7 +3,10 @@ import production, {Gate as ProductionGate, Registry as ProductionRegistry} from
 import {digest} from '../shared/protocol.mjs';
 import {HostedState} from '../src/hosted-state.mjs';
 export class Registry extends ProductionRegistry {
-  async seed(ids) {await this.ctx.storage.put(Object.fromEntries(ids.map(id => ['account:' + id, true])));}
+  async seed(ids) {await this.ctx.storage.put({count: ids.length, ...Object.fromEntries(ids.map(id => ['account:' + id, true]))});}
+  async records() {return [...await this.ctx.storage.list()];}
+  async capacity(count) {await this.ctx.storage.put('count', count);}
+  async expireInvite(id) {const key = 'invite:' + id, item = await this.ctx.storage.get(key); await this.ctx.storage.put(key, {...item, expires_at: Date.now() - 1});}
 }
 export class Gate extends ProductionGate {
   async seed({id, token, profile, browsers = [], cloud, sessions = []}) {
@@ -32,6 +35,9 @@ export default {async fetch(request, env, ctx) {
       const id = url.searchParams.get('account') || 'owner';
       return Response.json(await env.GATE.getByName(id === 'owner' ? 'single-owner-v1' : 'account:' + id).records());
     }
+    if (url.pathname === '/_admin-test/registry' && request.method === 'GET') return Response.json(await env.REGISTRY.getByName('beta-registry-v1').records());
+    if (url.pathname === '/_admin-test/capacity' && request.method === 'POST') {await env.REGISTRY.getByName('beta-registry-v1').capacity((await request.json()).count); return Response.json({ok: true});}
+    if (url.pathname === '/_admin-test/expire-invite' && request.method === 'POST') {await env.REGISTRY.getByName('beta-registry-v1').expireInvite((await request.json()).id); return Response.json({ok: true});}
     return new Response('Not found', {status: 404});
   }
   return production.fetch(request, env, ctx);

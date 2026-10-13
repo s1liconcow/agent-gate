@@ -1,9 +1,10 @@
 import {existingOwnerSession, pageAccount, accountBase} from './owner-session.mjs';
+import {InvitePanel} from './admin-invites.mjs';
 const $ = id => document.getElementById(id), account = pageAccount(location.pathname);
 $('home').href = accountBase(account) + '/'; $('profileLink').href = accountBase(account) + '/account.html';
 const el = (tag, text, className) => { const node = document.createElement(tag); if (text !== undefined) node.textContent = String(text); if (className) node.className = className; return node; };
 const date = value => Number.isSafeInteger(value) ? new Date(value).toLocaleString() : 'No activity recorded';
-let api, data, loading = false, cursors = [null], page = 0, capacity;
+let api, data, loading = false, cursors = [null], page = 0, capacity, invitePanel;
 function browserDetails(items) {
   const details = el('details'), list = el('ul'); details.append(el('summary', 'View browsers'));
   for (const item of items) { const row = el('li', item.name); row.append(el('span', item.id), el('span', item.kind === 'cloud' ? 'Cloud · ' + (item.authorized ? 'Enabled' : item.status) : (item.connected ? 'Online' : item.authorized ? 'Offline' : item.status))); list.append(row); }
@@ -50,6 +51,7 @@ async function refresh(reset = false) {
     $('history').textContent = history ? Math.round(history.browser_lifetime_today_ms / 60000) + ' browser minutes today (UTC), across ' + history.sample_sessions + ' sessions in the provider’s recent sample.' : 'No provider history available.';
     $('updated').textContent = 'Updated ' + date(data.observed_at); $('pageLabel').textContent = 'Page ' + (page + 1);
     $('dashboard').hidden = false; $('status').textContent = ''; renderAccounts();
+    invitePanel ||= new InvitePanel(api); await invitePanel.refresh();
   } catch (error) { $('dashboard').hidden = true; $('status').textContent = error.message; }
   finally {loading = false; $('refresh').disabled = false; $('next').disabled = !data?.next_cursor; $('previous').disabled = page === 0;}
 }

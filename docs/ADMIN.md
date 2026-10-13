@@ -8,6 +8,16 @@ Inspection opens no cloud browser and changes no consent, policy, browser state 
 
 `/account.html` lets an authenticated owner set an account name and optional contact email. Owner-entered emails are explicitly unverified and do not change identity or permissions. Account IDs remain stable.
 
+## Invite links
+
+In **Invite new users**, enter an optional label, choose an expiry (1, 7 or 30 days), and click **Create invite link**. Copy the link before leaving the page; it is shown once. Share it with the new user. The list shows pending, used, expired and revoked invitations. **Revoke** immediately disables a pending link.
+
+The recipient opens the link in desktop Chrome and clicks **Create my space**. AgentGate creates a separate private account and opens setup for pairing the approval phone, Chrome extension and assistant. Opening or previewing the link does not consume it. Each link enrolls one account; concurrent redemption allows one enrollment. Expiry and the existing `BETA_MAX_USERS` limit are enforced during enrollment. A full beta leaves the invitation unused.
+
+Invite creation, listing and revocation require the designated administrator's owner credential. The registry stores a hash of each invite token. Links carry the token in a URL fragment, which the join page removes from browser history. Account registration and invitation consumption are saved together. Existing `BETA_INVITE_TOKEN` links remain supported under the existing account limit.
+
+The owner API exposes `GET`/`POST /api/owner/admin/invites` and `POST /api/owner/admin/invites/:id/revoke`. List responses contain metadata and an opaque `next_cursor`; they contain no invite or pairing tokens. Creation accepts `{label, expires_in_days}` and returns `{invite, invite_url}`. New links use the existing registry and require no new bindings, secrets or migration.
+
 ## OpenAI email
 
 The MCP OAuth client authorizes AgentGate's scopes. Adding `email` to those scopes does not request the user's OpenAI email. OpenAI documents a separate [Sign in with ChatGPT flow](https://developers.openai.com/siwc/chatgpt-plugin) using `openid profile email`, a registered OpenAI client ID and callback, independent PKCE/state/nonce, and verified OpenAI ID tokens. The integration is currently a limited trial for selected partners.
@@ -16,7 +26,7 @@ No OpenAI client credentials or additional MCP scopes are created here. `login_h
 
 ## Release
 
-Run `npm run check` and `npm run test:admin`. The admin test exercises real local Worker routing and Durable Object RPC, denial of other account/assistant credentials, read-only inspection, profile field validation and desktop/mobile browser rendering. Test credentials and accounts stay in a temporary local instance.
+Run `npm run check`, `npm run test:admin` and `npm run test:invites`. The admin test exercises real local Worker routing and Durable Object RPC, denial of other account/assistant credentials, read-only inspection, profile field validation and desktop/mobile browser rendering. The invite test covers creation, revocation, expiry, concurrent redemption, account pairing and the signup browser flow. Test credentials and accounts stay in a temporary local instance.
 
 Deploy this code and the approved `ADMIN_ACCOUNT_ID=owner` designation to the existing Worker while retaining its bindings, secrets, namespaces, data, security settings and signed engagement. No Durable Object migration is needed. The original owner must already be authenticated in the browser used to open the admin page.
 
