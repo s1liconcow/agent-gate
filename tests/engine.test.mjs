@@ -10,12 +10,12 @@ for(const route of ['local','cloud'])for(const backend of ['chrome_ai','onnx'])f
  assert.equal((await f.engine.commands()).length,1);await f.engine.result(f.id,{command_id:(await f.engine.get(f.id)).pending.id,ok:true,code:'DISPATCHED'});
  assert.equal((await f.engine.get(f.id)).last_command.status,'dispatched');await f.engine.end(f.id,'closed');assert.equal(f.engine.public(await f.engine.get(f.id)).view,undefined);
 });
-for(const mode of ['AUDIT_ONLY','AUTO_APPROVE','AGGRESSIVE'])test(`${mode} cart removal follows the classifier engagement setting`,async()=>{
+for(const mode of ['AUDIT_ONLY','AUTO_APPROVE','AGGRESSIVE'])for(const decision of ['allow','deny'])test(`${mode} blocks Delete controls with classifier ${decision}`,async()=>{
  const f=await fixture(mode);if(mode!=='AUDIT_ONLY')await f.approve();
  await f.publish('Delete Sensodyne Fresh Mint Sensitive Toothpaste, 4 Ounces (Pack of 2)');await f.propose();
- const checked=await f.check({...observation,decision:'deny'}),audit=mode==='AUDIT_ONLY';
- assert.equal(checked.status,audit?'executing':'active');assert.equal((await f.engine.commands()).length,audit?1:0);
- assert.deepEqual(checked.observations.at(-1),{type:'action_check',at:f.now(),mode,decision:'deny',confidence:1,hard_boundary:false,applied:audit?'allow':'deny'});
+ const checked=await f.check({...observation,decision});
+ assert.equal(checked.status,'active');assert.equal((await f.engine.commands()).length,0);
+ assert.deepEqual(checked.observations.at(-1),{type:'action_check',at:f.now(),mode,decision,confidence:1,hard_boundary:true,applied:'deny'});
 });
 for(const mode of ['AUDIT_ONLY','AUTO_APPROVE','AGGRESSIVE'])test(`${mode} preserves hard origin/credential/final-action boundaries`,async()=>{
  const f=await fixture(mode);if(mode!=='AUDIT_ONLY')await f.approve();await f.publish('Place order');

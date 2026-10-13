@@ -14,7 +14,7 @@ The owner engagement mode governs classifier output across both Chrome AI and ON
 
 Chrome AI uses two fresh action/purchase judgments. ONNX supplies evidence-relevance probability; its action-effect accuracy remains unverified. Neither score establishes safety. Audit inference has a one-second local bound and records unavailability rather than waiting on semantic inference. Audit disclosure still passes the deterministic sanitizer, bounded source-ID selection, source freshness and privacy exclusions; named-author tasks cannot trust a sender name embedded in body text. Expiry, revocation, origins, permissions, pinned device/backend, credentials, operation budgets and direct final-commitment protections remain hard boundaries in every mode. No classifier fallback or permission change is introduced.
 
-These contracts cover bounded PA evidence and preparation, including tested calendar evidence and unsent draft fields. Delete controls follow the saved engagement setting. Cart-removal form buttons follow that setting when the signed goal requests cart cleanup; other form submissions keep their direct commitment boundary. These contracts do not give either model general authority to send, publish, transfer money or perform other commitments. Consequential actions retain their dedicated owner approval paths.
+These contracts cover bounded PA evidence and preparation, including tested calendar evidence and unsent draft fields. Delete controls and form submissions remain hard boundaries in every engagement mode, including cart cleanup. These contracts do not give either model general authority to send, publish, transfer money or perform other commitments. Consequential actions retain their dedicated owner approval paths.
 
 ## Full-cart checkout
 
