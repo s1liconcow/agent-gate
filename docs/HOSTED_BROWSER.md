@@ -31,12 +31,18 @@ rate-limit response. Cleanup closes owned browser processes, recovers interrupte
 acquisitions and respects backoff. An expired or disconnected local classifier
 revokes tasks on both executor routes.
 
+The cloud CDP connection and isolated reader stay attached between task actions.
+Idle expiry and revocation close the owned process. After transport loss or Worker
+reconstruction, old view bindings are discarded and the task must capture new refs;
+staged fills end the task, and interrupted dispatches remain uncertain.
+
 Cloud command failures include a bounded `last_command.execution_error` identifier
 without website text or credentials. Login-state saves and connection teardown
 have time limits so an unresponsive browser cannot hold the task queue indefinitely.
 
 ```sh
 node --test tests/hosted-browser-factory.test.mjs tests/hosted-browser-limits.test.mjs tests/hosted-browser-lifecycle.test.mjs tests/mcp-discovery.test.mjs
+npm run test:hosted-controls
 npm run demo:flow
 npm run test:extension
 ```

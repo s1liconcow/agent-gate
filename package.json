@@ -32,6 +32,7 @@
     "deploy:release": "node scripts/deploy-release.mjs",
     "test:e2e": "npm run demo:flow",
     "test:extension": "npm run build && node tests/extension-disconnect-browser.mjs",
+    "test:hosted-controls": "node tests/hosted-controls-browser.mjs",
     "test:control-capture": "npm run build && node tests/control-capture-browser.mjs"
   },
   "dependencies": {

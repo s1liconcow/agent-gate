@@ -29,9 +29,9 @@ test('an already-deployed matching release causes no writes', async () => {
 });
 test('an interrupted upload is inspected and reused without a duplicate upload', async () => {
   let uploads = 0, deployments = 0, inspections = 0;
-  const client = {request: async (method, resource) => {
+  const client = {request: async (method, resource, body) => {
     if (method === 'POST' && resource.startsWith('versions')) {uploads++;throw Error('network interruption');}
-    if (method === 'POST') {deployments++;return {id: 'live'};}
+    if (method === 'POST') {assert.deepEqual(body.code_update_strategy, {mode: 'immediate'}); deployments++;return {id: 'live'};}
     if (resource === 'settings') return uploads ? approved : settings;
     if (resource.startsWith('versions')) {inspections++;return {items: uploads ? [matching] : []};}
     return {deployments: [deployments ? {id: 'live', versions: [{version_id: matching.id, percentage: 100}]} : active]};

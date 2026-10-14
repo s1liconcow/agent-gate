@@ -37,32 +37,44 @@ export class HostedBrowser {
     const config = await this.config(), store = new HostedState(this.storage, config.account_id, config.browser_id);
     const saved = await store.get('connection');
     if (saved && (saved.account_id !== config.account_id || saved.browser_id !== config.browser_id)) throw new Error('Browser ownership changed.');
-    const {browser, sessionId, fresh} = await this.openConnection(store, saved?.sessionId, sessionId => store.put('connection', {account_id: config.account_id, browser_id: config.browser_id, sessionId, anchor: null, last_activity_at: this.now()}));
+    let retained = this.connection;
+    if (retained && (retained.connection.account_id !== config.account_id || retained.connection.browser_id !== config.browser_id || retained.connection.sessionId !== saved?.sessionId || retained.browser.isConnected?.() === false)) {
+      await this.disconnect(); retained = null;
+    }
+    let browser = retained?.browser;
     try {
       await this.config(config);
-      let context, recovered = false;
-      if (!fresh && saved?.anchor) {
-        for (const candidate of browser.contexts()) for (const page of candidate.pages()) {
-          const cdp = await candidate.newCDPSession(page);
-          try { if ((await cdp.send('Target.getTargetInfo')).targetInfo.targetId === saved.anchor) {context = candidate; recovered = true;} }
-          finally { await cdp.detach(); }
+      if (!retained) {
+        const opened = await this.openConnection(store, saved?.sessionId, sessionId => store.put('connection', {account_id: config.account_id, browser_id: config.browser_id, sessionId, anchor: null, last_activity_at: this.now()}));
+        browser = opened.browser;
+        await this.config(config);
+        let context, recovered = false;
+        if (!opened.fresh && saved?.anchor) {
+          for (const candidate of browser.contexts()) for (const page of candidate.pages()) {
+            const cdp = await candidate.newCDPSession(page);
+            try { if ((await cdp.send('Target.getTargetInfo')).targetInfo.targetId === saved.anchor) {context = candidate; recovered = true;} }
+            finally { await cdp.detach(); }
+          }
         }
-      }
-      if (!context) {
-        // This entire Browser Run process belongs to one account. Its default
-        // context survives CDP disconnects; incognito contexts do not.
-        context = browser.contexts()[0];
-        if (!context) throw new Error('Persistent browser context unavailable.');
+        if (!context) {
+          context = browser.contexts()[0];
+          if (!context) throw new Error('Persistent browser context unavailable.');
+          await store.delete('session:agent_tabs');
+        }
+        // Cloudflare's CDP disconnect discards the isolated reader world. A new
+        // transport must recapture authority; it cannot restore old DOM refs.
         await this.reset(); this.privateSession.clear();
-        for (const name of ['agent_tabs', 'bindings', 'guarded']) await store.delete('session:' + name);
+        for (const name of ['bindings', 'guarded']) await store.delete('session:' + name);
+        const modelUrl = new URL('/hosted-inference.html?model=' + config.model, config.coordinator).href;
+        const adapter = new HostedAdapter(browser, context, {scripts: this.scripts, modelUrl, store});
+        if (!recovered) await adapter.restore(await store.get('login'));
+        await adapter.recover();
+        if (!adapter.modelPage) { adapter.modelPage = await context.newPage(); await adapter.modelPage.goto(modelUrl, {waitUntil: 'domcontentloaded'}); }
+        const anchor = await adapter.target(adapter.modelPage);
+        const connection = {account_id: config.account_id, browser_id: config.browser_id, sessionId: opened.sessionId, anchor};
+        retained = this.connection = {browser, adapter, connection};
       }
-      const modelUrl = new URL('/hosted-inference.html?model=' + config.model, config.coordinator).href;
-      const adapter = new HostedAdapter(browser, context, {scripts: this.scripts, modelUrl, store});
-      if (!recovered) await adapter.restore(await store.get('login'));
-      await adapter.recover();
-      if (!adapter.modelPage) { adapter.modelPage = await context.newPage(); await adapter.modelPage.goto(modelUrl, {waitUntil: 'domcontentloaded'}); }
-      const anchor = await adapter.target(adapter.modelPage);
-      const connection = {account_id: config.account_id, browser_id: config.browser_id, sessionId, anchor};
+      const {adapter, connection} = retained;
       await store.put('connection', {...connection, last_activity_at: this.now()});
       const api = hostedAPI(adapter, store, this.privateSession);
       const settings = async () => await store.get('local:inference_settings') || {profile: config.inference, api_key: ''};
@@ -98,12 +110,32 @@ export class HostedBrowser {
         await store.put('connection', {...connection, last_activity_at: this.now()});
       }
       return answer;
-    } finally { await deadline(() => browser.close(), this.disconnectMilliseconds, 'BROWSER_UNRESPONSIVE').catch(() => {}); }
+    } catch (error) {
+      if (this.connection?.browser === browser) await this.disconnect();
+      else if (browser) await deadline(() => browser.close(), this.disconnectMilliseconds, 'BROWSER_UNRESPONSIVE').catch(() => {});
+      throw error;
+    }
+  }
+  async disconnect() {
+    const retained = this.connection; this.connection = null;
+    if (retained) await deadline(() => retained.browser.close(), this.disconnectMilliseconds, 'BROWSER_UNRESPONSIVE').catch(() => {});
+  }
+  async closeOwned(id, beforeClose = async () => {}) {
+    const retained = this.connection;
+    if (!retained || retained.connection.sessionId !== id || retained.browser.isConnected?.() === false) {
+      if (retained?.connection.sessionId === id) await this.disconnect();
+      return this.factory.close(id, beforeClose);
+    }
+    try { await beforeClose(retained.browser); }
+    finally {
+      try { await deadline(async () => (await retained.browser.newBrowserCDPSession()).send('Browser.close'), this.disconnectMilliseconds, 'BROWSER_UNRESPONSIVE'); }
+      finally { await this.disconnect(); }
+    }
   }
   tick() {
     return this.serial(async () => {
       await this.cleanup();
-      if (!await this.consent.current()) return;
+      if (!await this.consent.current()) { await this.disconnect(); return; }
       const state = await this.snapshot();
       const store = await this.store();
       const tasks = state.sessions.filter(session => !['closed', 'revoked', 'expired', 'requested'].includes(session.status));
@@ -117,7 +149,7 @@ export class HostedBrowser {
         if (viewUntil > this.now()) return;
         const saved = await store.get('connection');
         if (saved && (!tasks.length || !Number.isSafeInteger(saved.last_activity_at) || saved.last_activity_at + HOSTED_BROWSER_IDLE_MS <= this.now())) {
-          await this.factory.close(saved.sessionId, async browser => {
+          await this.closeOwned(saved.sessionId, async browser => {
             const context = browser.contexts()[0];
             if (context) await this.saveLogin(new HostedAdapter(browser, context, {scripts: this.scripts, store}), store);
           });
@@ -227,7 +259,7 @@ export class HostedBrowser {
       const cleanup = old ? {name: 'hosted:cleanup:' + crypto.randomUUID(), sessionId: old.sessionId} : null;
       await this.config(config);
       const result = await commit(config, prepared, cleanup);
-      this.privateSession.clear();
+      await this.disconnect(); this.privateSession.clear();
       return result;
     });
   }
@@ -272,7 +304,7 @@ export class HostedBrowser {
   async cleanup() {
     let failure;
     for (const [name, record] of await this.storage.list({prefix: 'hosted:cleanup:'})) {
-      try { await this.factory.close(record.sessionId); await this.storage.delete(name); }
+      try { await this.closeOwned(record.sessionId); await this.storage.delete(name); }
       catch (error) { failure ||= error; }
     }
     if (failure) throw failure;

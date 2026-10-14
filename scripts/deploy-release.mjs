@@ -93,7 +93,7 @@ export async function deployRelease({client, release, identity, source, baseline
   if (current.id !== release.rollback.deployment_id && !serves(current, version.id)) throw fail('DEPLOYMENT_BASELINE_CHANGED', 'Another deployment completed during upload. Inspect before continuing.');
   if (!serves(current, version.id)) {
     progress('Deploying the approved version at 100% traffic.');
-    try {await client.request('POST', 'deployments', {strategy: 'percentage', versions: [{version_id: version.id, percentage: 100}], annotations: {'workers/message': 'Deploy approved ' + release.commit + '; ADMIN_ACCOUNT_ID=owner; preserve resources and consent.'}});}
+    try {await client.request('POST', 'deployments', {strategy: 'percentage', code_update_strategy: {mode: 'immediate'}, versions: [{version_id: version.id, percentage: 100}], annotations: {'workers/message': 'Deploy approved ' + release.commit + '; ADMIN_ACCOUNT_ID=owner; preserve resources and consent.'}});}
     catch (error) {
       if (error.code === 'CLOUDFLARE_API_ERROR') throw error;
       let observed;try {observed = (await client.request('GET', 'deployments')).deployments[0];} catch { /* Preserve uncertain outcome. */ }

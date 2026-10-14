@@ -312,3 +312,33 @@ test('explicit daily quota and Retry-After prevent reconciliation lookups and ac
     assert.equal((await f.store.get('browser-retry')).retry_at, now + 900000);
   }
 });
+
+
+test('revoked consent disconnects the retained reader without opening a browser', async () => {
+  let disconnected = 0;
+  const f = fixture({open: () => assert.fail('Consent ended')});
+  f.hosted.connection = {connection: {...config, sessionId: 'owned'}, browser: {close: async () => {disconnected++;}}};
+  f.hosted.consent.current = async () => null;
+  await f.hosted.tick();
+  assert.equal(disconnected, 1); assert.equal(f.hosted.connection, null);
+});
+
+test('a hung checkpoint drops its transport and releases serialized work', async () => {
+  let disconnected = 0;
+  const f = fixture({open: () => assert.fail('The attached reader must be reused')});
+  const connection = {...config, sessionId: 'owned'};
+  await f.store.put('connection', connection);
+  f.hosted.loginCheckpointMilliseconds = 10;
+  f.hosted.connection = {connection, browser: {isConnected: () => true, close: async () => {disconnected++;}}, adapter: {loginState: () => new Promise(() => {})}};
+  const hung = f.hosted.serial(() => f.hosted.connected(async () => 'operation'));
+  const next = f.hosted.serial(() => 'released');
+  await assert.rejects(hung, {code: 'BROWSER_UNRESPONSIVE'});
+  assert.equal(await next, 'released'); assert.equal(disconnected, 1); assert.equal(f.hosted.connection, null);
+});
+
+test('a replacement browser discards the previous account transport before opening', async () => {
+  const events = [], f = fixture({open: async () => {events.push('open'); throw new Error('Capacity unavailable');}});
+  f.hosted.connection = {connection: {...config, browser_id: 'c'.repeat(32), sessionId: 'previous'}, browser: {close: async () => {events.push('disconnect');}}};
+  await assert.rejects(f.hosted.connected(async () => assert.fail('No browser was opened')), /Capacity unavailable/);
+  assert.deepEqual(events, ['disconnect', 'open']); assert.equal(f.hosted.connection, null);
+});
