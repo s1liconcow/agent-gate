@@ -32,6 +32,9 @@ acquisitions and respects backoff. An expired or disconnected local classifier
 revokes tasks on both executor routes.
 
 The cloud CDP connection and isolated reader stay attached between task actions.
+Messages reuse the exact execution context holding captured refs; creating a new
+named world cannot substitute for that context. Chrome context-destruction events
+invalidate it, and a fresh document must capture new refs.
 Idle expiry and revocation close the owned process. After transport loss or Worker
 reconstruction, old view bindings are discarded and the task must capture new refs;
 staged fills end the task, and interrupted dispatches remain uncertain.

@@ -61,8 +61,8 @@ export class HostedBrowser {
           if (!context) throw new Error('Persistent browser context unavailable.');
           await store.delete('session:agent_tabs');
         }
-        // Cloudflare's CDP disconnect discards the isolated reader world. A new
-        // transport must recapture authority; it cannot restore old DOM refs.
+        // A new transport must recapture authority; isolated reader contexts
+        // and their old DOM refs cannot be restored from saved profile state.
         await this.reset(); this.privateSession.clear();
         for (const name of ['bindings', 'guarded']) await store.delete('session:' + name);
         const modelUrl = new URL('/hosted-inference.html?model=' + config.model, config.coordinator).href;

@@ -18,6 +18,16 @@ const origin = 'https://shop.example.test', config = {account_id: 'a'.repeat(32)
 const storage = new Memory(), store = new HostedState(storage, config.account_id, config.browser_id);
 const browser = await chromium.launch({channel: 'chromium', headless: true});
 const context = await browser.newContext();
+// A world name does not authorize substituting a newly created context for the
+// one holding the captured DOM refs. Exercise fresh-world CDP creation in Chromium.
+const newCDPSession = context.newCDPSession.bind(context);
+let worldCreations = 0;
+context.newCDPSession = async (...args) => {
+  const cdp = await newCDPSession(...args), send = cdp.send.bind(cdp);
+  cdp.send = (method, parameters) => send(method, method === 'Page.createIsolatedWorld' ? {...parameters, worldName: parameters.worldName + '-' + ++worldCreations} : parameters);
+  return cdp;
+};
+
 let opens = 0, disconnects = 0, resets = 0, factoryCloses = 0, now = 100000, hosted;
 try {
   await context.route(config.coordinator + '/**', route => route.fulfill({contentType: 'text/html', body: '<title>Classifier anchor</title>'}));
@@ -51,7 +61,7 @@ try {
     await adapter.inject(tab.id, ['content.js']);
     assert.ok((await adapter.message(tab.id, {type: 'snapshot'})).blocks.some(b => b.text === 'Search results'));
   }));
-  assert.equal(opens, 1); assert.equal(disconnects, 0);
+  assert.equal(opens, 1); assert.equal(disconnects, 0); assert.equal(worldCreations, 2);
   await store.put('session:bindings', {task: {view_digest: 'old'}});
   await store.put('session:guarded', {task: {view_digest: 'old'}});
   await store.put('local:dispatches', {uncertain: {packet_digest: 'preserve'}});

@@ -48,22 +48,33 @@ export class HostedAdapter {
     // inspect the current origin and document readiness before capture.
     try { await page.goto(url, {waitUntil: 'domcontentloaded', timeout: 15000}); }
     catch (error) { if (error.name !== 'TimeoutError') throw fault('BROWSER_UNRESPONSIVE'); }
-    this.worlds.delete(id);
+    const world = this.worlds.get(id); if (world) world.executionContextId = null;
     return this.tab(id);
   }
   async world(id) {
-    const page = this.page(id), cached = this.worlds.get(id);
-    const cdp = cached?.cdp || await this.context.newCDPSession(page);
-    const {frameTree} = await cdp.send('Page.getFrameTree');
-    const {executionContextId} = await cdp.send('Page.createIsolatedWorld', {frameId: frameTree.frame.id, worldName: 'agentgate-hosted'});
-    this.worlds.set(id, {cdp, executionContextId});
-    return {cdp, executionContextId};
+    const page = this.page(id);
+    let world = this.worlds.get(id);
+    if (!world) {
+      const cdp = await this.context.newCDPSession(page);
+      world = {cdp, executionContextId: null}; this.worlds.set(id, world);
+      cdp.on('Runtime.executionContextDestroyed', ({executionContextId}) => { if (world.executionContextId === executionContextId) world.executionContextId = null; });
+      cdp.on('Runtime.executionContextsCleared', () => { world.executionContextId = null; });
+      await cdp.send('Runtime.enable');
+    }
+    if (world.executionContextId === null) {
+      const {frameTree} = await world.cdp.send('Page.getFrameTree');
+      // Names do not guarantee that createIsolatedWorld returns the same world.
+      // Captured refs belong to this exact context until Chrome destroys it.
+      const {executionContextId} = await world.cdp.send('Page.createIsolatedWorld', {frameId: frameTree.frame.id, worldName: 'agentgate-hosted'});
+      world.executionContextId = executionContextId;
+    }
+    return world;
   }
   async evaluate(id, expression) {
     const {cdp, executionContextId} = await this.world(id);
     let answer;
     try { answer = await deadline(() => cdp.send('Runtime.evaluate', {expression, contextId: executionContextId, returnByValue: true, awaitPromise: true}), 15000, 'BROWSER_UNRESPONSIVE'); }
-    catch { throw fault('BROWSER_UNRESPONSIVE', 'TRANSPORT_FAILED'); }
+    catch { this.worlds.delete(id); throw fault('BROWSER_UNRESPONSIVE', 'TRANSPORT_FAILED'); }
     if (answer.exceptionDetails) throw fault('BROWSER_UNRESPONSIVE', /Reader unavailable/.test(answer.exceptionDetails.exception?.description || '') ? 'READER_UNAVAILABLE' : 'EVALUATION_FAILED');
     return answer.result.value;
   }
