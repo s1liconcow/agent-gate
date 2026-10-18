@@ -5,6 +5,7 @@ import {cp, mkdtemp, mkdir, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
 import {chromium} from '@playwright/test';
+import {build} from 'esbuild';
 import {sealPairing} from '../shared/browser-pairing.mjs';
 import {owner, until, wait} from './flow/support.mjs';
 
@@ -12,7 +13,7 @@ const root = resolve(import.meta.dirname, '..'), temp = await mkdtemp(resolve(tm
 const extension = resolve(temp, 'extension'), profile = resolve(temp, 'profile');
 const listener = createServer(); await new Promise(resolve => listener.listen(0, '127.0.0.1', resolve));
 const port = listener.address().port; await new Promise(resolve => listener.close(resolve));
-const origin = 'http://127.0.0.1:' + port, pairingToken = crypto.randomUUID(), agentToken = crypto.randomUUID();
+const origin = 'http://127.0.0.1:' + port, pairingToken = crypto.randomUUID(), agentToken = crypto.randomUUID(), demoToken = crypto.randomUUID();
 const signer = await owner(), report = {worker: 'real local workerd', extension: 'production extension in temporary Chromium profile', checks: []};
 let runtime, context, worker, review, extensionId, ownerToken, workerLog = '';
 const errors = [], check = name => report.checks.push(name);
@@ -55,13 +56,38 @@ try {
   const manifest = JSON.parse(await readFile(resolve(extension, 'manifest.json'), 'utf8'));
   manifest.content_security_policy.extension_pages = manifest.content_security_policy.extension_pages.replace('ws://127.0.0.1:8788', 'ws://127.0.0.1:*');
   await writeFile(resolve(extension, 'manifest.json'), JSON.stringify(manifest));
-  runtime = spawn(process.execPath, [resolve(root, 'node_modules/wrangler/bin/wrangler.js'), 'dev', '--config', 'tests/flow/wrangler.jsonc', '--ip', '127.0.0.1', '--port', String(port), '--persist-to', resolve(temp, 'state'), '--var', 'PAIRING_TOKEN:' + pairingToken, '--var', 'AGENT_TOKEN:' + agentToken], {cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {...process.env, WRANGLER_SEND_METRICS: 'false', WRANGLER_LOG_PATH: resolve(temp, 'wrangler.log')}});
+  // Freeze the test deployment so concurrent edits cannot restart its sockets.
+  await cp(resolve(root, 'public'), resolve(temp, 'public'), {recursive: true});
+  await mkdir(resolve(temp, 'coordinator'));
+  await build({entryPoints: [resolve(root, 'tests/flow/worker.mjs')], bundle: true, format: 'esm', platform: 'browser', external: ['cloudflare:workers', 'node:*'], conditions: ['workerd', 'worker', 'browser'], outfile: resolve(temp, 'coordinator/worker.mjs'), logLevel: 'silent'});
+  const workerConfig = JSON.parse(await readFile(resolve(root, 'tests/flow/wrangler.jsonc'), 'utf8'));
+  workerConfig.main = 'worker.mjs'; workerConfig.assets.directory = '../public';
+  await writeFile(resolve(temp, 'coordinator/wrangler.json'), JSON.stringify(workerConfig));
+  runtime = spawn(process.execPath, [resolve(root, 'node_modules/wrangler/bin/wrangler.js'), 'dev', '--config', resolve(temp, 'coordinator/wrangler.json'), '--no-bundle', '--ip', '127.0.0.1', '--port', String(port), '--persist-to', resolve(temp, 'state'), '--var', 'PAIRING_TOKEN:' + pairingToken, '--var', 'AGENT_TOKEN:' + agentToken, '--var', 'DEMO_TOKEN:' + demoToken], {cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {...process.env, WRANGLER_SEND_METRICS: 'false', WRANGLER_LOG_PATH: resolve(temp, 'wrangler.log')}});
   runtime.stdout.on('data', chunk => workerLog += chunk); runtime.stderr.on('data', chunk => workerLog += chunk);
-  await until(async () => {try {return (await fetch(origin + '/api/health')).ok;} catch {if (runtime.exitCode !== null) throw new Error('Test Worker exited.'); return false;}}, 60000);
+  await until(async () => {try {return (await fetch(origin + '/api/health', {signal: AbortSignal.timeout(2000)})).ok;} catch {if (runtime.exitCode !== null) throw new Error('Test Worker exited.'); return false;}}, 60000);
   ownerToken = (await http('/api/pair', {pairing_token: pairingToken, public_key: signer.public_key})).owner_token;
+  const demo = async (path, data) => (await fetch(origin + '/_demo/hosted', {method: 'POST', headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + demoToken}, body: JSON.stringify({path, data})})).json();
+  const alarmState = async () => (await demo('alarm-status')).next_alarm;
+  assert.equal(await alarmState(), null, 'A paired idle account has no periodic alarm.');
   await launch();
   const unrelated = await context.newPage(); await unrelated.goto(origin + '/api/health');
   const id = await pair(); check('phone-approved QR pairing shows Disconnect');
+  assert.ok(await alarmState() > Date.now() + 86400000, 'An idle socket wakes only at its credential expiry.');
+  const snapshot = await http('/api/owner/state');
+  assert.deepEqual(snapshot.sessions, (await http('/api/owner/sessions')).sessions);
+  assert.deepEqual(snapshot.browser_state, await http('/api/owner/browsers'));
+  assert.equal(snapshot.hosted.enabled, true);
+  await worker.evaluate(() => {
+    const original = globalThis.fetch;
+    globalThis.idleRequests = [];
+    globalThis.fetch = (...args) => {globalThis.idleRequests.push(String(args[0])); return original(...args);};
+    chrome.alarms.create('agentgate-reconnect', {when: Date.now() + 250});
+    chrome.alarms.create('agentgate-recovery', {when: Date.now() + 500});
+  });
+  await wait(11000);
+  assert.deepEqual(await worker.evaluate(() => globalThis.idleRequests), []);
+  check('an idle connected extension handles recovery and housekeeping without HTTP polling');
   const task = await http('/api/agent/sessions', {goal: 'Read the synthetic local test page.', origins: [origin], start_url: origin, permissions: ['read'], ttl_seconds: 600, browser: 'local', classifier_backend: 'chrome_ai', classifier_browser_id: id}, true);
   const {sessions} = await http('/api/owner/sessions');
   await http('/api/owner/sessions/' + task.id + '/approve', await signer.sign(sessions.find(item => item.id === task.id).challenge));
@@ -72,7 +98,17 @@ try {
   await review.reload(); await disconnected();
   await context.close(); await launch(); await disconnected();
   check('disconnection persists across page reload and browser restart');
-  await pair(); check('a fresh phone-approved pairing connects again');
+  const reconnected = await pair(); check('a fresh phone-approved pairing connects again');
+  const expiring = await http('/api/agent/sessions', {goal: 'Read the synthetic local test page.', origins: [origin], start_url: origin, permissions: ['read'], ttl_seconds: 600, browser: 'local', classifier_backend: 'chrome_ai', classifier_browser_id: reconnected}, true);
+  const queued = (await http('/api/owner/sessions')).sessions.find(item => item.id === expiring.id);
+  await http('/api/owner/sessions/' + expiring.id + '/approve', await signer.sign(queued.challenge));
+  await until(async () => (await review.evaluate(() => chrome.runtime.sendMessage({type: 'sessions'}))).sessions.some(item => item.id === expiring.id));
+  const expiry = await demo('expire-session', {id: expiring.id});
+  assert.equal(await alarmState(), expiry.expires_at);
+  await until(async () => !(await review.evaluate(() => chrome.runtime.sendMessage({type: 'sessions'}))).sessions.some(item => item.id === expiring.id));
+  assert.equal((await http('/api/agent/sessions/' + expiring.id, undefined, true)).status, 'expired');
+  assert.ok(await alarmState() > Date.now() + 86400000);
+  check('the task expires and disappears through its scheduled alarm and push update without HTTP polling');
   await review.locator('#browserPairing').evaluate(node => node.open = true);
   await review.locator('#pair').click(); await review.locator('#pairingQR').waitFor({state: 'visible'});
   await worker.evaluate(() => {

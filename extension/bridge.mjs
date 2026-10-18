@@ -10,7 +10,7 @@ import {SessionRecordings} from './session-recording.mjs';
 import {PairedLocalClassifier} from './local-classifier.mjs';
 const ready = Promise.all([chrome.storage.local.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'}), chrome.storage.session.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'}), chrome.storage.session.remove(['source', 'binding', 'snapshot'])]);
 let socket, heartbeat, reconnectTimer, setupPromise, setupCredential, queue = Promise.resolve(), pairingQueue = Promise.resolve();
-let connectionGeneration = 0;
+let connectionGeneration = 0, reviewSessions = [];
 const leases = new Map();
 const recordings = new SessionRecordings({audit: auditRecording});
 const automatic = new AutomaticBrowser({call, config, verifySession, audit: auditEvent, recordings});
@@ -27,7 +27,7 @@ async function setupBrowser() {
 }
 async function forget(settings) {
   if ((await config())?.bridge_token !== settings.bridge_token) return;
-  connectionGeneration++;
+  connectionGeneration++; reviewSessions = [];
   clearTimeout(reconnectTimer); clearInterval(heartbeat);
   setupPromise = null; setupCredential = null;
   if (socket) { socket.onclose = socket.onmessage = socket.onerror = socket.onopen = null; socket.close(); socket = null; }
@@ -35,12 +35,17 @@ async function forget(settings) {
   await recordings.stopAll();
   await auditConnectionEnded();
   await chrome.storage.session.remove(['binding', 'bindings', 'agent_tabs', 'guarded', 'snapshot', 'checkout_bindings']); leases.clear();
+  automatic.attempts.clear();
   await automatic.activity.clear();
 }
 async function call(path, value) {
   const settings = await config(); if (!settings) throw new Error('Pair the desktop bridge first.');
   const response = await fetch(settings.url + '/api/bridge/' + path, {method: value === undefined ? 'GET' : 'POST', headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + settings.bridge_token, 'X-AgentGate-Extension': 'chrome-extension://' + chrome.runtime.id}, ...(value !== undefined ? {body: JSON.stringify(value)} : {}), redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(15000)});
   const result = await response.json(); if (!response.ok) { if (response.status === 403) await forget(settings); const error = new Error(result.error?.message || 'The coordinator rejected the request.'); error.code = result.error?.code; throw error; }
+  if ((await config())?.bridge_token === settings.bridge_token) {
+    if (path === 'sessions' && value === undefined) reviewSessions = result.sessions;
+    else if (path.endsWith('/runtime')) reviewSessions = reviewSessions.map(item => item.id === result.id ? {...item, ...result} : item);
+  }
   if (path === 'sessions' && value === undefined) auditActiveSessions(result.sessions);
   const published = path.match(/^sessions\/([a-f0-9]{32})\/(view|dom)$/);
   if (published?.[2] === 'view' && result.view) auditEvent(published[1], {id: 'view:' + result.view_digest + ':' + (result.disclosure_request?.id || Date.now()), type: 'view', view: result.view, view_digest: result.view_digest});
@@ -195,29 +200,37 @@ async function connect() {
         const packet = JSON.parse(event.data);
         // Command acknowledgements are not browser assignment snapshots.
         if (!Array.isArray(packet.sessions)) return;
-        queue = queue.then(async () => {
-          if (socket !== connection || generation !== connectionGeneration) return;
-          await classifier.tick(packet.classifier_requests || []);
-          await automatic.stop(packet.sessions);
-          for (const check of packet.checks || []) await automatic.check(check);
-          for (const command of packet.commands || []) await execute(command);
-          automatic.tick().catch(() => {});
-          auditStatuses(packet.sessions);
-        }).catch(() => {});
+        receiveState(packet, connection, generation);
       } catch { connection.close(); }
     };
     connection.onclose = event => { if (socket !== connection || generation !== connectionGeneration) return; clearInterval(heartbeat); automatic.activity.pause(); if (event.code === 4001) { forget(settings).catch(() => {}); } else reconnectTimer = setTimeout(connect, 5000); };
     connection.onerror = () => connection.close();
   } catch { if (generation === connectionGeneration) reconnectTimer = setTimeout(connect, 5000); }
 }
+function receiveState(packet, connection = socket, generation = connectionGeneration) {
+  if (!Array.isArray(packet.sessions)) return;
+  queue = queue.then(async () => {
+    if (socket !== connection || generation !== connectionGeneration) return;
+    if (packet.snapshot_version === 1) reviewSessions = packet.sessions.filter(item => ['active', 'checking_action', 'awaiting_action', 'executing'].includes(item.status));
+    await automatic.stop(packet.sessions);
+    await classifier.tick(packet.classifier_requests || []);
+    for (const check of packet.checks || []) await automatic.check(check);
+    for (const command of packet.commands || []) await execute(command);
+    automatic.tick(packet.snapshot_version === 1 ? packet.sessions : undefined).catch(() => {});
+    auditStatuses(packet.sessions);
+  }).catch(() => {});
+  return queue;
+}
 chrome.alarms.create('agentgate-reconnect', {periodInMinutes: 1});
+chrome.alarms.create('agentgate-recovery', {periodInMinutes: 5});
 chrome.alarms.create('agentgate-audit-prune', {periodInMinutes: 1440});
 chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === 'agentgate-audit-prune') { auditPrune(); return; }
-  connect(); automatic.tick().catch(() => {}); classifier.tick().catch(() => {});
+  if (alarm.name === 'agentgate-recovery') { if (socket?.readyState === WebSocket.OPEN) socket.send('ready'); return; }
+  connect(); automatic.retry().catch(() => {});
 });
-setInterval(() => { automatic.activity.expire(); automatic.tick().catch(() => {}); classifier.tick().catch(() => {}); }, 5000);
-chrome.tabs.onUpdated.addListener((tabId, change) => { if (change.status === 'complete') automatic.activity.loaded(tabId); });
+setInterval(() => { automatic.activity.expire(); automatic.retry().catch(() => {}); }, 5000);
+chrome.tabs.onUpdated.addListener((tabId, change) => { if (change.status === 'complete') { automatic.activity.loaded(tabId); automatic.retry().catch(() => {}); } });
 chrome.debugger.onDetach.addListener(source => recordings.detached(source.tabId));
 automatic.activity.initialize();
 chrome.action.onClicked.addListener(async () => {
@@ -262,7 +275,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       automatic.tick().catch(()=>{});return {ok:true};
     }
     if (message.type === 'disable_automation') { await chrome.storage.local.set({automation: {enabled: false,grants_enabled:false,setup_version:1}}); await automatic.activity.pause(); return {ok: true}; }
-    if (message.type === 'sessions') return {ok: true, ...await call('sessions')};
+    if (message.type === 'sessions') return {ok: true, sessions: socket?.readyState === WebSocket.OPEN ? reviewSessions : []};
     throw new Error('Unsupported extension operation.');
   })().then(respond).catch(error => respond({ok: false, error: error.message}));
   return true;

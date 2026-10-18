@@ -15,6 +15,24 @@ function fixture({toolbar=false,changed=false,loading=false,unrelated=false}={})
 test('automatic inbox publication contains source evidence and local count-only diagnostics',async()=>{
   const f=fixture();await f.browser.tick();assert.equal(f.calls.filter(c=>c.path.endsWith('/view')).length,1);assert.match(f.data.bindings[id].view.text,/Friday/);assert.equal(f.data.capture_diagnostics[id].shared_text_chars,30);assert.ok(!JSON.stringify(f.data.capture_diagnostics).includes('Ali'));assert.deepEqual(f.calls.at(-1).input,{state:'ready',code:null,phase:'ready'});
 });
+test('pushed idle state and local housekeeping produce no coordinator reads', async () => {
+  const f = fixture();
+  await f.browser.tick([]);
+  for (let i = 0; i < 60; i++) {f.advance(5000); await f.browser.retry();}
+  assert.deepEqual(f.calls, []);
+});
+test('pushed work keeps fresh authorization reads and retries only unfinished captures', async () => {
+  const f = fixture({loading: true});
+  await f.browser.tick([item]);
+  assert.equal(f.calls.filter(call => call.path === 'sessions').length, 0);
+  await f.browser.retry();
+  assert.equal(f.calls.filter(call => call.path === 'sessions').length, 1);
+  await f.browser.tick([{...item, status: 'revoked'}]);
+  const before = f.calls.length; f.advance(60000); await f.browser.retry();
+  assert.equal(f.calls.length, before);
+  const publication = fixture(); await publication.browser.tick([item]);
+  assert.ok(publication.calls.some(call => call.path === 'sessions'), 'Publication still rechecks current authority.');
+});
 test('moving a task to another browser stops recording and clears local task bindings', async () => {
   const f = fixture(), statuses = [];
   f.data.bindings = {[id]: {tab_id: 1}}; f.data.capture_diagnostics = {[id]: {shared_text_chars: 30}};

@@ -74,16 +74,20 @@ export class AutomaticBrowser {
     await this.activity.sync([item], true, true);
     return tab;
   }
-  async tick() {
-    // Coalesce updates arriving during publication instead of losing the read
-    // notification and waiting for the five-second housekeeping poll.
-    if (this.busy) {this.needsTick=true;return;}
+  async retry() {
+    if (!this.busy && [...this.attempts.values()].some(attempt => attempt.retry_at <= this.now())) await this.tick();
+  }
+  async tick(suppliedSessions) {
+    // Keep the newest pushed state when a publication is already in flight.
+    if (this.busy) {this.needsTick=true;this.pendingSessions=suppliedSessions;return;}
     this.needsTick=false;
     this.busy = true;
     try {
       const {automation} = await this.api.storage.local.get('automation');
       if (!await this.config()) { await this.activity.clear(); return; }
-      const {sessions} = await this.call('sessions');
+      const sessions = suppliedSessions ?? (await this.call('sessions')).sessions;
+      const retryable = new Set(sessions.filter(item => item.status === 'active' && !item.view && enabled(item.scope, automation)).map(item => item.id));
+      for (const id of this.attempts.keys()) if (!retryable.has(id)) this.attempts.delete(id);
       await this.activity.sync(sessions, Boolean(automation?.enabled||automation?.grants_enabled));
       for (const item of sessions.filter(i=>i.status==='active'&&!enabled(i.scope,automation)&&!i.view)) await this.runtime(item.id,'blocked','MODEL_SETUP_REQUIRED');
       for (const item of sessions.filter(i => i.status === 'active' && enabled(i.scope,automation) && i.scope.disclosure === 'local_planner' && !i.view)) {
@@ -140,7 +144,7 @@ export class AutomaticBrowser {
         }
       }
     } catch (error) { await this.activity.pause(); throw error; }
-    finally { this.busy = false;if(this.needsTick){this.needsTick=false;queueMicrotask(()=>this.tick().catch(()=>{}));} }
+    finally { this.busy = false;if(this.needsTick){this.needsTick=false;const pending=this.pendingSessions;delete this.pendingSessions;queueMicrotask(()=>this.tick(pending).catch(()=>{}));} }
   }
   async check(packet) {
     const {session_id: id, command} = packet;

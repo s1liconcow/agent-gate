@@ -249,11 +249,19 @@ function focusLinkedSession() {
     }
   }
 }
-let lastRender = '';
+let lastRender = '', refreshTimer, refreshMilliseconds = 30000;
+function scheduleRefresh() {
+  clearTimeout(refreshTimer);
+  if (device && !document.hidden) refreshTimer = setTimeout(refresh, refreshMilliseconds);
+}
 async function refresh() {
-  if (!device || refreshing || signing) return; refreshing = true; $('refresh').disabled = true;
+  if (!device || refreshing || signing) { scheduleRefresh(); return; }
+  clearTimeout(refreshTimer); refreshing = true; $('refresh').disabled = true;
   try {
-    const [{sessions}, {connectors}, browserState, hosted, engagement, {sources}, {transfers}, {connections}] = await Promise.all([api('owner/sessions'), api('owner/connectors'), api('owner/browsers'), api('owner/hosted-browser'), api('owner/engagement'), api('owner/login-sources'), api('owner/login-transfers'), api('owner/login-connections')]);
+    const {sessions, connectors, browser_state: browserState, hosted, engagement, sources, transfers, connections} = await api('owner/state');
+    const active = sessions.some(item => !['closed', 'revoked', 'expired'].includes(item.status)) || transfers.length ||
+      [...connectors, ...browserState.browsers, ...sources].some(item => item.challenge) || hosted.challenge;
+    refreshMilliseconds = active ? 5000 : 30000;
     const {browsers} = browserState;
     browserChoices = browserState.choices || [];
     renderDefaultBrowser(browserState.default_browser_id);
@@ -270,8 +278,8 @@ async function refresh() {
     }
     $('connection').textContent = 'Connected'; $('connection').className = 'status connected';
   }
-  catch (error) { $('connection').textContent = 'Disconnected'; $('connection').className = 'status'; message(error.message, true); }
-  finally { refreshing = false; $('refresh').disabled = false; }
+  catch (error) { refreshMilliseconds = 30000; $('connection').textContent = 'Disconnected'; $('connection').className = 'status'; message(error.message, true); }
+  finally { refreshing = false; $('refresh').disabled = false; scheduleRefresh(); }
 }
 async function showDevice() {
   $('intro').hidden = true; $('pairing').hidden = true; $('inbox').hidden = false; $('device').hidden = false;
@@ -308,5 +316,9 @@ if (device) await showDevice(); else {
   if (scannedBrowser) message('Open this link in your paired phone browser.', true);
   const code = new URLSearchParams(location.hash.slice(1)).get('pair'); if (code) { $('pairCode').value = code; history.replaceState(null, '', base + '/'); }
 }
-setInterval(refresh, 5000);
+document.addEventListener('visibilitychange', () => {
+  clearTimeout(refreshTimer);
+  if (!document.hidden) refresh();
+});
+scheduleRefresh();
 addEventListener('hashchange', () => { readBrowserLink(); lastFocusedSession = ''; lastFocusedLogin = ''; lastRender = ''; refresh(); });

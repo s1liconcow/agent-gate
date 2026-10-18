@@ -33,6 +33,8 @@ import {loginSyncCapabilities} from '../shared/login-sync.mjs';
 import {apiFailure} from './api-error.mjs';
 import {executionError} from '../shared/bridge-result.mjs';
 import {browserPhases} from '../extension/model-phases.mjs';
+import {scheduleMaintenance} from './maintenance.mjs';
+import {ownerBrowsers, ownerSessions, ownerState} from './owner-state.mjs';
 
 export {Registry};
 
@@ -91,6 +93,14 @@ export class Gate extends DurableObject {
     return {sessions, commands: (await this.engine.commands()).filter(item => ids.has(item.session_id)),
       checks: (await this.engine.checks()).filter(item => ids.has(item.session_id)), classifier_requests: await this.classifier.pending(browserId)};
   }
+  scheduleMaintenance() {
+    const browserIds = [...new Set(this.ctx.getWebSockets().filter(ws => ws.readyState === 1).flatMap(ws => this.ctx.getTags(ws)).filter(tag => tag.startsWith('browser:')).map(tag => tag.slice(8)))];
+    return scheduleMaintenance(this.ctx.storage, {browserIds, hostedBusy: Boolean(this.hostedWork)});
+  }
+  async bridgeState(browserId) {
+    const state = await this.browserTasks(browserId);
+    return {...state, snapshot_version: 1, sessions: state.sessions.map(item => ['closed', 'revoked', 'expired'].includes(item.status) ? {id: item.id, status: item.status, expires_at: item.expires_at} : {...this.engine.public(item), scope: item.task, session_receipt: item.session_receipt})};
+  }
   hostedSnapshot() { return this.hostedLock(async () => {
     const current = await this.hostedConsent.current();
     const state = await this.browserTasks(current?.browser_id);
@@ -139,7 +149,7 @@ export class Gate extends DurableObject {
           });
         }
       } while (this.hostedAgain);
-    })().finally(() => { this.hostedWork = null; });
+    })().finally(async () => { this.hostedWork = null; await this.ctx.blockConcurrencyWhile(() => this.scheduleMaintenance()); });
     this.ctx.waitUntil(this.hostedWork);
   }
   async endBrowserTasks(browserId) {
@@ -148,7 +158,7 @@ export class Gate extends DurableObject {
   }
   async endHostedTasks(browserId) { await this.endBrowserTasks(browserId || (await this.hostedConsent.current())?.browser_id); }
   async endAllTasks() { for (const item of await this.engine.list()) if (!['expired', 'revoked', 'closed'].includes(item.status)) await this.engine.end(item.id); }
-  stopHosted(item) { if (item) this.ctx.waitUntil(this.hosted.stop(item)); }
+  stopHosted(item) { if (item) this.ctx.waitUntil(this.hosted.stop(item).finally(() => this.ctx.blockConcurrencyWhile(() => this.scheduleMaintenance()))); }
 
   async initializeAccount(id, pairingHash) {
     if (!/^[a-f0-9]{32}$/.test(id) || !/^[A-Za-z0-9_-]{43}$/.test(pairingHash)) throw new Error('Invalid account enrollment.');
@@ -225,7 +235,7 @@ export class Gate extends DurableObject {
     });
   }
   async locked(callback) {
-    return this.ctx.blockConcurrencyWhile(async () => { try { await this.requireExistingAccount(); return {result: await callback()}; } catch (error) { return {error: apiFailure(error)}; } });
+    return this.ctx.blockConcurrencyWhile(async () => { try { await this.requireExistingAccount(); return {result: await callback()}; } catch (error) { return {error: apiFailure(error)}; } finally { await this.scheduleMaintenance(); } });
   }
   async requireExistingAccount() { if (await this.ctx.storage.get(deletionKey)) fail('ACCOUNT_DELETED', 'This account has been deleted.', 410); }
   createConnector(auth, name, handle) { return this.locked(async () => { const result = await this.connectors.create(auth, name, handle); this.ctx.waitUntil(this.notify()); return result; }); }
@@ -241,7 +251,7 @@ export class Gate extends DurableObject {
     await this.endAllTasks();
     if (result.hosted) await this.activateHosted(result.hosted);
     else await this.ensureHosted(new URL(result.coordinator).origin);
-    await this.ctx.storage.setAlarm(Date.now() + 30000);
+    await this.scheduleMaintenance();
     return {coordinator: result.coordinator};
   }); }
   async activateHosted(item, old) {
@@ -344,7 +354,10 @@ export class Gate extends DurableObject {
           await this.ensureHosted(new URL(request.url).origin); return id;
         });
         exact(await body(request), []);
-        if (loginOperation[4] === 'live-view') return json(await this.hosted.loginView(loginOperation[3]));
+        if (loginOperation[4] === 'live-view') {
+          try { return json(await this.hosted.loginView(loginOperation[3])); }
+          finally { await this.ctx.blockConcurrencyWhile(() => this.scheduleMaintenance()); }
+        }
         let transfer;
         const result = await this.hosted.updateLogin(
           config => this.hostedLock(async () => {
@@ -365,6 +378,7 @@ export class Gate extends DurableObject {
             await this.loginSync.save(config, prepared, undefined, cleanup); return {status: 'disconnected'};
           })
         );
+        await this.ctx.blockConcurrencyWhile(() => this.scheduleMaintenance());
         return json(result);
       }
       if (path === '/api/bridge/socket') return await this.socket(request);
@@ -372,10 +386,11 @@ export class Gate extends DurableObject {
         await this.hostedLock(() => this.auth(request, 'owner'));
         const input = await body(request); exact(input, ['session_id']);
         if (!/^[a-f0-9]{32}$/.test(input.session_id || '')) fail('NOT_FOUND', 'Unknown task.', 404);
-        return json(await this.hosted.liveView(input.session_id));
+        try { return json(await this.hosted.liveView(input.session_id)); }
+        finally { await this.ctx.blockConcurrencyWhile(() => this.scheduleMaintenance()); }
       }
       // Handle expected policy failures inside the lock: an uncaught exception here resets a DO.
-      const result = await this.ctx.blockConcurrencyWhile(async () => { try { return await this.route(request); } catch (error) { return errorResponse(error); } });
+      const result = await this.ctx.blockConcurrencyWhile(async () => { try { return await this.route(request); } catch (error) { return errorResponse(error); } finally { await this.scheduleMaintenance(); } });
       if (path.endsWith('/actions') || path.endsWith('/approve') || path.endsWith('/check') || path.endsWith('/revoke') || path.endsWith('/close') || request.method==='POST'&&path==='/api/agent/sessions') await this.dispatch();
       return result;
     } catch (error) { return errorResponse(error); }
@@ -405,7 +420,7 @@ export class Gate extends DurableObject {
         return json({source_id: sourceId, account_id: hosted?.account_id || await this.ctx.storage.get('account_id') || 'owner', browser_id: hosted?.browser_id || null, login_sync: loginSyncCapabilities, connections: hosted ? await this.loginSync.connections(hosted) : []});
       }
       if (path === '/api/login-source/transfers' && method === 'POST') {
-        const result = await this.loginSync.request(sourceId, await body(request)); await this.ctx.storage.setAlarm(Date.now() + 30000); return json(result, 201);
+        const result = await this.loginSync.request(sourceId, await body(request)); await this.scheduleMaintenance(); return json(result, 201);
       }
       const transfer = path.match(/^\/api\/login-source\/transfers\/([a-f0-9]{32})(?:\/(chunk|cancel))?$/);
       if (transfer && method === 'GET' && !transfer[2]) {
@@ -426,7 +441,7 @@ export class Gate extends DurableObject {
       await this.engine.register(input.public_key);
       await this.ensureHosted(url.origin);
       const token = random() + random(); await this.ctx.storage.put('owner_hash', await digest(token));
-      await this.ctx.storage.setAlarm(Date.now() + 30000);
+      await this.scheduleMaintenance();
       return json({owner_token: token});
     }
     if (path.startsWith('/api/browser/pairings')) {
@@ -458,6 +473,7 @@ export class Gate extends DurableObject {
       if (['GET', 'POST'].includes(method)) return json(await this.agentCall(path.slice('/api/agent/'.length), method === 'POST' ? await body(request) : undefined), method === 'POST' ? 202 : 200);
     }
     if (role === 'owner') {
+      if (path === '/api/owner/state' && method === 'GET') return json(await ownerState(this));
       if (path === '/api/owner/login-sources' && method === 'GET') return json({sources: (await this.loginSources.list()).map(item => this.loginSources.public(item))});
       const source = path.match(/^\/api\/owner\/login-sources\/([a-f0-9]{32})\/(approve|revoke)$/);
       if (source && method === 'POST') {
@@ -502,7 +518,7 @@ export class Gate extends DurableObject {
         const old = await this.hostedConsent.current(), account = await this.ctx.storage.get('account_id') || 'owner';
         const item = await this.hostedConsent.approve(await body(request), account, account === 'owner' ? url.origin : url.origin + '/u/' + account);
         await this.endHostedTasks(old?.browser_id); await this.activateHosted(item, old);
-        await this.ctx.storage.setAlarm(Date.now() + 30000);
+        await this.scheduleMaintenance();
         return json(await this.hostedConsent.status());
       }
       if (path === '/api/owner/hosted-browser/inference' && method === 'POST') {
@@ -518,15 +534,7 @@ export class Gate extends DurableObject {
         await this.ensureHosted(url.origin);
         return json(await this.hostedConsent.status());
       }
-      if (path === '/api/owner/browsers' && method === 'GET') return json({
-        account_id: await this.ctx.storage.get('account_id') || 'owner',
-        browsers: (await this.browsers.list()).filter(item => item.kind !== 'hosted').map(item => ({
-          ...this.browsers.public(item),
-          socket_connected: item.status === 'active' && this.ctx.getWebSockets('browser:' + item.id).some(ws => ws.readyState === 1)
-        })),
-        choices: await this.browserRouting.choices(),
-        default_browser_id: (await this.browserRouting.current())?.id || null
-      });
+      if (path === '/api/owner/browsers' && method === 'GET') return json(await ownerBrowsers(this));
       if (path === '/api/owner/browsers/default' && method === 'POST') {
         const input = await body(request); exact(input, ['browser_id']);
         await this.browserRouting.pinSessions(await this.engine.list());
@@ -551,10 +559,7 @@ export class Gate extends DurableObject {
         for (const item of await this.engine.list()) if (item.principal === 'remote:' + connection[1]) await this.engine.end(item.id);
         return json(result);
       }
-      if (path === '/api/owner/sessions' && method === 'GET') {
-        const items = await this.engine.list(), hosted = await this.hostedConsent.current();
-        return json({sessions: await Promise.all(items.map(async item => ({...this.engine.public(item), scope: item.task, browser_id: await this.browserRouting.sessionBrowser(item), hosted: Boolean(hosted && await this.browserRouting.owns(item, hosted.browser_id)), audit: item.history.filter(event => ['session', 'action_check', 'disclosure_check'].includes(event.type)), challenge: item.status === 'requested' ? item.challenge : item.status === 'awaiting_action' ? item.action_challenge : null})))});
-      }
+      if (path === '/api/owner/sessions' && method === 'GET') return json({sessions: await ownerSessions(this)});
       if (path === '/api/owner/push-key' && method === 'GET') return json({public_key: this.env.VAPID_PUBLIC_KEY || null});
       if (path === '/api/owner/push' && method === 'POST') {
         const input = await body(request); exact(input, ['endpoint', 'expirationTime', 'keys']); exact(input.keys, ['p256dh', 'auth']);
@@ -615,6 +620,7 @@ export class Gate extends DurableObject {
       const accepted = await this.ctx.blockConcurrencyWhile(async () => { try { await this.requireTaskBrowser(input.session_id, this.ctx.getTags(ws).find(tag => tag.startsWith('browser:')).slice(8)); await this.engine.result(input.session_id, input.result); return true; } catch { return false; } });
       if (!accepted) { ws.send(JSON.stringify({error: 'RESULT_REJECTED'})); return; }
       ws.send(JSON.stringify({ack: input.result.command_id}));
+      await this.dispatch();
     } catch { ws.send(JSON.stringify({error: 'RESULT_REJECTED'})); }
   }
   async webSocketClose(ws) {
@@ -631,11 +637,12 @@ export class Gate extends DurableObject {
     this.kickHosted();
     const sockets = [];
     for (const ws of this.ctx.getWebSockets()) if (ws.readyState === 1) { if (await this.socketAllowed(ws)) sockets.push(ws); else ws.close(4001, 'Browser connection ended'); }
-    if (!sockets.length) return;
+    if (!sockets.length) { await this.ctx.blockConcurrencyWhile(() => this.scheduleMaintenance()); return; }
     for (const ws of sockets) {
-      const browserId = this.ctx.getTags(ws).find(tag => tag.startsWith('browser:')).slice(8), state = await this.browserTasks(browserId);
-      try { ws.send(JSON.stringify({...state, sessions: state.sessions.map(item => ({id: item.id, status: item.status}))})); } catch { /* closed socket */ }
+      const browserId = this.ctx.getTags(ws).find(tag => tag.startsWith('browser:')).slice(8), state = await this.bridgeState(browserId);
+      try { ws.send(JSON.stringify(state)); } catch { /* closed socket */ }
     }
+    await this.ctx.blockConcurrencyWhile(() => this.scheduleMaintenance());
   }
   async socketAllowed(ws) {
     if (await this.ctx.storage.get(deletionKey)) return false;
@@ -665,7 +672,7 @@ export class Gate extends DurableObject {
       await this.classifier.sweep();
       await this.loginSync.sweep();
     });
-    await this.dispatch(); await this.ctx.storage.setAlarm(Date.now() + 30000);
+    await this.dispatch();
   }
 }
 

@@ -14,10 +14,14 @@ const browser = await chromium.launch({channel: 'chromium', headless: true});
 let publicKey, allowed = 0, stopped = 0, defaultBrowserId = cloudId;
 try {
   const page = await browser.newPage(), errors = [];
+  const reads = [];
+  await page.clock.install();
+  await page.clock.pauseAt(new Date(Date.now() + 1000));
   page.on('pageerror', error => errors.push(error.message));
   await page.route(origin + '/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname;
     if (path.startsWith('/api/')) {
+      if (request.method() === 'GET') reads.push(path);
       assert.equal(request.headers().authorization, 'Bearer ' + 'd'.repeat(64));
       let result;
       if (path.endsWith('/profile')) result = {account_id: 'owner', admin: true};
@@ -25,6 +29,7 @@ try {
         await verifyReceipt(request.postDataJSON(), publicKey, challenge); allowed++; task.status = 'active'; task.challenge = null; result = {};
       } else if (path.endsWith('/browsers/default')) { defaultBrowserId = request.postDataJSON().browser_id; result = {default_browser_id: defaultBrowserId}; }
       else if (path.endsWith('/sessions/' + task.id + '/revoke')) { stopped++; task.status = 'revoked'; result = {}; }
+      else if (path.endsWith('/state')) result = {sessions: [task], connectors: [], browser_state: {browsers: [{id: localId, name: 'My Chrome', status: 'active', extension_origin: 'chrome-extension://' + 'a'.repeat(32)}], choices: [{id: cloudId, name: 'Cloud browser', kind: 'cloud'}, {id: localId, name: 'My Chrome', kind: 'local'}], default_browser_id: defaultBrowserId}, hosted: {available: true, enabled: true, browser_id: cloudId}, engagement: {enabled: true, mode: 'AUTO_APPROVE'}, sources: [], transfers: [], connections: [login]};
       else if (path.endsWith('/sessions')) result = {sessions: [task]};
       else if (path.endsWith('/connectors')) result = {connectors: []};
       else if (path.endsWith('/browsers')) result = {browsers: [{id: localId, name: 'My Chrome', status: 'active', extension_origin: 'chrome-extension://' + 'a'.repeat(32)}], choices: [{id: cloudId, name: 'Cloud browser', kind: 'cloud'}, {id: localId, name: 'My Chrome', kind: 'local'}], default_browser_id: defaultBrowserId};
@@ -86,6 +91,20 @@ try {
   assert.match(await page.locator('#accountIdentity').textContent(), /Account: owner/);
   assert.equal(await page.locator('#adminLink').isVisible(), true);
   assert.equal(await page.locator('#purchasePolicySettings').count(), 0);
+  await page.locator('#refresh').click();
+  await page.waitForFunction(() => !document.getElementById('refresh').disabled);
+  const count = reads.length;
+  await page.clock.runFor(29000); assert.equal(reads.length, count, 'Idle dashboard waits thirty seconds.');
+  const refreshed = page.waitForResponse(origin + '/api/owner/state');
+  await page.clock.runFor(1000); await refreshed;
+  await page.waitForFunction(() => !document.getElementById('refresh').disabled);
+  assert.equal(reads.length, count + 1, 'One request refreshes the entire dashboard.');
+  await page.evaluate(() => {Object.defineProperty(document, 'hidden', {configurable: true, value: true}); document.dispatchEvent(new Event('visibilitychange'));});
+  await page.clock.runFor(120000); assert.equal(reads.length, count + 1, 'Hidden dashboard does not poll.');
+  const resumed = page.waitForResponse(origin + '/api/owner/state');
+  await page.evaluate(() => {Object.defineProperty(document, 'hidden', {configurable: true, value: false}); document.dispatchEvent(new Event('visibilitychange'));});
+  await resumed;
+  assert.ok(reads.every(path => ['/api/owner/profile', '/api/owner/state'].includes(path)));
   assert.deepEqual(errors, []);
   console.log('Owner UI checks passed: signed task consent, browser default preserves task scope, running tasks, stop/history, shared logins and owner account/admin links.');
 } finally { await browser.close(); }
