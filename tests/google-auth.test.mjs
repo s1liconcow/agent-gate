@@ -28,12 +28,27 @@ test('authorization-code exchange sends the PKCE verifier and keeps tokens on th
   try {
     globalThis.fetch = async (url, options) => {
       assert.equal(url, 'https://oauth2.googleapis.com/token');
-      assert.equal(options.redirect, 'error');
+      assert.equal(options.redirect, 'manual');
       assert.equal(options.body.get('code_verifier'), 'test-verifier');
       assert.equal(options.body.get('client_secret'), 'test-secret');
       return Response.json({error: 'invalid_grant'}, {status: 400});
     };
     await assert.rejects(() => googleProvider.exchange('code', {verifier: 'test-verifier', nonce}, 'https://gate.test/api/auth/google/callback', {GOOGLE_CLIENT_ID: 'test-client', GOOGLE_CLIENT_SECRET: 'test-secret'}), {code: 'GOOGLE_SIGN_IN_FAILED'});
+  } finally { globalThis.fetch = previous; }
+});
+
+test('authorization-code exchange rejects redirects without forwarding Google credentials', async () => {
+  const previous = globalThis.fetch;
+  let calls = 0;
+  try {
+    globalThis.fetch = async (url, options) => {
+      calls++;
+      assert.equal(url, 'https://oauth2.googleapis.com/token');
+      assert.equal(options.redirect, 'manual');
+      return new Response(null, {status: 302, headers: {Location: 'https://other.example/token'}});
+    };
+    await assert.rejects(() => googleProvider.exchange('code', {verifier: 'test-verifier', nonce}, 'https://gate.test/api/auth/google/callback', {GOOGLE_CLIENT_ID: 'test-client', GOOGLE_CLIENT_SECRET: 'test-secret'}), {code: 'GOOGLE_SIGN_IN_FAILED', auth_step: 'token_endpoint', auth_reason: 'exchange_failed'});
+    assert.equal(calls, 1);
   } finally { globalThis.fetch = previous; }
 });
 
