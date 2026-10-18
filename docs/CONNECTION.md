@@ -11,8 +11,8 @@ There is no cloud-browser checkbox or separate phone setup.
 
 A first connection requires an invitation code and creates a private account after
 consent. The server validates the code before setup and rechecks it when creating
-the account. Single-use invitations are redeemed atomically across signup paths;
-expired, revoked, and redeemed codes cannot create accounts. Existing accounts
+the account. Invitation uses are counted atomically across signup paths;
+expired, revoked, and fully used codes cannot create accounts. Existing accounts
 can reconnect without another invitation. Google sign-in must apply this same
 invitation check whenever it creates a new account.
 

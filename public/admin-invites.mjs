@@ -26,9 +26,10 @@ export class InvitePanel {
       const row = el('li', undefined, 'invite-row'), identity = el('div');
       identity.append(el('strong', item.label || 'Private account invitation'), el('p', 'Created ' + date(item.created_at), 'hint'));
       const state = el('div');
-      state.append(el('span', {pending: 'Pending', redeemed: 'Used', revoked: 'Revoked', expired: 'Expired'}[item.status], 'admin-state ' + (item.status === 'pending' ? 'waiting' : '')),
+      state.append(el('span', {pending: item.use_count ? 'Active' : 'Pending', redeemed: 'Used', revoked: 'Revoked', expired: 'Expired'}[item.status], 'admin-state ' + (item.status === 'pending' ? 'waiting' : '')),
+        el('p', item.use_count + ' of ' + item.max_uses + ' uses', 'hint'),
         el('p', item.status === 'redeemed' ? 'Used ' + date(item.redeemed_at) : item.status === 'revoked' ? 'Revoked ' + date(item.revoked_at) : 'Expires ' + date(item.expires_at), 'hint'));
-      if (item.account_id) {const link = el('a', 'Open account'); link.href = '/u/' + item.account_id + '/'; state.append(link);}
+      if (item.account_id) {const link = el('a', item.max_uses > 1 ? 'Open latest account' : 'Open account'); link.href = '/u/' + item.account_id + '/'; state.append(link);}
       row.append(identity, state);
       if (item.status === 'pending') {
         const button = el('button', 'Revoke', 'secondary'); button.type = 'button'; button.setAttribute('aria-label', 'Revoke invite ' + (item.label || item.id));
@@ -51,7 +52,7 @@ export class InvitePanel {
     if (this.busy) return;
     this.busy = true; this.controls(); this.message('Creating invite link…');
     try {
-      const result = await this.api('admin/invites', {label: $('inviteLabel').value.trim(), expires_in_days: Number($('inviteExpiry').value)});
+      const result = await this.api('admin/invites', {label: $('inviteLabel').value.trim(), expires_in_days: Number($('inviteExpiry').value), max_uses: Number($('inviteUses').value)});
       this.generatedId = result.invite.id; $('inviteURL').value = result.invite_url; $('generatedInvite').hidden = false;
       $('inviteLabel').value = ''; this.page = 0; this.cursors = [null];
       this.message('Invite created. Copy this link before leaving the page.'); $('inviteURL').focus(); $('inviteURL').select();

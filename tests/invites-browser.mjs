@@ -40,6 +40,7 @@ try {
     assert.equal((await http('/api/admin/invites', {admin: true, body, headers: {Origin: 'https://other.example'}})).status, 403);
   }
   assert.equal((await http('/api/admin/invites', {admin: true, body: {expires_in_days: 31}})).status, 400);
+  for (const max_uses of [0, 101, 1.5, '2', null]) assert.equal((await http('/api/admin/invites', {admin: true, body: {max_uses}})).status, 400);
   assert.equal((await http('/api/admin/invites?limit=21', {admin: true})).status, 400);
   assert.equal((await http('/api/admin/invites', {admin: true, method: 'DELETE'})).status, 405);
   report.checks.push('administrator-only creation and listing, origin checks, field validation and methods');
@@ -94,7 +95,9 @@ try {
   const page = await context.newPage(), errors = []; page.on('pageerror', error => errors.push(error.message));
   await installGoogleSession(context, origin, login);
   await page.goto(origin + '/admin.html'); await page.locator('#invites li').first().waitFor();
+  assert.equal(await page.getByLabel('Maximum uses').inputValue(), '1');
   await page.getByLabel('Invite label').fill('<img src=x onerror=alert(1)>');
+  await page.getByLabel('Maximum uses').fill('2');
   await page.getByRole('button', {name: 'Create invite link', exact: true}).click();
   await page.getByText('Invite created. Copy this link before leaving the page.', {exact: true}).waitFor();
   const link = await page.locator('#inviteURL').inputValue();
@@ -102,6 +105,7 @@ try {
   await page.getByText('Invite link copied.', {exact: true}).waitFor();
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), link);
   assert.equal(await page.locator('#invites img').count(), 0);
+  await page.locator('#invites li').first().getByText('0 of 2 uses', {exact: true}).waitFor();
   await page.screenshot({path: resolve(output, 'admin-desktop.png'), fullPage: true});
   await page.setViewportSize({width: 390, height: 844});
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
@@ -121,12 +125,26 @@ try {
   await join.getByRole('button', {name: 'Create my space', exact: true}).click();
   await join.waitForURL(/\/u\/[a-f0-9]{32}\/try\.html/); await join.locator('#phoneQR').waitFor({state: 'visible'});
   assert.ok(await join.locator('#phoneLink').getAttribute('href'));
+  const firstAccountURL = join.url();
+  await page.getByRole('button', {name: 'Refresh', exact: true}).click();
+  await page.locator('#invites li').first().getByText('1 of 2 uses', {exact: true}).waitFor();
+  await page.locator('#invites li').first().getByText('Active', {exact: true}).waitFor();
+  assert.equal(await page.locator('#invites li').first().getByRole('button', {name: /Revoke invite/}).isEnabled(), true);
   await join.goto(link); await join.getByRole('button', {name: 'Create my space', exact: true}).click();
-  await join.getByText(/This invitation has already been used/).waitFor(); assert.equal(await join.locator('#join').isEnabled(), true);
+  await join.waitForURL(/\/u\/[a-f0-9]{32}\/try\.html/); assert.notEqual(join.url(), firstAccountURL);
+  await join.goto(link); await join.getByRole('button', {name: 'Create my space', exact: true}).click();
+  await join.getByText(/This invitation has reached its use limit/).waitFor(); assert.equal(await join.locator('#join').isEnabled(), true);
   await page.getByRole('button', {name: 'Refresh', exact: true}).click(); await page.locator('#invites').getByText('Used', {exact: true}).first().waitFor();
+  await page.locator('#invites li').first().getByText('2 of 2 uses', {exact: true}).waitFor();
+  assert.equal(await page.locator('#invites li').first().getByRole('button').count(), 0);
   await page.getByLabel('Invite label').fill('Revoke in browser'); await page.getByRole('button', {name: 'Create invite link', exact: true}).click();
   await page.getByText('Invite created. Copy this link before leaving the page.', {exact: true}).waitFor();
-  const revokedLink = await page.locator('#inviteURL').inputValue(); await page.getByRole('button', {name: 'Revoke invite Revoke in browser', exact: true}).click();
+  const revokedLink = await page.locator('#inviteURL').inputValue();
+  await join.goto(revokedLink); await join.getByRole('button', {name: 'Create my space', exact: true}).click();
+  await join.waitForURL(/\/u\/[a-f0-9]{32}\/try\.html/);
+  await page.getByRole('button', {name: 'Refresh', exact: true}).click();
+  await page.locator('#invites li').first().getByText('1 of 2 uses', {exact: true}).waitFor();
+  await page.getByRole('button', {name: 'Revoke invite Revoke in browser', exact: true}).click();
   await page.getByText('Invite revoked.', {exact: true}).waitFor(); assert.equal(await page.locator('#generatedInvite').isVisible(), false);
   await join.goto(revokedLink); await join.getByRole('button', {name: 'Create my space', exact: true}).click(); await join.getByText(/This invitation was revoked/).waitFor();
   assert.deepEqual(errors, []);

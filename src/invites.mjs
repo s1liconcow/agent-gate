@@ -4,9 +4,11 @@ const day = 86400000;
 export const validInviteId = value => typeof value === 'string' && /^\d{13}-[a-f0-9]{32}$/.test(value);
 const key = id => 'invite:' + id;
 const tokenKey = hash => 'invite-token:' + hash;
+const maxUses = item => item.max_uses ?? 1;
+const useCount = item => item.use_count ?? (item.redeemed_at === null ? 0 : 1);
 
 export function inviteStatus(item, now = Date.now()) {
-  return item.redeemed_at !== null ? 'redeemed' : item.revoked_at !== null ? 'revoked' : item.expires_at <= now ? 'expired' : 'pending';
+  return useCount(item) >= maxUses(item) ? 'redeemed' : item.revoked_at !== null ? 'revoked' : item.expires_at <= now ? 'expired' : 'pending';
 }
 
 export function invitePageQuery(params) {
@@ -21,15 +23,17 @@ export class Invites {
   constructor(storage, now = Date.now) { this.storage = storage; this.now = now; }
   public(item) {
     const {id, label, created_by, created_at, expires_at, redeemed_at, revoked_at, account_id} = item;
-    return {id, label, created_by, created_at, expires_at, redeemed_at, revoked_at, account_id, status: inviteStatus(item, this.now())};
+    return {id, label, created_by, created_at, expires_at, redeemed_at, revoked_at, account_id, max_uses: maxUses(item), use_count: useCount(item), status: inviteStatus(item, this.now())};
   }
   async create(input, created_by) {
-    exact(input, ['label', 'expires_in_days'].filter(name => Object.hasOwn(input ?? {}, name)));
+    exact(input, ['label', 'expires_in_days', 'max_uses'].filter(name => Object.hasOwn(input ?? {}, name)));
     const label = input.label === undefined ? '' : input.label, days = input.expires_in_days === undefined ? 7 : input.expires_in_days;
+    const max_uses = input.max_uses === undefined ? 1 : input.max_uses;
     if (typeof label !== 'string' || label.trim().length > 80 || /[\u0000-\u001f\u007f]/.test(label) || !Number.isInteger(days) || days < 1 || days > 30) fail('INVALID_REQUEST', 'Use a label up to 80 characters and an expiry from 1 to 30 days.');
+    if (!Number.isInteger(max_uses) || max_uses < 1 || max_uses > 100) fail('INVALID_REQUEST', 'Use a whole number from 1 to 100 for maximum uses.');
     const created_at = this.now(), token = b64url(crypto.getRandomValues(new Uint8Array(32)));
     const item = {id: String(created_at).padStart(13, '0') + '-' + random(), label: label.trim(), created_by, created_at, expires_at: created_at + days * day,
-      token_hash: await digest(token), redeemed_at: null, revoked_at: null, account_id: null};
+      token_hash: await digest(token), max_uses, use_count: 0, redeemed_at: null, revoked_at: null, account_id: null};
     await this.storage.put({[key(item.id)]: item, [tokenKey(item.token_hash)]: item.id});
     return {invite: this.public(item), token};
   }
@@ -45,7 +49,7 @@ export class Invites {
     const item = await this.storage.get(key(id));
     if (!item || item.token_hash !== hash) fail('INVALID_INVITE', 'This invitation is invalid.', 403);
     const status = inviteStatus(item, this.now());
-    if (status !== 'pending') fail('INVITE_' + status.toUpperCase(), {redeemed: 'This invitation has already been used.', revoked: 'This invitation was revoked.', expired: 'This invitation has expired.'}[status], 410);
+    if (status !== 'pending') fail('INVITE_' + status.toUpperCase(), {redeemed: maxUses(item) === 1 ? 'This invitation has already been used.' : 'This invitation has reached its use limit.', revoked: 'This invitation was revoked.', expired: 'This invitation has expired.'}[status], 410);
     return item;
   }
   async authorize(token, legacyToken) {
@@ -54,7 +58,7 @@ export class Invites {
     return invitation;
   }
   redemption(item, account_id) {
-    return {[key(item.id)]: {...item, account_id, redeemed_at: this.now()}};
+    return {[key(item.id)]: {...item, max_uses: maxUses(item), use_count: useCount(item) + 1, account_id, redeemed_at: this.now()}};
   }
   async revoke(id) {
     if (!validInviteId(id)) fail('INVALID_REQUEST', 'Invalid invitation ID.');

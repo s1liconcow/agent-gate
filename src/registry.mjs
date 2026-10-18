@@ -61,7 +61,7 @@ export class Registry extends DurableObject {
         const count = await this.ctx.storage.get('count') || 0;
         if (count >= limit) return {error: 'The beta is full.', status: 409};
         // Consent and signatures precede this call; invitation redemption shares
-        // the registry lock with /api/signup so only one account can use a code.
+        // the registry lock with /api/signup so both paths enforce the use limit.
         await this.env.GATE.getByName('account:' + account_id).initializeAccount(account_id, await digest(b64url(crypto.getRandomValues(new Uint8Array(32)))));
         await this.ctx.storage.put({count: count + 1, ['account:' + account_id]: true, ...(invitation ? invitations.redemption(invitation, account_id) : {})});
         return {account_id};

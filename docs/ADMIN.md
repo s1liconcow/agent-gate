@@ -14,13 +14,13 @@ Inspection opens no cloud browser and changes no consent, policy, browser state 
 
 ## Invite links
 
-In **Invite new users**, enter an optional label, choose an expiry (1, 7 or 30 days), and click **Create invite link**. Copy the link before leaving the page; it is shown once. Share it with the new user. The list shows pending, used, expired and revoked invitations. **Revoke** immediately disables a pending link.
+In **Invite new users**, enter an optional label, set **Maximum uses** (1–100, default 1), choose an expiry (1, 7 or 30 days), and click **Create invite link**. Copy the link before leaving the page; it is shown once. Share it with your invitees. The list shows usage counts and pending, active, used, expired or revoked status. **Revoke** immediately disables a link with uses remaining.
 
-The recipient opens the link in desktop Chrome and clicks **Create my space**. AgentGate creates a separate private account and opens setup for pairing the approval phone, Chrome extension and assistant. Opening or previewing the link does not consume it. Each link enrolls one account; concurrent redemption allows one enrollment. Expiry and the existing `BETA_MAX_USERS` limit are enforced during enrollment. A full beta leaves the invitation unused.
+The recipient opens the link in desktop Chrome and clicks **Create my space**. AgentGate creates a separate private account and opens setup for pairing the approval phone, Chrome extension and assistant. Opening or previewing the link does not consume it. Each successful signup consumes one use. Concurrent signups share the same use limit across the join page and OAuth connection flow. Existing links remain single-use. Expiry and the existing `BETA_MAX_USERS` limit are enforced during enrollment. A full beta does not consume a use.
 
 Invite creation, listing and revocation require the administrator's Google session. The registry stores a hash of each invite token. Links carry the token in a URL fragment, which the join page removes from browser history. Account registration and invitation consumption are saved together. Existing `BETA_INVITE_TOKEN` links remain supported under the existing account limit.
 
-The global API exposes `GET`/`POST /api/admin/invites` and `POST /api/admin/invites/:id/revoke`. Legacy `/api/owner/admin/` endpoints are disabled. List responses contain metadata and an opaque `next_cursor`; they contain no invite or pairing tokens. Creation accepts `{label, expires_in_days}` and returns `{invite, invite_url}`. New links use the existing registry and require no new namespace or migration.
+The global API exposes `GET`/`POST /api/admin/invites` and `POST /api/admin/invites/:id/revoke`. Legacy `/api/owner/admin/` endpoints are disabled. List responses contain metadata and an opaque `next_cursor`; they contain no invite or pairing tokens. Creation accepts `{label, expires_in_days, max_uses}` and returns `{invite, invite_url}`. Metadata includes `max_uses` and `use_count`; `account_id` and `redeemed_at` describe the latest successful signup. The `redeemed` status means all uses are consumed. New links use the existing registry and require no new namespace or migration.
 
 ## OpenAI email
 

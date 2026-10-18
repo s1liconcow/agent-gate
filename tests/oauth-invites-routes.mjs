@@ -20,8 +20,8 @@ const http = (path, input, {token, cookie, admin} = {}) => fetch(origin + path, 
 async function ok(response, status = 200) {assert.equal(response.status, status, await response.clone().text()); return response.json();}
 const records = () => http('/_admin-test/registry', undefined, {token: testToken}).then(ok);
 const accounts = async () => (await records()).filter(([key]) => key.startsWith('account:')).map(([key]) => key.slice(8));
-async function invitation(label) {
-  const result = await ok(await http('/api/admin/invites', {label}, {admin: true}), 201);
+async function invitation(label, max_uses = 1) {
+  const result = await ok(await http('/api/admin/invites', {label, max_uses}, {admin: true}), 201);
   return {...result.invite, token: new URLSearchParams(new URL(result.invite_url).hash.slice(1)).get('invite')};
 }
 async function authorization() {
@@ -147,6 +147,34 @@ try {
   await page.getByRole('button', {name: 'Connect', exact: true}).click();
   await page.waitForURL(url => url.pathname === '/callback' && url.searchParams.has('code'));
   assert.equal((await accounts()).length, 3); assert.deepEqual(errors, []);
+
+  const reusable = await invitation('Shared use limit across signup and OAuth', 3);
+  const usage = async () => (await records()).find(([key]) => key === 'invite:' + reusable.id)[1];
+  await ok(await http('/api/signup', {invite: reusable.token}), 201);
+  assert.equal((await usage()).use_count, 1);
+  const reusableFlow = await connection();
+  const reusablePrepared = await ok(await reusableFlow.request('prepare', {...reusableFlow.input, invite: reusable.token}));
+  assert.equal((await usage()).use_count, 1);
+  const reusableSigned = await reusableFlow.receipts(reusablePrepared);
+  await ok(await http('/_admin-test/capacity', {count: 100}, {token: testToken}));
+  assert.equal((await reusableFlow.request('complete', {...reusableSigned, invite: reusable.token})).status, 409);
+  assert.equal((await http('/api/signup', {invite: reusable.token})).status, 409);
+  assert.equal((await usage()).use_count, 1);
+  await ok(await http('/_admin-test/capacity', {count: 4}, {token: testToken}));
+  const retryFlow = await connection(), retryPrepared = await ok(await retryFlow.request('prepare', {...retryFlow.input, invite: reusable.token}));
+  await ok(await retryFlow.request('complete', {...await retryFlow.receipts(retryPrepared), invite: reusable.token}));
+  assert.equal((await usage()).use_count, 2);
+  const reusableContenders = await Promise.all([connection(), connection()]);
+  const reusablePending = await Promise.all(reusableContenders.map(async flow => {
+    const prepared = await ok(await flow.request('prepare', {...flow.input, invite: reusable.token}));
+    return {flow, receipts: await flow.receipts(prepared)};
+  }));
+  const reusableRace = await Promise.all([http('/api/signup', {invite: reusable.token}), ...reusablePending.map(({flow, receipts}) => flow.request('complete', {...receipts, invite: reusable.token}))]);
+  assert.equal(reusableRace.filter(response => [200, 201].includes(response.status)).length, 1);
+  assert.equal(reusableRace.filter(response => response.status === 410).length, 2);
+  assert.equal((await usage()).use_count, 3); assert.equal((await accounts()).length, 6);
+  const metadata = (await ok(await http('/api/admin/invites', undefined, {admin: true}))).invites.find(item => item.id === reusable.id);
+  assert.equal(metadata.status, 'redeemed'); assert.equal(metadata.max_uses, 3); assert.equal(metadata.use_count, 3);
   console.log('OAuth invitation enrollment checks complete.');
 } finally {
   await browser?.close();
