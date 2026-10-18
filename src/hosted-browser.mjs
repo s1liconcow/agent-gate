@@ -33,6 +33,12 @@ export class HostedBrowser {
     if (!item || item.status !== status || canonical(item.scope) !== canonical(packet.scope) || packet.command && item.last_command?.id !== packet.command.id || packet.dom_request && item.dom_request?.id !== packet.dom_request.id || packet.checkout && item.checkout?.id !== packet.checkout.id) fail('INFERENCE_NOT_APPROVED', 'The hosted task changed or ended.', 403);
     return config;
   }
+  async progress(phase) {
+    if (!this.call) return;
+    for (const item of (await this.snapshot()).sessions) if (item.status === 'active' && !item.view) {
+      await this.call('sessions/' + item.id + '/runtime', {state: 'starting', code: null, phase});
+    }
+  }
   async connected(operation) {
     const config = await this.config(), store = new HostedState(this.storage, config.account_id, config.browser_id);
     const saved = await store.get('connection');
@@ -45,10 +51,12 @@ export class HostedBrowser {
     try {
       await this.config(config);
       if (!retained) {
+        await this.progress(phase);
         const opened = await this.openConnection(store, saved?.sessionId, sessionId => store.put('connection', {account_id: config.account_id, browser_id: config.browser_id, sessionId, anchor: null, last_activity_at: this.now()}));
         browser = opened.browser;
         await this.config(config);
         phase = 'browser_recovery';
+        await this.progress(phase);
         let context, recovered = false;
         if (!opened.fresh && saved?.anchor) {
           for (const candidate of browser.contexts()) for (const page of candidate.pages()) {
@@ -69,10 +77,13 @@ export class HostedBrowser {
         const modelUrl = new URL('/hosted-inference.html?model=' + config.model, config.coordinator).href;
         const adapter = new HostedAdapter(browser, context, {scripts: this.scripts, modelUrl, store});
         phase = 'profile_restore';
+        await this.progress(phase);
         if (!recovered) await adapter.restore(await store.get('login'));
         phase = 'browser_recovery';
+        await this.progress(phase);
         await adapter.recover();
         phase = 'browser_anchor';
+        await this.progress(phase);
         if (!adapter.modelPage) { adapter.modelPage = await context.newPage(); await adapter.modelPage.goto(modelUrl, {waitUntil: 'domcontentloaded'}); }
         const anchor = await adapter.target(adapter.modelPage);
         const connection = {account_id: config.account_id, browser_id: config.browser_id, sessionId: opened.sessionId, anchor};

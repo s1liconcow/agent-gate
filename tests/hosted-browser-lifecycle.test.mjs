@@ -25,6 +25,13 @@ test('cloud initialization failures retain their stage for bounded runtime diagn
   const recovery = fixture({open: async () => ({sessionId: 'owned', fresh: true, browser: {contexts: () => [], close: async () => {}}})});
   await assert.rejects(recovery.hosted.connected(() => {}), error => error.phase === 'browser_recovery');
 });
+test('cloud startup publishes its current stage before an operation can stall', async () => {
+  const reports = [], f = fixture({open: async () => ({sessionId: 'owned', fresh: true, browser: {contexts: () => [], close: async () => {}}})});
+  f.hosted.snapshot = async () => ({sessions: [{id: 'active', status: 'active'}, {id: 'ready', status: 'active', view: {}}, {id: 'closed', status: 'closed'}]});
+  f.hosted.call = async (path, data) => reports.push({path, data});
+  await assert.rejects(f.hosted.connected(() => {}));
+  assert.deepEqual(reports, ['browser_acquisition', 'browser_recovery'].map(phase => ({path: 'sessions/active/runtime', data: {state: 'starting', code: null, phase}})));
+});
 
 test('idle and expired tasks close the saved process without reconnecting or creating a replacement', async () => {
   const closed = [], f = fixture({open: async () => {throw new Error('Idle cleanup must not open a browser');}, close: async id => closed.push(id)});
