@@ -15,6 +15,10 @@
 .login-app .hint{margin:12px 0 0}
 .login-tab{margin:0 0 12px 31px}
 .login-tab label{margin:8px 0}
+.login-domain{margin:0 0 12px 31px}
+.login-domain label{margin:8px 0}
+.login-domain .hint{margin:8px 0 0}
+.login-domain .error{color:var(--danger)}
 .login-help{margin:18px 0 22px}
 #transferStatus{margin:14px 0 0;font-size:13px;min-height:20px}
 #connections article{padding:16px 0;border-top:1px solid var(--edge)}

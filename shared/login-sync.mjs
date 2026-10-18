@@ -33,7 +33,7 @@ export function loginSelection(value) {
   const host = new URL(value.origin).hostname, app = loginApps.find(app => app.id === value.app);
   if (value.app !== 'tab' && !app) fail('LOGIN_APP_UNSUPPORTED', LOGIN_SYNC_UPDATE_MESSAGE, 409);
   if (app && !app.domains.some(domain => domainMatches(host, domain))) fail('INVALID_LOGIN', 'Choose a tab from ' + app.name + '.');
-  // Arbitrary tabs export cookies only for their exact host and domain scope.
+  // Custom websites export cookies only for their selected host and domain scope.
   const allowed = app?.domains || [host, '.' + host];
   names(value.domains, 20);
   if (!value.domains.length || value.domains.some(domain => !allowed.includes(domain) && !app?.domains.some(root => domainMatches(cookieDomain(domain), root)))) fail('INVALID_LOGIN', 'Cookie domains exceed the selected app.');

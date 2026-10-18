@@ -10,6 +10,8 @@ Checkout approval shows the prepared order, merchant and exact USD total, follow
 
 Use **Share logins**, **Connect**, **Allow task**, **Open** and **Stop task** for everyday actions. Put connection identifiers, model settings and diagnostic data behind details. Settings use **Record only**, **Balanced** and **Careful** while retaining the existing policy behavior. Show shared apps by name and running tasks above past tasks.
 
+**Other website** accepts a domain such as `ralphs.com`. Include its cookies automatically, including subdomains, without requiring an open tab or a cookie picker. Keep optional storage under **More sign-in data**. Saved website logins use their domain as the name and support **Share again** while closed.
+
 The browser page uses one column: connection and task controls first, Advanced settings last.
 
 The approval app shows cloud and local connections together under **Browsers**. Use **Default for new tasks** for the saved preference and **Browser for this task** on each task before actions begin. Cloud is ready automatically and is the initial default. Local pairing preserves the cloud connection and shared logins.

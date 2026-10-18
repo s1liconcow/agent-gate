@@ -27,7 +27,12 @@ try {
   await context.addCookies([
     {name: 'session', value: 'SYNTHETIC-AMAZON-LOGIN', domain: '.amazon.com', path: '/', secure: true, httpOnly: true},
     {name: 'session', value: 'SYNTHETIC-GOOGLE-LOGIN', domain: '.google.com', path: '/', secure: true, httpOnly: true},
-    {name: 'session', value: 'SYNTHETIC-GITHUB-LOGIN', domain: '.github.com', path: '/', secure: true, httpOnly: true}
+    {name: 'session', value: 'SYNTHETIC-GITHUB-LOGIN', domain: '.github.com', path: '/', secure: true, httpOnly: true},
+    {name: 'opaque-login', value: 'SYNTHETIC-RALPHS-LOGIN', domain: '.ralphs.com', path: '/', secure: true, httpOnly: true},
+    {name: 'required-companion', value: 'SYNTHETIC-RALPHS-COMPANION', domain: 'www.ralphs.com', path: '/', secure: true, httpOnly: true},
+    {name: 'outside-scope', value: 'SYNTHETIC-LOOKALIKE', domain: '.evilralphs.com', path: '/', secure: true, httpOnly: true},
+    {name: 'other-site', value: 'SYNTHETIC-OTHER-SITE', domain: '.ralphs.com.evil.example', path: '/', secure: true, httpOnly: true},
+    {name: 'opaque-login', value: 'SYNTHETIC-SECOND-WEBSITE', domain: '.another.example', path: '/', secure: true, httpOnly: true}
   ]);
   await context.route('https://github.com/**', route => route.fulfill({contentType: 'text/html', body: '<title>Signed-in GitHub</title>'}));
   const app = await context.newPage(); await app.goto('https://github.com');
@@ -61,7 +66,7 @@ try {
         loginProfile(profile, transfer.challenge.selection);
         imported.push({selection: transfer.challenge.selection, profile});
         const connection = {id, selection: transfer.challenge.selection, status: 'sign_in_required'};
-        const previous = connections.findIndex(saved => saved.selection.app === connection.selection.app);
+        const previous = connections.findIndex(saved => saved.selection.app === connection.selection.app && (connection.selection.app !== 'tab' || saved.selection.origin === connection.selection.origin));
         if (previous < 0) connections.push(connection); else connections[previous] = connection;
         response = {status: 'sign_in_required'};
       } else { assert.equal(action, 'cancel'); cancelled.push(transfer.challenge.selection.app); response = {status: 'cancelled'}; }
@@ -189,5 +194,55 @@ try {
   assert.equal(requested.length, previous);
   oldCoordinator = false;
   await setup.waitForFunction(() => !document.querySelector('#transfer').disabled && document.querySelector('#message').hidden);
+
+  // A custom domain shares all of its cookies with no matching website tab or cookie picker.
+  await setup.locator('#share-amazon').uncheck();
+  assert.equal(await setup.locator('#share-tab').isDisabled(), false);
+  await setup.locator('#websiteDomain').fill('RALPHS.COM');
+  assert.equal(await setup.locator('#share-tab').isChecked(), true);
+  assert.equal(await setup.locator('#transfer').isDisabled(), false);
+  assert.equal(context.pages().some(page => page.url().includes('ralphs.com')), false);
+  assert.equal(await setup.locator('[data-app="tab"] .login-storage input').count(), 0);
+  if (process.env.LOGIN_SYNC_SCREENSHOT_DIR) {
+    for (const [name, width, height] of [['desktop', 1280, 1000], ['mobile', 390, 844]]) {
+      await setup.setViewportSize({width, height});
+      await setup.screenshot({path: resolve(process.env.LOGIN_SYNC_SCREENSHOT_DIR, 'login-domains-' + name + '.png'), fullPage: true});
+      assert.equal(await setup.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    }
+  }
+  await setup.locator('#transfer').click();
+  await setup.waitForFunction(() => document.querySelector('#transferStatus').textContent.startsWith('Shared 1 login.'));
+  const ralphs = imported.at(-1);
+  assert.deepEqual(ralphs.selection, {app: 'tab', origin: 'https://ralphs.com', domains: ['ralphs.com', '.ralphs.com'], local_storage: [], indexed_db: []});
+  assert.deepEqual(ralphs.profile.cookies.map(cookie => cookie.value).sort(), ['SYNTHETIC-RALPHS-COMPANION', 'SYNTHETIC-RALPHS-LOGIN']);
+  assert.ok(ralphs.profile.cookies.every(cookie => cookie.httpOnly));
+  assert.deepEqual(ralphs.profile.origins, []);
+
+  // Multiple custom sites retain separate saved connections and can be refreshed while closed.
+  await setup.locator('#websiteDomain').fill('another.example');
+  await setup.locator('#transfer').click();
+  await setup.waitForFunction(() => document.querySelector('#transferStatus').textContent.startsWith('Shared 1 login.'));
+  assert.deepEqual(imported.at(-1).profile.cookies.map(cookie => cookie.value), ['SYNTHETIC-SECOND-WEBSITE']);
+  const savedRalphs = setup.locator('#connections article').filter({has: setup.getByRole('heading', {name: 'ralphs.com', exact: true})});
+  await savedRalphs.getByRole('button', {name: 'Share again'}).click();
+  assert.equal(await setup.locator('#websiteDomain').inputValue(), 'https://ralphs.com');
+  assert.equal(await setup.locator('#transfer').isDisabled(), false);
+  await setup.locator('#transfer').click();
+  await setup.waitForFunction(() => document.querySelector('#transferStatus').textContent.startsWith('Shared 1 login.'));
+  assert.deepEqual(imported.at(-1).profile, ralphs.profile);
+
+  const beforeInvalidDomain = requested.length, beforeInvalidReads = await setup.evaluate(() => window.loginCookieReads);
+  await setup.locator('#websiteDomain').fill('https://user:secret@ralphs.com');
+  assert.equal(await setup.locator('#transfer').isDisabled(), true);
+  assert.equal(await setup.locator('#domainError').isVisible(), true);
+  assert.equal(await setup.locator('#websiteDomain').getAttribute('aria-invalid'), 'true');
+  assert.equal(requested.length, beforeInvalidDomain);
+  assert.equal(await setup.evaluate(() => window.loginCookieReads), beforeInvalidReads);
+  await setup.locator('#websiteDomain').fill('missing-login.example');
+  await setup.locator('#transfer').click();
+  await setup.waitForFunction(() => document.querySelector('#message').textContent === 'Sign in to missing-login.example in this browser, then try again.');
+  assert.equal(requested.length, beforeInvalidDomain);
+  assert.equal(await setup.locator('#share-tab').isChecked(), true);
+  assert.deepEqual(pageErrors, []);
   console.log('App-checkbox Chromium checks passed: closed-app cookies, selected-only uploads, one-click sharing without phone prompts, partial failures, retries, cancellation, optional storage and empty logins.');
 } finally { await context?.close(); await rm(temporary, {recursive: true, force: true}); }

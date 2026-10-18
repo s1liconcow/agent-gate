@@ -9,7 +9,7 @@ import {HostedState} from '../src/hosted-state.mjs';
 import {HostedBrowser} from '../src/hosted-browser.mjs';
 import {LoginSync} from '../src/login-sync.mjs';
 import {Engine} from '../src/engine.mjs';
-import {LoginSource, exportAppCookies, selectionForApp} from '../extension/login-export.mjs';
+import {LoginSource, exportAppCookies, selectionForApp, selectionForDomain} from '../extension/login-export.mjs';
 import {LOGIN_CLOCK_SKEW_MS} from '../shared/login-sync.mjs';
 
 class Memory {
@@ -128,6 +128,33 @@ test('saved-cookie export uses the setup page profile and excludes other app dom
   await assert.rejects(exportAppCookies(selected, api), /regular Chrome profile/);
   assert.equal(queries.length, 1);
   await assert.rejects(exportAppCookies({...selected, local_storage: ['auth']}, api), /Open the app/);
+});
+test('website domains normalize to bounded cookie selections without an open tab', () => {
+  const selected = selectionForDomain('  RALPHS.COM  ');
+  assert.deepEqual(selected, {app: 'tab', origin: 'https://ralphs.com', domains: ['ralphs.com', '.ralphs.com'], local_storage: [], indexed_db: []});
+  assert.deepEqual(selectionForDomain('https://ralphs.com/'), selected);
+  assert.deepEqual(selectionForDomain('ralphs.com.'), selected);
+  assert.equal(selectionForDomain('https://shop.example.co.uk:8443').origin, 'https://shop.example.co.uk:8443');
+  assert.equal(selectionForDomain('bücher.example').origin, 'https://xn--bcher-kva.example');
+  for (const domain of ['', 'com', '*.ralphs.com', '.ralphs.com', 'bad..example', '-bad.example', 'bad-.example', 'bad_name.example', 'http://ralphs.com', 'https://user:password@ralphs.com', 'ralphs.com/login', 'ralphs.com?query=1', 'ralphs.com#login', 'ralphs .com', 'file:///tmp/login']) {
+    assert.throws(() => selectionForDomain(domain), /Enter a website domain/);
+  }
+  for (const domain of ['ralphs.com', '.ralphs.com', 'www.ralphs.com', '.identity.ralphs.com']) loginProfile({cookies: [{...cookie(), domain}], origins: []}, selected);
+  for (const domain of ['.com', '.evilralphs.com', '.ralphs.com.evil.example', '.google.com']) {
+    assert.throws(() => loginProfile({cookies: [{...cookie(), domain}], origins: []}, selected));
+  }
+});
+test('custom website export automatically includes all scoped cookies in the regular profile', async () => {
+  const queries = [], selected = selectionForDomain('ralphs.com');
+  const raw = {name: 'opaque-login-name', value: 'synthetic-login', domain: '.ralphs.com', hostOnly: false, path: '/', session: true, httpOnly: true, secure: true, sameSite: 'lax'};
+  const api = {permissions: {contains: async () => true}, tabs: {getCurrent: async () => ({id: 42, incognito: false})}, cookies: {
+    getAllCookieStores: async () => [{id: 'regular', tabIds: [42]}],
+    getAll: async query => { queries.push(query); return [raw, {...raw, name: 'second-required-cookie', domain: 'www.ralphs.com', hostOnly: true}, {...raw, domain: '.unrelated.example'}]; }
+  }};
+  const exported = await exportAppCookies(selected, api);
+  assert.deepEqual(queries, [{domain: 'ralphs.com', storeId: 'regular', partitionKey: {}}]);
+  assert.deepEqual(exported.profile.cookies.map(cookie => [cookie.name, cookie.domain]), [['opaque-login-name', '.ralphs.com'], ['second-required-cookie', 'www.ralphs.com']]);
+  assert.deepEqual(exported.profile.origins, []);
 });
 test('login source pairing has a separate purpose and coexists with desktop and cloud consent', async () => {
   const f = await fixture(), desktop = new Browsers(f.db), credential = 'f'.repeat(64);

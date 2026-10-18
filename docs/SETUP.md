@@ -50,6 +50,18 @@ This validates the export and installs it in `extension/models/purpose/` before
 rebuilding the same extension folder. Existing explicit provider choices and
 intentional task pauses survive ordinary reloads.
 
+## Share website logins
+
+Open **Share logins** in the extension and connect it to your account once.
+Choose an app, or enter a domain such as `ralphs.com` under **Other website**.
+Click **Share logins** to copy that domain's cookies, including its subdomains,
+from this Chrome profile. The website can be closed; cookie selection is automatic.
+Sign in to the website in this profile first if no saved login is found.
+
+Use **Share again** beside a saved website to refresh it by domain. **More sign-in
+data** allows optional website storage from an open tab. Sharing replaces the
+selected login and stops running cloud tasks.
+
 ## Run a task
 
 Select explicit `browser` and `classifier_backend` values when requesting a task;

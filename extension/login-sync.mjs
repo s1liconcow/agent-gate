@@ -1,7 +1,7 @@
 import QRCode from './qr.mjs';
 import {canonical, digest} from './protocol.mjs';
 import {loginChallenge, loginApps, cookieDomain, domainMatches, LOGIN_CLOCK_SKEW_MS, LOGIN_SYNC_UPDATE_MESSAGE, requireLoginSync} from './login-sync-protocol.mjs';
-import {LoginSource, exportLogin, exportAppCookies, inspectLoginTab, selectionForApp, selectionForTab, uploadLogin} from './login-export.mjs';
+import {LoginSource, exportLogin, exportAppCookies, inspectLoginTab, selectionForApp, selectionForDomain, selectionForTab, uploadLogin} from './login-export.mjs';
 
 const $ = id => document.getElementById(id), source = new LoginSource(), entries = [];
 let tabs = [], busy = false, polling = false, cancelled = false, activeTransfer, cloudReady = false;
@@ -11,14 +11,17 @@ const chosen = () => entries.filter(entry => entry.checkbox.checked);
 const selectedTab = entry => tabs.find(tab => String(tab.id) === entry.tab.value);
 function updateButton() {
   const selected = chosen();
-  $('transfer').disabled = busy || !cloudReady || !selected.length || selected.some(entry => entry.id === 'tab' && !entry.inspected);
+  $('transfer').disabled = busy || !cloudReady || !selected.length || selected.some(entry => {
+    try { selection(entry); return false; } catch { return true; }
+  });
   $('transfer').textContent = selected.length ? 'Share ' + selected.length + ' login' + (selected.length === 1 ? '' : 's') : 'Share logins';
 }
 function setBusy(value) {
   busy = value;
   for (const id of ['pair', 'reloadTabs']) $(id).disabled = value;
   for (const entry of entries) {
-    entry.checkbox.disabled = value || entry.id === 'tab' && !entry.tab.value;
+    entry.checkbox.disabled = value;
+    if (entry.domain) entry.domain.disabled = value;
     entry.tab.disabled = value || !entry.tab.value;
     for (const box of entry.storage.querySelectorAll('input')) box.disabled = value;
   }
@@ -27,10 +30,11 @@ function setBusy(value) {
 function setResult(entry, text, state = '') { entry.result.textContent = text; entry.result.dataset.state = state; }
 function selection(entry) {
   const boxes = [...entry.storage.querySelectorAll('input:checked')], tab = selectedTab(entry);
-  if (entry.id === 'tab' || boxes.length) {
+  if (boxes.length) {
     if (!tab || !entry.inspected || entry.inspected.origin !== new URL(tab.url).origin) throw new Error('Refresh the open tab for ' + entry.name + '.');
   }
-  const selected = entry.id === 'tab' || boxes.length ? selectionForTab(tab, entry.id) : selectionForApp(entry.id);
+  const selected = entry.domain ? selectionForDomain(entry.domain.value) : boxes.length ? selectionForTab(tab, entry.id) : selectionForApp(entry.id);
+  if (boxes.length && entry.inspected.origin !== selected.origin) throw new Error('Refresh the open tab for ' + entry.name + '.');
   for (const box of boxes) {
     if (box.dataset.local !== undefined) selected.local_storage.push(box.dataset.local);
     else {
@@ -42,10 +46,14 @@ function selection(entry) {
   return selected;
 }
 function showScope(entry) {
+  if (entry.domain) { entry.domain.removeAttribute('aria-invalid'); entry.domainError.hidden = true; }
   try {
     const selected = selection(entry);
     entry.scope.textContent = 'Websites: ' + [...new Set(selected.domains.map(cookieDomain))].join(', ') + (selected.local_storage.length || selected.indexed_db.length ? ' · Extra data from ' + selected.origin : '') + (entry.id === 'google' ? ' · Applies across Google apps.' : '');
-  } catch (error) { entry.scope.textContent = error.message; }
+  } catch (error) {
+    entry.scope.textContent = entry.domain && !entry.domain.value ? '' : error.message;
+    if (entry.domain?.value) { entry.domain.setAttribute('aria-invalid', 'true'); entry.domainError.textContent = error.message; entry.domainError.hidden = false; }
+  }
   updateButton();
 }
 async function inspect(entry) {
@@ -70,14 +78,26 @@ function addApp(app) {
   row.className = 'login-app'; row.dataset.app = app.id; label.className = 'login-choice';
   checkbox.type = 'checkbox'; checkbox.id = 'share-' + app.id; result.className = 'login-result';
   label.append(checkbox, node('strong', app.name), result); row.append(label);
-  const details = node('details'), summary = node('summary', app.id === 'tab' ? 'Choose a tab' : 'More sign-in data');
+  const details = node('details'), summary = node('summary', 'More sign-in data');
   const tabLabel = node('label', 'Open tab'), tab = node('select'), storage = node('div'), scope = node('p');
   tab.id = 'tab-' + app.id; tabLabel.htmlFor = tab.id; tabLabel.append(tab); scope.className = 'hint'; storage.className = 'login-storage';
   details.append(summary, tabLabel, storage, scope); details.hidden = true; row.append(details);
   Object.assign(entry, {row, checkbox, result, details, tab, storage, scope}); entries.push(entry); $('apps').append(row);
+  if (app.id === 'tab') {
+    const field = node('div'), domainLabel = node('label', 'Website domain'), domain = node('input'), help = node('p', 'Cookies are included automatically for this domain and its subdomains. The website can be closed.'), domainError = node('p');
+    field.className = 'login-domain'; domain.id = 'websiteDomain'; domain.type = 'text'; domain.placeholder = 'ralphs.com'; domain.autocomplete = 'off'; domain.spellcheck = false; domain.autocapitalize = 'none'; domain.inputMode = 'url';
+    domain.setAttribute('aria-describedby', 'domainHelp domainError'); domainLabel.htmlFor = domain.id; help.id = 'domainHelp'; help.className = 'hint'; domainError.id = 'domainError'; domainError.className = 'hint error'; domainError.hidden = true;
+    field.append(domainLabel, domain, help, domainError); row.insertBefore(field, details); Object.assign(entry, {domain, domainError});
+    domain.addEventListener('input', () => {
+      if (busy) return;
+      checkbox.checked = Boolean(domain.value.trim()); details.hidden = !checkbox.checked; setResult(entry, '');
+      populateTabs(entry).catch(error => message(error.message, true));
+    });
+  }
   checkbox.addEventListener('change', async () => {
-    details.hidden = !checkbox.checked; if (entry.id === 'tab' && checkbox.checked) details.open = true; setResult(entry, ''); updateButton();
-    if (checkbox.checked && (entry.id === 'tab' || details.open)) {
+    details.hidden = !checkbox.checked; setResult(entry, ''); updateButton();
+    if (entry.domain && checkbox.checked && !entry.domain.value) entry.domain.focus();
+    if (checkbox.checked && details.open) {
       try { await inspect(entry); } catch (error) { message(error.message, true); }
     }
   });
@@ -87,19 +107,23 @@ function addApp(app) {
 }
 for (const app of loginApps) addApp(app);
 addApp({id: 'tab', name: 'Other website'});
+async function populateTabs(entry) {
+  const previous = entry.tab.value;
+  let selected;
+  try { if (entry.domain) selected = selectionForDomain(entry.domain.value); } catch { /* Keep invalid domains editable. */ }
+  const matching = tabs.filter(tab => entry.domain ? new URL(tab.url).origin === selected?.origin : entry.domains.some(domain => domainMatches(new URL(tab.url).hostname, domain)));
+  entry.tab.replaceChildren(...matching.map(tab => { const option = node('option', new URL(tab.url).origin + ' · ' + (tab.title || 'Open tab')); option.value = tab.id; return option; }));
+  if (!matching.length) { const option = node('option', 'Open this website for extra data'); option.value = ''; entry.tab.append(option); }
+  if (matching.some(tab => String(tab.id) === previous)) entry.tab.value = previous;
+  entry.tab.disabled = busy || !matching.length;
+  entry.generation++; entry.inspected = undefined; entry.storage.replaceChildren();
+  if (entry.details.open) await inspect(entry);
+  else showScope(entry);
+}
 async function loadTabs() {
   tabs = (await chrome.tabs.query({})).filter(tab => !tab.incognito && /^(?:https:\/\/|http:\/\/(?:127\.0\.0\.1|localhost)(?::|\/))/.test(tab.url || ''));
   for (const entry of entries) {
-    const previous = entry.tab.value;
-    const matching = entry.id === 'tab' ? tabs : tabs.filter(tab => entry.domains.some(domain => domainMatches(new URL(tab.url).hostname, domain)));
-    entry.tab.replaceChildren(...matching.map(tab => { const option = node('option', new URL(tab.url).origin + ' · ' + (tab.title || 'Open tab')); option.value = tab.id; return option; }));
-    if (!matching.length) { const option = node('option', 'Open this app first'); option.value = ''; entry.tab.append(option); }
-    if (matching.some(tab => String(tab.id) === previous)) entry.tab.value = previous;
-    entry.tab.disabled = !matching.length; entry.checkbox.disabled = entry.id === 'tab' && !matching.length;
-    if (entry.checkbox.disabled) { entry.checkbox.checked = false; entry.details.hidden = true; }
-    entry.generation++; entry.inspected = undefined; entry.storage.replaceChildren();
-    if (entry.details.open || entry.id === 'tab' && entry.checkbox.checked) await inspect(entry);
-    else showScope(entry);
+    await populateTabs(entry);
   }
   updateButton();
 }
@@ -116,14 +140,14 @@ async function refresh() {
   for (const connection of result.connections) {
     const entry = entries.find(entry => entry.id === connection.selection.app) || entries.find(entry => entry.id === 'tab');
     const item = node('article'), status = connection.status === 'connected' ? 'Signed in' : 'Shared';
-    item.append(node('h3', connection.selection.app === 'tab' ? connection.selection.origin : entry.name), node('p', status));
+    item.append(node('h3', connection.selection.app === 'tab' ? new URL(connection.selection.origin).hostname : entry.name), node('p', status));
     const refresh = node('button', 'Share again'); refresh.className = 'secondary';
     refresh.addEventListener('click', async () => {
       if (busy) return;
       entry.checkbox.checked = true; entry.details.hidden = false; setResult(entry, 'Selected');
+      if (entry.domain) { entry.domain.value = connection.selection.origin; await populateTabs(entry); }
       const tab = tabs.find(tab => new URL(tab.url).origin === connection.selection.origin);
       if (tab) { entry.tab.value = String(tab.id); await inspect(entry); }
-      else if (entry.id === 'tab') { entry.inspected = undefined; message('Open this website, then refresh tabs.'); updateButton(); return; }
       updateButton(); entry.checkbox.focus();
     });
     const erase = node('a', 'Open in app'); erase.href = settings.url + '/#login-connection=' + connection.id; erase.target = '_blank'; erase.rel = 'noopener noreferrer';
@@ -165,9 +189,9 @@ async function share(entry, selected, settings, position, total) {
   let raw;
   try {
     const includesStorage = selected.local_storage.length || selected.indexed_db.length;
-    const exported = includesStorage || entry.id === 'tab' ? await exportLogin(Number(entry.tab.value), entry.inspected.document_id, selected) : await exportAppCookies(selected);
+    const exported = includesStorage ? await exportLogin(Number(entry.tab.value), entry.inspected.document_id, selected) : await exportAppCookies(selected);
     raw = exported.raw;
-    if (!exported.profile.cookies.length && !exported.profile.origins.some(origin => origin.localStorage.length || origin.indexedDB.length)) throw new Error('Sign in to ' + entry.name + ' in this browser, then try again.');
+    if (!exported.profile.cookies.length && !exported.profile.origins.some(origin => origin.localStorage.length || origin.indexedDB.length)) throw new Error('Sign in to ' + (entry.domain ? new URL(selected.origin).hostname : entry.name) + ' in this browser, then try again.');
     if (cancelled) throw new Error('Sharing cancelled.');
     activeTransfer = await source.call(settings, 'transfers', {selection: selected, payload_digest: exported.payload_digest, payload_bytes: raw.length});
     const c = loginChallenge(activeTransfer.challenge), account = settings.url.match(/\/u\/([a-f0-9]{32})$/)?.[1] || 'owner';
@@ -190,6 +214,7 @@ $('transfer').addEventListener('click', async () => {
   // Keep the optional permission request in this click's user activation.
   const permission = chrome.permissions.request({permissions: ['cookies']});
   setBusy(true); cancelled = false; $('cancel').disabled = false;
+  $('transferStatus').textContent = 'Preparing logins…';
   let completed = 0, total = chosen().length;
   try {
     if (!await permission) throw new Error('Cookie access was not granted.');

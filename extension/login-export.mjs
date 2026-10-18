@@ -1,4 +1,4 @@
-import {canonical, coordinator, digest, random} from './protocol.mjs';
+import {canonical, coordinator, digest, origin, random} from './protocol.mjs';
 import {openPairing, pairingChallenge} from './browser-pairing.mjs';
 import {chromeCookie, cookieSelected, LOGIN_CHUNK_BYTES, LOGIN_MAX_BYTES, LOGIN_CLOCK_SKEW_MS, loginApps, loginProfile, loginSelection, requireLoginSync} from './login-sync-protocol.mjs';
 
@@ -47,6 +47,18 @@ export function selectionForApp(appId) {
   const app = loginApps.find(app => app.id === appId);
   if (!app) throw new Error('Choose a supported app.');
   return selectionForTab({url: app.origin}, appId);
+}
+export function selectionForDomain(value) {
+  try {
+    const input = value.trim();
+    if (!input || /\s/.test(input)) throw new Error();
+    const url = new URL(input.includes('://') ? input : 'https://' + input);
+    origin(url.href);
+    const host = url.hostname.replace(/\.$/, '');
+    if (!host.includes('.') || host.length > 253 || host.split('.').some(label => !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))) throw new Error();
+    url.hostname = host;
+    return selectionForTab({url: url.href});
+  } catch { throw new Error('Enter a website domain, such as ralphs.com.'); }
 }
 export async function inspectLoginTab(tabId, api = chrome) {
   const [result] = await api.scripting.executeScript({target: {tabId, frameIds: [0]}, func: async () => {
