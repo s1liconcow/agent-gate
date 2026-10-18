@@ -38,6 +38,9 @@ saved error and original deadline. The next approved task checks the actual
 allowance; a new denial saves fresh backoff. Automatic retries still preserve
 explicit provider deadlines, midnight waits and incomplete legacy records.
 
+The account backend uses `AccountGate`. Migration `v3` renames the original
+`Gate` namespace with its stored data; `Gate` remains a compatible export alias.
+
 The cloud CDP connection and isolated reader stay attached between task actions.
 Messages reuse the exact execution context holding captured refs; creating a new
 named world cannot substitute for that context. Chrome context-destruction events
