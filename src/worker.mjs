@@ -692,6 +692,10 @@ export class Gate extends DurableObject {
   }
 }
 
+// Keep both names exported while Cloudflare rolls the existing namespace onto
+// the refreshed class name; the namespace and its stored account data remain.
+export {Gate as AccountGate};
+
 const app = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
