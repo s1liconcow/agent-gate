@@ -5,8 +5,8 @@ const fault = (code, execution_error) => Object.assign(new Error(code), {code, .
 const transport = `globalThis.chrome ||= {};chrome.runtime ||= {id:'agentgate-hosted',onMessage:{addListener(f){(globalThis.__agentgateListeners ||= new Set()).add(f)},removeListener(f){globalThis.__agentgateListeners?.delete(f)}}};`;
 
 export class HostedAdapter {
-  constructor(browser, context, {scripts, modelUrl, store}) {
-    Object.assign(this, {browser, context, scripts, modelUrl, store}); this.pages = new Map(); this.worlds = new Map();
+  constructor(browser, context, {scripts, anchorId, store}) {
+    Object.assign(this, {browser, context, scripts, anchorId, store}); this.pages = new Map(); this.worlds = new Map();
   }
   async target(page) {
     const cdp = await this.context.newCDPSession(page);
@@ -15,8 +15,9 @@ export class HostedAdapter {
   }
   async recover() {
     for (const page of this.context.pages()) {
-      if (page.url() === this.modelUrl) { this.modelPage = page; continue; }
-      const id = await this.target(page); this.pages.set(id, page);
+      const id = await this.target(page);
+      if (id === this.anchorId) { this.anchorPage = page; continue; }
+      this.pages.set(id, page);
     }
   }
   async restore(profile) {
@@ -87,24 +88,6 @@ export class HostedAdapter {
   }
   async message(id, message) {
     return this.evaluate(id, `new Promise((resolve,reject)=>{let handled=false;for(const f of globalThis.__agentgateListeners||[]){const result=f(${JSON.stringify(message)},{id:chrome.runtime.id},resolve);handled ||= result===true;}if(!globalThis.__agentgateListeners?.size)reject(new Error('Reader unavailable'));})`);
-  }
-  async modelRequest(message) {
-    const page = this.modelPage;
-    if (!page || page.isClosed() || page.url() !== this.modelUrl) throw fault('INFERENCE_UNAVAILABLE');
-    return page.evaluate(async request => {
-      const runtime = await globalThis.agentgatePurposeReady();
-      if (runtime.model !== request.model) throw new Error('Classifier identity changed.');
-      if (request.type === 'warmup') return {ok: true, model: runtime.model, financial_source_policy: runtime.financial_source_policy};
-      const result = await runtime.classify(request.row);
-      return {ok: true, ...result};
-    }, message);
-  }
-  async warmup(model) {
-    if (!this.modelPage || this.modelPage.isClosed()) {
-      this.modelPage = await this.context.newPage();
-      await this.modelPage.goto(this.modelUrl, {waitUntil: 'domcontentloaded', timeout: 15000});
-    }
-    return deadline(() => this.modelRequest({type: 'warmup', model}), 90000, 'MODEL_TIMEOUT');
   }
   async closeTab(id) {
     const page = this.pages.get(id); if (page && !page.isClosed()) await page.close();

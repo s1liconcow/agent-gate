@@ -30,7 +30,8 @@ context.newCDPSession = async (...args) => {
 
 let opens = 0, disconnects = 0, resets = 0, factoryCloses = 0, now = 100000, hosted;
 try {
-  await context.route(config.coordinator + '/**', route => route.fulfill({contentType: 'text/html', body: '<title>Classifier anchor</title>'}));
+  let coordinatorRequests = 0;
+  await context.route(config.coordinator + '/**', route => {coordinatorRequests++; return route.abort();});
   await context.route(origin + '/**', route => route.fulfill({contentType: 'text/html', body: new URL(route.request().url()).searchParams.has('q') ? '<main><h1>Search results</h1></main>' : '<main><h1>Synthetic product</h1><button onclick="window.helpClicks=(window.helpClicks||0)+1">Help</button><form action="/search"><input aria-label="Search" name="q"><input type="submit" value="Go"></form></main>'}));
   hosted = new HostedBrowser({storage, consent: {current: async () => config}, now: () => now,
     scripts: {'content.js': await readFile(new URL('../extension/content.js', import.meta.url), 'utf8')},
@@ -45,6 +46,8 @@ try {
     firstAdapter = adapter; tab = await adapter.createTab(origin + '/product');
     await adapter.inject(tab.id, ['content.js']); capture = await adapter.message(tab.id, {type: 'snapshot'});
   }));
+  assert.equal(firstAdapter.anchorPage.url(), 'about:blank');
+  assert.equal(coordinatorRequests, 0, 'Cloud startup must not fetch a hosted classifier page');
   assert.equal(disconnects, 0);
   const help = capture.controls.find(c => c.label === 'Help'), search = capture.controls.find(c => c.label === 'Search'), go = capture.controls.find(c => c.label === 'Go');
   await hosted.serial(() => hosted.connected(async ({adapter}) => {
@@ -73,7 +76,10 @@ try {
     assert.equal(await store.get('session:guarded'), undefined);
     assert.deepEqual(await store.get('local:dispatches'), {uncertain: {packet_digest: 'preserve'}});
     assert.equal((await store.get('session:agent_tabs')).task.current, tab.id);
+    assert.equal(adapter.anchorPage, firstAdapter.anchorPage);
+    assert.equal(adapter.pages.has((await store.get('connection')).anchor), false);
   }));
+  assert.equal(coordinatorRequests, 0);
   assert.equal(resets, 2); assert.equal(opens, 2);
   const disconnected = new Promise(resolve => browser.once('disconnected', resolve));
   now += 120000; await hosted.tick(); await disconnected;

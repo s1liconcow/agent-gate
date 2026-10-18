@@ -74,8 +74,7 @@ export class HostedBrowser {
         // and their old DOM refs cannot be restored from saved profile state.
         await this.reset(); this.privateSession.clear();
         for (const name of ['bindings', 'guarded']) await store.delete('session:' + name);
-        const modelUrl = new URL('/hosted-inference.html?model=' + config.model, config.coordinator).href;
-        const adapter = new HostedAdapter(browser, context, {scripts: this.scripts, modelUrl, store});
+        const adapter = new HostedAdapter(browser, context, {scripts: this.scripts, anchorId: recovered ? saved.anchor : undefined, store});
         phase = 'profile_restore';
         await this.progress(phase);
         if (!recovered) await adapter.restore(await store.get('login'));
@@ -84,15 +83,16 @@ export class HostedBrowser {
         await adapter.recover();
         phase = 'browser_anchor';
         await this.progress(phase);
-        if (!adapter.modelPage) { adapter.modelPage = await context.newPage(); await adapter.modelPage.goto(modelUrl, {waitUntil: 'domcontentloaded'}); }
-        const anchor = await adapter.target(adapter.modelPage);
+        // The anchor identifies this account's context without a website load.
+        // Every task's inference runs on its paired local classifier.
+        if (!adapter.anchorPage) adapter.anchorPage = await context.newPage();
+        const anchor = await adapter.target(adapter.anchorPage);
         const connection = {account_id: config.account_id, browser_id: config.browser_id, sessionId: opened.sessionId, anchor};
         retained = this.connection = {browser, adapter, connection};
       }
       const {adapter, connection} = retained;
       await store.put('connection', {...connection, last_activity_at: this.now()});
       const api = hostedAPI(adapter, store, this.privateSession);
-      const settings = async () => await store.get('local:inference_settings') || {profile: config.inference, api_key: ''};
       const authorize = (packet, status) => this.authorize(packet, status, config);
       const call = async (path, data) => { await this.config(config); return this.call(path, data); };
       const model = async (type, input, {beforeInference, onStage, session_id: sessionId} = {}) => {
