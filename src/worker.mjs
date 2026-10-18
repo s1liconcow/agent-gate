@@ -413,7 +413,7 @@ export class Gate extends DurableObject {
   }
   async route(request) {
     const url = new URL(request.url), path = url.pathname, method = request.method;
-    if (path === '/api/health' && method === 'GET') return json({version: '0.7.1', paired: Boolean(await this.ctx.storage.get('phone')),
+    if (path === '/api/health' && method === 'GET') return json({version: '0.7.1', deployment_id: this.env.CF_VERSION_METADATA?.id || null, paired: Boolean(await this.ctx.storage.get('phone')),
       cloud_browser: {...this.cloudDeployment, startup_timeout_ms: this.hosted.startupMilliseconds, available: this.hostedConsent.available, configured: Boolean(await this.hostedConsent.current())}});
     if (path.startsWith('/api/login-source/')) {
       const extensionOrigin = browserOrigin(request);
