@@ -37,6 +37,8 @@ export async function verifyGoogleToken(token, clientId, nonce, jwks = keys) {
 export const googleProvider = {
   authorizeURL: 'https://accounts.google.com/o/oauth2/v2/auth',
   async exchange(code, login, redirect_uri, env) {
+    let step = 'token_endpoint';
+    try {
     const response = await fetch('https://oauth2.googleapis.com/token', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'},
       body: new URLSearchParams({grant_type: 'authorization_code', code, code_verifier: login.verifier, redirect_uri, client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET}),
       redirect: 'error', signal: AbortSignal.timeout(15000)});
@@ -46,9 +48,12 @@ export const googleProvider = {
       error.auth_reason = ['invalid_client', 'invalid_grant', 'unauthorized_client', 'invalid_request'].includes(result.error) ? result.error : 'exchange_failed';
       throw error;
     }
+    step = 'token_response';
     const tokens = await response.json();
     if (typeof tokens.id_token !== 'string' || tokens.id_token.length > 16000) fail('INVALID_IDENTITY', 'Google could not verify this sign-in.', 403);
-    return verifyGoogleToken(tokens.id_token, env.GOOGLE_CLIENT_ID, login.nonce);
+    step = 'verify_id_token';
+    return await verifyGoogleToken(tokens.id_token, env.GOOGLE_CLIENT_ID, login.nonce);
+    } catch (error) { error.auth_step = step; throw error; }
   }
 };
 
@@ -101,6 +106,12 @@ export async function googleAuthRoute(request, env, provider = googleProvider) {
   } catch (error) {
     const code = typeof error.code === 'string' && /^[A-Z0-9_]{1,80}$/.test(error.code) ? error.code : 'UNEXPECTED_ERROR';
     console.warn(JSON.stringify({event: 'google_sign_in_failed', stage, code,
+      ...(['token_endpoint', 'token_response', 'verify_id_token'].includes(error.auth_step) ? {step: error.auth_step} : {}),
+      ...(['TypeError', 'SyntaxError', 'Error', 'DOMException'].includes(error.name) ? {type: error.name} : {}),
+      frames: String(error.stack || '').split('\n').slice(1, 5).flatMap(line => {
+        const match = line.match(/^\s+at (?:async )?([\w.$<>]+).*?(\d+:\d+)\)?$/);
+        return match ? [{function: match[1], location: match[2]}] : [];
+      }),
       ...(['invalid_client', 'invalid_grant', 'unauthorized_client', 'invalid_request', 'exchange_failed'].includes(error.auth_reason) ? {reason: error.auth_reason} : {}),
       ...(['iss', 'aud', 'exp', 'iat', 'nbf', 'nonce', 'email', 'email_verified'].includes(error.claim) ? {claim: error.claim} : {})}));
     if (error.code === 'ADMIN_REQUIRED') outcome = 'denied';
