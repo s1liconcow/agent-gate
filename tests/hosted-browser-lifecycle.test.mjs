@@ -33,6 +33,34 @@ test('cloud startup publishes its current stage before an operation can stall', 
   await assert.rejects(f.hosted.connected(() => {}));
   assert.deepEqual(reports, ['browser_acquisition', 'browser_recovery'].map(phase => ({path: 'sessions/active/runtime', data: {state: 'starting', code: null, phase}})));
 });
+test('a hung startup tab releases its owned process and queue, and closes a late page', async () => {
+  let resolvePage, disconnected = 0, lateClosed = 0;
+  const closed = [], context = {pages: () => [], addCookies: async () => {}, newPage: () => new Promise(resolve => {resolvePage = resolve;})};
+  const browser = {contexts: () => [context], close: async () => {disconnected++;}};
+  const f = fixture({open: async (_, onAcquire) => {await onAcquire('startup-owned'); return {sessionId: 'startup-owned', fresh: true, browser};},
+    close: async id => closed.push(id)});
+  f.hosted.reset = async () => {}; f.hosted.startupMilliseconds = 10;
+  await f.store.put('login', {cookies: ['saved-login'], origins: []});
+  await assert.rejects(f.hosted.serial(() => f.hosted.connected(() => assert.fail('Startup did not finish'))),
+    error => error.code === 'BROWSER_UNRESPONSIVE' && error.phase === 'opening_tab');
+  assert.deepEqual(closed, ['startup-owned']); assert.equal(disconnected, 1);
+  assert.equal(await f.store.get('connection'), undefined);
+  assert.deepEqual(await f.store.get('login'), {cookies: ['saved-login'], origins: []});
+  resolvePage({close: async () => {lateClosed++;}});
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(lateClosed, 1); assert.equal(f.hosted.connection, undefined);
+  assert.equal(await f.hosted.serial(async () => 'queue released'), 'queue released');
+});
+test('a hung anchor lookup cannot retain a process or block later cloud work', async () => {
+  const closed = [], context = {pages: () => [], newPage: async () => ({}), newCDPSession: () => new Promise(() => {})};
+  const browser = {contexts: () => [context], close: async () => {}};
+  const f = fixture({open: async (_, onAcquire) => {await onAcquire('anchor-owned'); return {sessionId: 'anchor-owned', fresh: true, browser};}, close: async id => closed.push(id)});
+  f.hosted.reset = async () => {}; f.hosted.startupMilliseconds = 10;
+  await assert.rejects(f.hosted.serial(() => f.hosted.connected(() => assert.fail('Anchor did not finish'))),
+    error => error.code === 'BROWSER_UNRESPONSIVE' && error.phase === 'browser_anchor');
+  assert.deepEqual(closed, ['anchor-owned']); assert.equal(await f.store.get('connection'), undefined);
+  assert.equal(await f.hosted.serial(async () => 'queue released'), 'queue released');
+});
 
 test('idle and expired tasks close the saved process without reconnecting or creating a replacement', async () => {
   const closed = [], f = fixture({open: async () => {throw new Error('Idle cleanup must not open a browser');}, close: async id => closed.push(id)});

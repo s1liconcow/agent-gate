@@ -2,6 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {hostedBrowserFactory} from '../src/hosted-browser-factory.mjs';
 
+test('owned process termination can bypass a stalled browser transport', async () => {
+  const terminated = [];
+  const factory = hostedBrowserFactory({}, {connect: () => assert.fail('Cleanup must not reconnect'), terminate: async (_, id) => terminated.push(id)});
+  await factory.close('owned-process'); await factory.close(null);
+  assert.deepEqual(terminated, ['owned-process']);
+});
+
 test('an owned browser that stopped before reconnection is replaced and recorded before use', async () => {
   const events = [], browser = {}, client = {
     sessions: async () => [{sessionId: 'old'}],

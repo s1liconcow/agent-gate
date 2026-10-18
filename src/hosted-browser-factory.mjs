@@ -4,7 +4,7 @@ export const HOSTED_BROWSER_IDLE_MS = 120000;
 
 const stopped = error => /^Unable to connect to browser: code: (404|410):/.test(error.message || '');
 
-export function hostedBrowserFactory(binding, {acquire, connect, limits, history, now = Date.now}) {
+export function hostedBrowserFactory(binding, {acquire, connect, limits, history, terminate, now = Date.now}) {
   return {
     inspectLimits() { return inspectBrowserLimits(binding, limits, now); },
     inspectHistory() { return inspectBrowserHistory(binding, history, now); },
@@ -27,14 +27,15 @@ export function hostedBrowserFactory(binding, {acquire, connect, limits, history
         throw await browserLimitError(error, binding, limits, now);
       }
     },
-    async close(id, beforeClose = async () => {}) {
+    async close(id, beforeClose) {
       if (!id) return;
+      if (terminate && !beforeClose) { await terminate(binding, id); return; }
       let browser;
       try { browser = await connect(binding, {sessionId: id, persistent: true}); }
       catch (error) { if (stopped(error)) return; throw error; }
-      try { await beforeClose(browser); }
+      try { if (beforeClose) await beforeClose(browser); }
       finally {
-        try { await (await browser.newBrowserCDPSession()).send('Browser.close'); }
+        try { if (terminate) await terminate(binding, id); else await (await browser.newBrowserCDPSession()).send('Browser.close'); }
         finally { await browser.close().catch(() => {}); }
       }
     }

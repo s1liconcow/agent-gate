@@ -14,8 +14,8 @@ const setupBlockers = new Set(['LOGIN_REQUIRED', 'PERMISSION_REQUIRED', 'MODEL_S
   'INFERENCE_CONFIG_CHANGED', 'INFERENCE_AUTH_FAILED', 'INFERENCE_NOT_APPROVED', 'OUT_OF_SCOPE', 'TAB_CLOSED', 'LOCAL_CHECK_REFUSED', 'PAGE_UNSUPPORTED']);
 
 export class HostedBrowser {
-  constructor({storage, consent, factory, scripts, call, snapshot, reset, classifierReady = async () => false, now = Date.now, loginCheckpointMilliseconds = 15000, disconnectMilliseconds = 5000}) {
-    Object.assign(this, {storage, consent, factory, scripts, call, snapshot, reset, classifierReady, now, loginCheckpointMilliseconds, disconnectMilliseconds}); this.queue = Promise.resolve(); this.privateSession = new Map();
+  constructor({storage, consent, factory, scripts, call, snapshot, reset, classifierReady = async () => false, now = Date.now, loginCheckpointMilliseconds = 15000, disconnectMilliseconds = 5000, startupMilliseconds = 15000}) {
+    Object.assign(this, {storage, consent, factory, scripts, call, snapshot, reset, classifierReady, now, loginCheckpointMilliseconds, disconnectMilliseconds, startupMilliseconds}); this.queue = Promise.resolve(); this.privateSession = new Map();
   }
   serial(operation) { const pending = this.queue.then(operation, operation); this.queue = pending.catch(() => {}); return pending; }
   async config(expected) {
@@ -47,13 +47,13 @@ export class HostedBrowser {
     if (retained && (retained.connection.account_id !== config.account_id || retained.connection.browser_id !== config.browser_id || retained.connection.sessionId !== saved?.sessionId || retained.browser.isConnected?.() === false)) {
       await this.disconnect(); retained = null;
     }
-    let browser = retained?.browser, phase = 'browser_acquisition';
+    let browser = retained?.browser, phase = 'browser_acquisition', pendingSession;
     try {
       await this.config(config);
       if (!retained) {
         await this.progress(phase);
         const opened = await this.openConnection(store, saved?.sessionId, sessionId => store.put('connection', {account_id: config.account_id, browser_id: config.browser_id, sessionId, anchor: null, last_activity_at: this.now()}));
-        browser = opened.browser;
+        browser = opened.browser; pendingSession = opened.sessionId;
         await this.config(config);
         phase = 'browser_recovery';
         await this.progress(phase);
@@ -81,12 +81,17 @@ export class HostedBrowser {
         phase = 'browser_recovery';
         await this.progress(phase);
         await adapter.recover();
-        phase = 'browser_anchor';
-        await this.progress(phase);
         // The anchor identifies this account's context without a website load.
         // Every task's inference runs on its paired local classifier.
-        if (!adapter.anchorPage) adapter.anchorPage = await context.newPage();
-        const anchor = await adapter.target(adapter.anchorPage);
+        if (!adapter.anchorPage) {
+          phase = 'opening_tab'; await this.progress(phase);
+          adapter.anchorPage = await deadline(signal => context.newPage().then(async page => {
+            if (signal.aborted) { await page.close().catch(() => {}); throw signal.reason; }
+            return page;
+          }), this.startupMilliseconds, 'BROWSER_UNRESPONSIVE');
+        }
+        phase = 'browser_anchor'; await this.progress(phase);
+        const anchor = await deadline(() => adapter.target(adapter.anchorPage), this.startupMilliseconds, 'BROWSER_UNRESPONSIVE');
         const connection = {account_id: config.account_id, browser_id: config.browser_id, sessionId: opened.sessionId, anchor};
         retained = this.connection = {browser, adapter, connection};
       }
@@ -130,7 +135,14 @@ export class HostedBrowser {
     } catch (error) {
       error.phase ||= phase;
       if (this.connection?.browser === browser) await this.disconnect();
-      else if (browser) await deadline(() => browser.close(), this.disconnectMilliseconds, 'BROWSER_UNRESPONSIVE').catch(() => {});
+      else if (browser) {
+        if (pendingSession && this.factory.close) {
+          try { await deadline(() => this.factory.close(pendingSession), this.disconnectMilliseconds, 'BROWSER_UNRESPONSIVE'); }
+          catch { await this.storage.put('hosted:cleanup:' + crypto.randomUUID(), {sessionId: pendingSession}); }
+          if ((await store.get('connection'))?.sessionId === pendingSession) await store.delete('connection');
+        }
+        await deadline(() => browser.close(), this.disconnectMilliseconds, 'BROWSER_UNRESPONSIVE').catch(() => {});
+      }
       throw error;
     }
   }
