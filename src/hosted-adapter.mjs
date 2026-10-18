@@ -52,6 +52,9 @@ export class HostedAdapter {
   page(id) { const page = this.pages.get(id); if (!page || page.isClosed()) throw fault('TAB_CLOSED'); return page; }
   async tab(id) {
     const page = this.page(id);
+    // A new tab's blank document is already loaded while its first website
+    // navigation is still pending. It cannot be a ready, scoped task page.
+    if (page.url() === 'about:blank') return {id, url: page.url(), status: 'loading'};
     let status = 'complete';
     // Playwright tracks load events on the transport. Reading readiness must
     // not queue JavaScript behind an unresponsive website's main thread.

@@ -37,3 +37,12 @@ test('transport load state reports loading without executing website JavaScript'
   assert.equal((await adapter.tab('task')).status, 'loading');
   loaded = true; assert.equal((await adapter.tab('task')).status, 'complete');
 });
+
+test('the loaded blank document stays loading until its first website navigation commits', async () => {
+  const adapter = new HostedAdapter({}, {}, {});
+  let url = 'about:blank';
+  adapter.pages.set('task', {isClosed: () => false, url: () => url, waitForLoadState: async () => {}});
+  assert.equal((await adapter.tab('task')).status, 'loading');
+  url = 'https://example.com';
+  assert.equal((await adapter.tab('task')).status, 'complete');
+});
