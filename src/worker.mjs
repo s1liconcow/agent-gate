@@ -59,21 +59,20 @@ async function body(request) {
   const raw = new Uint8Array(length); let offset = 0; for (const c of chunks) { raw.set(c, offset); offset += c.length; }
   try { return JSON.parse(new TextDecoder().decode(raw)); } catch { fail('INVALID_BODY', 'The JSON request is invalid.'); }
 }
-export class AccountGate extends DurableObject {
+export class Gate extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env); this.engine = new Engine(ctx.storage); this.engagement = new Engagement(ctx.storage); this.connectors = new Connectors(ctx.storage); this.browsers = new Browsers(ctx.storage); this.tickets = new Map();
-    const browserBinding = env.BROWSER_RUN || env.BROWSER;
     this.browserRouting = new BrowserRouting(ctx.storage);
     this.classifier = new LocalClassifier(ctx.storage, {engine: this.engine, allowed: async id => {
       const item = await ctx.storage.get('browser:' + id);
       return item?.kind !== 'hosted' && item?.status === 'active' && item.expires_at > Date.now() && ctx.getWebSockets('browser:' + id).some(ws => ws.readyState === 1);
     }});
-    this.cloudDeployment = {browser_binding: Boolean(browserBinding), assets_binding: Boolean(env.HOSTED_MODELS), model_installed: Boolean(hostedModel)};
-    this.hostedConsent = new HostedConsent(ctx.storage, {model: hostedModel, available: Boolean(browserBinding && env.HOSTED_MODELS && hostedModel)});
-    this.connectionSetup = new ConnectionSetup(ctx.storage, {model: hostedModel, available: Boolean(browserBinding && env.HOSTED_MODELS && hostedModel)});
+    this.cloudDeployment = {browser_binding: Boolean(env.BROWSER), assets_binding: Boolean(env.HOSTED_MODELS), model_installed: Boolean(hostedModel)};
+    this.hostedConsent = new HostedConsent(ctx.storage, {model: hostedModel, available: Boolean(env.BROWSER && env.HOSTED_MODELS && hostedModel)});
+    this.connectionSetup = new ConnectionSetup(ctx.storage, {model: hostedModel, available: Boolean(env.BROWSER && env.HOSTED_MODELS && hostedModel)});
     this.loginSources = new Browsers(ctx.storage, Date.now, {loginSource: true});
     this.loginSync = new LoginSync(ctx.storage, this.hostedConsent, this.loginSources);
-    this.hosted = new HostedBrowser({storage: ctx.storage, consent: this.hostedConsent, factory: cloudflareBrowserFactory(browserBinding), scripts: hostedScripts,
+    this.hosted = new HostedBrowser({storage: ctx.storage, consent: this.hostedConsent, factory: cloudflareBrowserFactory(env.BROWSER), scripts: hostedScripts,
       call: (path, data) => this.hostedCall(path, data), snapshot: () => this.hostedSnapshot(), classifierReady: id => this.classifier.allowed(id), reset: () => this.hostedLock(async () => {
         const hosted = await this.hostedConsent.current();
         for (const item of await this.engine.list()) if (item.status === 'active' && hosted && await this.browserRouting.owns(item, hosted.browser_id)) {
@@ -137,7 +136,7 @@ export class AccountGate extends DurableObject {
     return answer;
   }); }
   kickHosted() {
-    if (!(this.env.BROWSER_RUN || this.env.BROWSER)) return;
+    if (!this.env.BROWSER) return;
     if (this.hostedWork) { this.hostedAgain = true; return; }
     this.hostedWork = (async () => {
       do {
@@ -692,9 +691,6 @@ export class AccountGate extends DurableObject {
     await this.dispatch();
   }
 }
-
-// Keep existing bindings and local harness imports valid during the class rename.
-export {AccountGate as Gate};
 
 const app = {
   async fetch(request, env, ctx) {
