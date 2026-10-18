@@ -21,8 +21,14 @@ html = html.replace(approvalLink, `<a href="${approvalUrl}">Approval app</a>`);
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
 await writeFile(join(output, 'index.html'), html);
-await Promise.all(['landing.css', 'landing.mjs', 'icon.svg'].map(file =>
+await Promise.all(['landing.css', 'landing.mjs', 'legal.css', 'icon.svg', '_headers'].map(file =>
   copyFile(join(source, file), join(output, file))
 ));
+for (const file of ['privacy.html', 'terms.html']) {
+  const page = (await readFile(join(source, file), 'utf8'))
+    .replaceAll('href="/landing.html"', 'href="/"')
+    .replace(approvalLink, `<a href="${approvalUrl}">Approval app</a>`);
+  await writeFile(join(output, file), page);
+}
 
 console.log(`Built Cloudflare Pages site in ${output}`);
