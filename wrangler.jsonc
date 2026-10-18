@@ -10,5 +10,11 @@
   "r2_buckets": [{"binding": "HOSTED_MODELS", "bucket_name": "agentgate-hosted-models"}],
   "durable_objects": {"code_update_strategy": {"mode": "immediate"}, "bindings": [{"name": "GATE", "class_name": "Gate"}, {"name": "REGISTRY", "class_name": "Registry"}]},
   "migrations": [{"tag": "v1", "new_sqlite_classes": ["Gate"]}, {"tag": "v2", "new_sqlite_classes": ["Registry"]}],
-  "observability": {"enabled": true, "redact_query_string": true, "logs": {"enabled": true, "invocation_logs": true}}
+  "observability": {
+    "enabled": true,
+    "redact_query_string": true,
+    "logs": {"enabled": true, "invocation_logs": true},
+    "traces": {"enabled": true},
+    "issues": {"enabled": true}
+  }
 }
