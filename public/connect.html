@@ -4,6 +4,7 @@
 <main class="phone connect-page"><h1>Connect your assistant</h1><p id="connectionSummary">Loading your connection…</p>
 <div id="status" role="status" class="message" hidden></div>
 <form id="connectForm" hidden>
+<section id="inviteSection" hidden><label for="inviteCode">Invitation code<input id="inviteCode" autocomplete="off" spellcheck="false" maxlength="43" pattern="[A-Za-z0-9_-]{43}" aria-describedby="inviteHint"></label><p id="inviteHint" class="hint">An invite code is required to create your account.</p></section>
 <section class="engagement-panel"><label for="engagementSlider">When to ask <output id="engagementLabel">Record only</output></label><input id="engagementSlider" type="range" min="0" max="2" step="1" value="0" aria-describedby="engagementDescription" aria-valuetext="Record only"><div class="engagement-stops" aria-hidden="true"><span>Record only</span><span>Balanced</span><span>Careful</span></div><p id="engagementDescription"></p></section>
 <p class="hint">Includes a cloud browser with saved logins.</p>
 <button id="continue" type="submit">Connect</button>

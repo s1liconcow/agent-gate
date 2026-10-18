@@ -1,7 +1,12 @@
-import {exact, fail, random} from '../shared/protocol.mjs';
+import {digest, exact, fail, random} from '../shared/protocol.mjs';
 
 const json = (value, status = 200, headers) => new Response(JSON.stringify(value), {status, headers: {...headers, 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'}});
 const key = id => 'oauth:connection:' + id;
+async function requireInvite(registry, invite) {
+  if (!invite) fail('INVITE_REQUIRED', 'Enter an invitation code to create an account.', 403);
+  const checked = await registry.validateInvite(invite);
+  if (checked.error) fail(checked.code || 'INVALID_INVITE', checked.error, checked.status || 403);
+}
 function bindingMatches(request, binding) {
   const cookie = (request.headers.get('Cookie') || '').split(';').map(part => part.trim()).find(part => part.startsWith(binding.name + '='))?.slice(binding.name.length + 1);
   if (!cookie || cookie.length !== binding.value.length) return false;
@@ -36,32 +41,43 @@ export async function inlineConnectionRoute(request, env, api, tenant_id = null)
   try {
     const input = await readBody(request);
     if (route[1] === 'prepare') {
-      exact(input, ['mode', 'account_id', 'public_key', 'owner_token']);
+      exact(input, ['mode', 'account_id', 'public_key', 'owner_token', ...(Object.hasOwn(input, 'invite') ? ['invite'] : [])]);
       if (tenant_id && input.account_id !== tenant_id) fail('WRONG_ACCOUNT', 'Use the approval device for this account.', 403);
       const account_id = input.account_id || context.proposed_account_id, new_account = !input.account_id;
       if (account_id !== 'owner' && !/^[a-f0-9]{32}$/.test(account_id)) fail('WRONG_ACCOUNT', 'Unknown account.', 403);
       if (!new_account && account_id !== 'owner' && !await env.REGISTRY.getByName('beta-registry-v1').hasAccount(account_id)) fail('WRONG_ACCOUNT', 'Unknown account.', 403);
+      const {invite, ...setup} = input;
+      if (new_account) await requireInvite(env.REGISTRY.getByName('beta-registry-v1'), invite);
       const coordinator = url.origin + (account_id === 'owner' ? '' : '/u/' + account_id);
       const gate = env.GATE.getByName(account_id === 'owner' ? 'single-owner-v1' : 'account:' + account_id);
-      const answer = await gate.prepareConnectionSetup({...input, cloud_browser: true, id: context.id, account_id, new_account, coordinator, auth: context.auth, client_name: context.client_name, expires_at: context.expires_at});
+      const answer = await gate.prepareConnectionSetup({...setup, cloud_browser: true, id: context.id, account_id, new_account, coordinator, auth: context.auth, client_name: context.client_name, expires_at: context.expires_at});
       if (answer.error) return json(answer.error, answer.error.status || 400);
       context.account_id = account_id; context.new_account = new_account;
+      if (new_account) context.invite_hash = await digest(invite);
+      else delete context.invite_hash;
       await env.OAUTH_KV.put(key(context.id), JSON.stringify(context), {expirationTtl: Math.max(1, Math.ceil((context.expires_at - Date.now()) / 1000))});
       return json(answer.result);
     }
     // Keep pending connections created by the previous phone flow interoperable.
     if (!Object.keys(input).length) return null;
     if (!context.account_id) fail('STALE_APPROVAL', 'Choose an engagement level and approve the connection.', 409);
+    let receipts = input;
+    if (context.new_account) {
+      exact(input, ['connector', 'engagement', 'hosted_browser', 'invite']);
+      if (!context.invite_hash || typeof input.invite !== 'string' || await digest(input.invite) !== context.invite_hash) fail('INVITE_REQUIRED', 'Enter your invitation code and connect again.', 403);
+      await requireInvite(env.REGISTRY.getByName('beta-registry-v1'), input.invite);
+      const {invite, ...signed} = input; receipts = signed;
+    }
     const account_id = context.account_id, gate = env.GATE.getByName(account_id === 'owner' ? 'single-owner-v1' : 'account:' + account_id);
-    const checked = await gate.validateConnectionSetup(context.id, input);
+    const checked = await gate.validateConnectionSetup(context.id, receipts);
     if (checked.error) return json(checked.error, checked.error.status || 400);
     // This consumes the initiating browser's cookie-bound OAuth transaction.
     const consent = await api.approveConsent(request, context.handle, {scope: context.auth.scope});
     if (context.new_account) {
-      const enrolled = await env.REGISTRY.getByName('beta-registry-v1').activateConnectionAccount(account_id);
+      const enrolled = await env.REGISTRY.getByName('beta-registry-v1').activateConnectionAccount(account_id, input.invite);
       if (enrolled.error) return json({error: 'enrollment_failed', error_description: enrolled.error}, enrolled.status);
     }
-    const approved = await gate.completeConnectionSetup(context.id, input);
+    const approved = await gate.completeConnectionSetup(context.id, receipts);
     if (approved.error) return json(approved.error, approved.error.status || 400);
     const claim = await gate.claimConnector(context.id); if (claim.error) return json({error: 'approval_changed'}, 409);
     const props = account_id === 'owner' ? {connector_id: context.id} : {account_id, connector_id: context.id};

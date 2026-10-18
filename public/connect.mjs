@@ -20,7 +20,7 @@ function validate(prepared, mode) {
 }
 $('engagementSlider').addEventListener('input', describe); describe();
 $('connectForm').addEventListener('submit', async event => {
-  event.preventDefault(); if (completing) return; completing = true; $('continue').disabled = true; $('engagementSlider').disabled = true;
+  event.preventDefault(); if (completing) return; completing = true; $('continue').disabled = true; $('engagementSlider').disabled = true; $('inviteCode').disabled = true;
   try {
     status('Connecting…');
     if (!device) {
@@ -28,19 +28,20 @@ $('connectForm').addEventListener('submit', async event => {
       const {kty, crv, x, y} = await crypto.subtle.exportKey('jwk', pair.publicKey);
       device = {key: pair.privateKey, publicKey: {kty, crv, x, y}, token: [...crypto.getRandomValues(new Uint8Array(32))].map(byte => byte.toString(16).padStart(2, '0')).join('')};
     }
-    const mode = engagementModes[Number($('engagementSlider').value)], prepared = await api('prepare', {mode, account_id: deviceAccount || null, public_key: device.publicKey, owner_token: device.token});
+    const enrollment = deviceAccount ? {} : {invite: $('inviteCode').value.trim()};
+    const mode = engagementModes[Number($('engagementSlider').value)], prepared = await api('prepare', {mode, account_id: deviceAccount || null, public_key: device.publicKey, owner_token: device.token, ...enrollment});
     validate(prepared, mode);
     // Keep the non-extractable key before completing consent so a lost callback
     // cannot lose access to the newly authorized account.
     await stored('put', prepared.account_id === 'owner' ? 'device' : 'device:' + prepared.account_id, device);
     await stored('put', 'device:last', prepared.account_id);
     const receipts = {connector: await sign(prepared.connector), engagement: await sign(prepared.engagement), hosted_browser: prepared.hosted_browser ? await sign(prepared.hosted_browser) : null};
-    const result = await api('complete', receipts);
+    const result = await api('complete', {...receipts, ...enrollment});
     if (result.account_id !== prepared.account_id || result.account_url !== prepared.coordinator) throw new Error('Account changed. Start sign-in again.');
     const destination = new URL(result.redirect), expected = new URL(context.redirect_uri);
     if (!['https:', 'http:'].includes(destination.protocol) || destination.username || destination.password || destination.origin !== expected.origin || destination.pathname !== expected.pathname) throw new Error('Invalid assistant return address.');
-    status('Connected. Returning to your assistant…'); location.assign(destination.href);
-  } catch (error) { status(error.message, true); completing = false; $('continue').disabled = false; $('engagementSlider').disabled = false; }
+    $('inviteCode').value = ''; status('Connected. Returning to your assistant…'); location.assign(destination.href);
+  } catch (error) { status(error.message, true); completing = false; $('continue').disabled = false; $('engagementSlider').disabled = false; $('inviteCode').disabled = false; }
 });
 try {
   if (!/^[a-f0-9]{32}$/.test(id || '')) throw new Error('Start the connection from OpenAI or your assistant.');
@@ -64,6 +65,7 @@ try {
     }
   }
   $('connectionSummary').textContent = context.client_name + ' can use your browser for tasks.';
+  $('inviteSection').hidden = Boolean(deviceAccount); $('inviteCode').required = !deviceAccount;
   for (const [label, value] of [['Assistant', context.client_name], ['Return address', context.redirect_uri], ['Access', 'Scoped browser tasks'], ['Account', deviceAccount ? 'Your existing account' : 'A new private account']]) { const term = document.createElement('dt'), description = document.createElement('dd'); term.textContent = label; description.textContent = value; $('connectionDetails').append(term, description); }
   $('connectForm').hidden = false;
 } catch (error) { status(error.message, true); }

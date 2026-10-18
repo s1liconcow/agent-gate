@@ -28,7 +28,7 @@
     "check:source": "node scripts/check-source.mjs",
     "test:native-extension": "node scripts/native-extension-probe.mjs",
     "test:admin": "npm run build && node tests/admin-browser.mjs",
-    "test:invites": "npm run build && node --test tests/invites.test.mjs && node tests/invites-browser.mjs",
+    "test:invites": "npm run build && node --test tests/invites.test.mjs && node tests/invites-browser.mjs && node tests/oauth-invites-routes.mjs",
     "deploy:release": "node scripts/deploy-release.mjs",
     "test:e2e": "npm run demo:flow",
     "test:extension": "npm run build && node tests/extension-disconnect-browser.mjs",

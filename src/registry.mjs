@@ -21,12 +21,16 @@ export class Registry extends DurableObject {
   async hasAccount(id) {
     return /^[a-f0-9]{32}$/.test(id) && await this.ctx.storage.get('account:' + id) === true;
   }
+  async validateInvite(invite) {
+    try {
+      await new Invites(this.ctx.storage).authorize(invite, this.env.BETA_INVITE_TOKEN);
+      return {valid: true};
+    } catch (error) {const failure = apiFailure(error); return {error: failure.message, code: failure.code, status: failure.status};}
+  }
   async enroll(invite) {
     return this.ctx.blockConcurrencyWhile(async () => {
       try {
-        const invitations = new Invites(this.ctx.storage), invitation = await invitations.find(invite);
-        const expected = this.env.BETA_INVITE_TOKEN;
-        if (!invitation && (typeof expected !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(expected) || await digest(invite) !== await digest(expected))) return {error: 'This invitation is invalid.', status: 403};
+        const invitations = new Invites(this.ctx.storage), invitation = await invitations.authorize(invite, this.env.BETA_INVITE_TOKEN);
         const configured = Number(this.env.BETA_MAX_USERS ?? 10);
         const limit = Number.isSafeInteger(configured) ? Math.min(100, Math.max(0, configured)) : 10;
         const count = await this.ctx.storage.get('count') || 0;
@@ -39,16 +43,20 @@ export class Registry extends DurableObject {
       } catch (error) { const failure = apiFailure(error); return {error: failure.message, code: failure.code, status: failure.status}; }
     });
   }
-  async activateConnectionAccount(account_id) {
+  async activateConnectionAccount(account_id, invite) {
     return this.ctx.blockConcurrencyWhile(async () => {
-      if (!/^[a-f0-9]{32}$/.test(account_id) || await this.hasAccount(account_id)) return {error: 'Account changed. Start the connection again.', status: 409};
-      const configured = Number(this.env.BETA_MAX_USERS ?? 10), limit = Number.isSafeInteger(configured) ? Math.min(100, Math.max(0, configured)) : 10;
-      const count = await this.ctx.storage.get('count') || 0;
-      if (count >= limit) return {error: 'The beta is full.', status: 409};
-      // Only the Worker calls this after browser-bound OAuth consent and signatures pass.
-      await this.env.GATE.getByName('account:' + account_id).initializeAccount(account_id, await digest(b64url(crypto.getRandomValues(new Uint8Array(32)))));
-      await this.ctx.storage.put({count: count + 1, ['account:' + account_id]: true});
-      return {account_id};
+      try {
+        const invitations = new Invites(this.ctx.storage), invitation = await invitations.authorize(invite, this.env.BETA_INVITE_TOKEN);
+        if (!/^[a-f0-9]{32}$/.test(account_id) || await this.hasAccount(account_id)) return {error: 'Account changed. Start the connection again.', status: 409};
+        const configured = Number(this.env.BETA_MAX_USERS ?? 10), limit = Number.isSafeInteger(configured) ? Math.min(100, Math.max(0, configured)) : 10;
+        const count = await this.ctx.storage.get('count') || 0;
+        if (count >= limit) return {error: 'The beta is full.', status: 409};
+        // Consent and signatures precede this call; invitation redemption shares
+        // the registry lock with /api/signup so only one account can use a code.
+        await this.env.GATE.getByName('account:' + account_id).initializeAccount(account_id, await digest(b64url(crypto.getRandomValues(new Uint8Array(32)))));
+        await this.ctx.storage.put({count: count + 1, ['account:' + account_id]: true, ...(invitation ? invitations.redemption(invitation, account_id) : {})});
+        return {account_id};
+      } catch (error) {const failure = apiFailure(error); return {error: failure.message, code: failure.code, status: failure.status};}
     });
   }
 }

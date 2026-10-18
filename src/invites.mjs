@@ -48,6 +48,11 @@ export class Invites {
     if (status !== 'pending') fail('INVITE_' + status.toUpperCase(), {redeemed: 'This invitation has already been used.', revoked: 'This invitation was revoked.', expired: 'This invitation has expired.'}[status], 410);
     return item;
   }
+  async authorize(token, legacyToken) {
+    const invitation = await this.find(token);
+    if (!invitation && (typeof legacyToken !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(legacyToken) || await digest(token) !== await digest(legacyToken))) fail('INVALID_INVITE', 'Enter a valid invitation code to create an account.', 403);
+    return invitation;
+  }
   redemption(item, account_id) {
     return {[key(item.id)]: {...item, account_id, redeemed_at: this.now()}};
   }

@@ -9,7 +9,14 @@ engagement for 90 days, and enables the account's cloud browser. Cloud access
 renews automatically while preserving website logins and inference settings.
 There is no cloud-browser checkbox or separate phone setup.
 
-A first connection creates a private account after consent. The approval key is
+A first connection requires an invitation code and creates a private account after
+consent. The server validates the code before setup and rechecks it when creating
+the account. Single-use invitations are redeemed atomically across signup paths;
+expired, revoked, and redeemed codes cannot create accounts. Existing accounts
+can reconnect without another invitation. Google sign-in must apply this same
+invitation check whenever it creates a new account.
+
+The approval key is
 non-extractable and stored in this browser's IndexedDB. Returning connections in
 the same browser reuse the account, saved level, browser connection, configured
 inference and website logins. Account-specific MCP URLs remain supported. An

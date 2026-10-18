@@ -30,6 +30,17 @@ test('invalid creation cannot persist records or claim admin authority', async (
   assert.equal(storage.items.size, 0);
 });
 
+test('account creation requires a pending invitation or the configured legacy code', async () => {
+  const storage = new Storage(), invites = new Invites(storage, () => start), legacy = 'L'.repeat(43);
+  const {invite, token} = await invites.create({}, 'owner');
+  assert.equal((await invites.authorize(token)).id, invite.id);
+  assert.equal(await invites.authorize(legacy, legacy), null);
+  for (const configured of [undefined, '', 'invalid', 'X'.repeat(43)]) await assert.rejects(invites.authorize(legacy, configured), {code: 'INVALID_INVITE', status: 403});
+  for (const value of [undefined, null, '', 'invalid']) await assert.rejects(invites.authorize(value, legacy), {code: 'INVALID_INVITE', status: 403});
+  await invites.revoke(invite.id);
+  await assert.rejects(invites.authorize(token, token), {code: 'INVITE_REVOKED', status: 410});
+});
+
 test('revocation is idempotent and only pending invites are changed', async () => {
   const storage = new Storage(); let time = start;
   const invites = new Invites(storage, () => time), {invite, token} = await invites.create({}, 'owner');

@@ -36,6 +36,11 @@ export default {async fetch(request, env, ctx) {
       return Response.json(await env.GATE.getByName(id === 'owner' ? 'single-owner-v1' : 'account:' + id).records());
     }
     if (url.pathname === '/_admin-test/registry' && request.method === 'GET') return Response.json(await env.REGISTRY.getByName('beta-registry-v1').records());
+    if (url.pathname === '/_admin-test/oauth-context' && request.method === 'GET') return Response.json(await env.OAUTH_KV.get('oauth:connection:' + url.searchParams.get('id'), 'json'));
+    if (url.pathname === '/_admin-test/activate-connection' && request.method === 'POST') {
+      const {id, invite} = await request.json(), answer = await env.REGISTRY.getByName('beta-registry-v1').activateConnectionAccount(id, invite);
+      return Response.json(answer, {status: answer.status || 200});
+    }
     if (url.pathname === '/_admin-test/capacity' && request.method === 'POST') {await env.REGISTRY.getByName('beta-registry-v1').capacity((await request.json()).count); return Response.json({ok: true});}
     if (url.pathname === '/_admin-test/expire-invite' && request.method === 'POST') {await env.REGISTRY.getByName('beta-registry-v1').expireInvite((await request.json()).id); return Response.json({ok: true});}
     return new Response('Not found', {status: 404});
