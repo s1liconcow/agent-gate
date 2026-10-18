@@ -1,4 +1,5 @@
 import {deadline} from '../extension/deadline.mjs';
+import {executionError} from '../shared/bridge-result.mjs';
 
 const fault = (code, execution_error) => Object.assign(new Error(code), {code, ...(execution_error ? {execution_error} : {})});
 const transport = `globalThis.chrome ||= {};chrome.runtime ||= {id:'agentgate-hosted',onMessage:{addListener(f){(globalThis.__agentgateListeners ||= new Set()).add(f)},removeListener(f){globalThis.__agentgateListeners?.delete(f)}}};`;
@@ -47,7 +48,7 @@ export class HostedAdapter {
     // A navigation timeout can still leave a usable page. All later access checks
     // inspect the current origin and document readiness before capture.
     try { await page.goto(url, {waitUntil: 'domcontentloaded', timeout: 15000}); }
-    catch (error) { if (error.name !== 'TimeoutError') throw fault('BROWSER_UNRESPONSIVE'); }
+    catch (error) { if (error.name !== 'TimeoutError') throw Object.assign(fault('BROWSER_UNRESPONSIVE', executionError(error)), {phase: 'opening_tab'}); }
     const world = this.worlds.get(id); if (world) world.executionContextId = null;
     return this.tab(id);
   }

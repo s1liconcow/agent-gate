@@ -19,6 +19,12 @@ const fixture = (factory, storage = new Memory(), now = Date.now) => ({
   storage, store: new HostedState(storage, config.account_id, config.browser_id),
   hosted: new HostedBrowser({storage, factory, now, consent: {current: async () => config}, snapshot: async () => ({sessions: []})})
 });
+test('cloud initialization failures retain their stage for bounded runtime diagnostics', async () => {
+  const acquisition = fixture({open: async () => { throw new Error('Provider failure'); }});
+  await assert.rejects(acquisition.hosted.connected(() => {}), error => error.phase === 'browser_acquisition');
+  const recovery = fixture({open: async () => ({sessionId: 'owned', fresh: true, browser: {contexts: () => [], close: async () => {}}})});
+  await assert.rejects(recovery.hosted.connected(() => {}), error => error.phase === 'browser_recovery');
+});
 
 test('idle and expired tasks close the saved process without reconnecting or creating a replacement', async () => {
   const closed = [], f = fixture({open: async () => {throw new Error('Idle cleanup must not open a browser');}, close: async id => closed.push(id)});

@@ -140,10 +140,11 @@ export class Engine {
     }
   }
   async runtime(id, input) {
-    exact(input, ['state', 'code', ...['phase', 'extension_version', 'browser_limit'].filter(key => Object.hasOwn(input || {}, key))]); const item = await this.get(id);
+    exact(input, ['state', 'code', ...['phase', 'extension_version', 'browser_limit', 'execution_error'].filter(key => Object.hasOwn(input || {}, key))]); const item = await this.get(id);
     if (terminal.has(item.status)) fail('SESSION_NOT_ACTIVE', 'This session has ended.', 409);
     if (!['starting', 'planning', 'ready', 'blocked'].includes(input.state) || ![null, 'PERMISSION_REQUIRED', 'MODEL_SETUP_REQUIRED', 'MODEL_UNAVAILABLE', 'MODEL_TIMEOUT', 'LOCAL_CLASSIFIER_UNAVAILABLE', 'LOCAL_CLASSIFIER_REFUSED', 'LOCAL_CLASSIFIER_STALE', 'LOCAL_CLASSIFIER_REPLAY', 'BROWSER_UNRESPONSIVE', 'BROWSER_RATE_LIMITED', 'LOGIN_REQUIRED', 'OUT_OF_SCOPE', 'TAB_CLOSED', 'LOCAL_CHECK_REFUSED', 'PAGE_UNSUPPORTED', 'CONTENT_NOT_READY', 'INFERENCE_CONFIG_CHANGED', 'INFERENCE_AUTH_FAILED', 'INFERENCE_RATE_LIMITED', 'INFERENCE_UNAVAILABLE', 'INFERENCE_NOT_APPROVED'].includes(input.code)) fail('INVALID_RESULT', 'Invalid browser runtime status.');
     if ((input.phase !== undefined && input.phase !== null && !browserPhases.includes(input.phase)) || (input.extension_version !== undefined && !/^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(input.extension_version))) fail('INVALID_RESULT', 'Invalid browser progress metadata.');
+    if (input.execution_error !== undefined && (input.state !== 'blocked' || input.code !== 'BROWSER_UNRESPONSIVE' || !executionErrors.includes(input.execution_error))) fail('INVALID_RESULT', 'Invalid browser failure diagnostic.');
     if (input.browser_limit !== undefined) {
       exact(input.browser_limit, ['reason', 'retry_at']);
       if (input.state !== 'blocked' || input.code !== 'BROWSER_RATE_LIMITED' || !['daily_time', 'concurrency', 'acquisition_rate', 'unknown'].includes(input.browser_limit.reason) || !Number.isSafeInteger(input.browser_limit.retry_at) || input.browser_limit.retry_at < 1 || input.browser_limit.retry_at > 8640000000000000) fail('INVALID_RESULT', 'Invalid browser limit metadata.');

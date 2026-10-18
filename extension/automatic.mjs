@@ -9,6 +9,7 @@ import {inferenceSettings} from './inference-settings.mjs';
 import {purposeBrowserModel} from './purpose-browser-model.mjs';
 import {engagementDecision} from './engagement.mjs';
 import {purposeDecision} from './purpose-engagement.mjs';
+import {executionError} from './bridge-result.mjs';
 const enabled=(task,automation)=>Boolean(automation?.enabled);
 
 export class AutomaticBrowser {
@@ -22,9 +23,9 @@ export class AutomaticBrowser {
       if (this.ended.has(current?.id) || !current || canonical(current.scope) !== canonical(item.scope) || (checking ? current.status !== 'checking_action' || current.last_command?.id !== item.command.id : current.status !== 'active' || current.view || current.disclosure_request?.id !== item.disclosure_request?.id || current.dom_request?.id !== item.dom_request?.id || current.dom_request && current.dom_request.deadline <= this.now())) throw inferenceError('INFERENCE_NOT_APPROVED');
     } catch { throw inferenceError('INFERENCE_NOT_APPROVED'); }
   }
-  async runtime(id, state, code = null, phase = null) {
+  async runtime(id, state, code = null, phase = null, execution_error) {
     const version = this.api.runtime?.getManifest?.().version;
-    const report = async () => { await this.activity.report(id, state); try { await this.call('sessions/' + id + '/runtime', {state, code, phase, ...(version ? {extension_version: version} : {})}); } catch { /* No runtime report can grant access. */ } };
+    const report = async () => { await this.activity.report(id, state); try { await this.call('sessions/' + id + '/runtime', {state, code, phase, ...(version ? {extension_version: version} : {}), ...(execution_error ? {execution_error} : {})}); } catch { /* No runtime report can grant access. */ } };
     // Preserve status order when a heartbeat overlaps publication or a timeout.
     this.runtimeQueue = this.runtimeQueue.then(report, report); await this.runtimeQueue;
   }
@@ -91,14 +92,16 @@ export class AutomaticBrowser {
         let attempt = this.attempts.get(item.id);
         if (!attempt || attempt.key !== key) { attempt = {key, since: this.now(), retry_at: 0}; this.attempts.set(item.id, attempt); }
         if (attempt.retry_at > this.now()) continue;
-        let counts;
+        let counts, phase = 'opening_tab';
         try {
           await this.receipt(item);
           const tab = await this.ownedTab(item);
+          phase = 'page_loading';
           if (tab.status !== 'complete') { const error = new Error('Page loading.'); error.code = 'CONTENT_NOT_READY'; error.phase = 'page_loading'; throw error; }
           const site = new URL(tab.url).origin;
           if (!item.scope.origins.includes(site)) { const error = new Error('The task tab left the approved websites.'); error.code = 'OUT_OF_SCOPE'; throw error; }
-          await this.runtime(item.id, 'planning', null, 'capture');
+          phase = 'capture';
+          await this.runtime(item.id, 'planning', null, phase);
           await deadline(() => this.api.scripting.executeScript({target: {tabId: tab.id, frameIds: [0]}, files: ['content.js']}), 15000, 'BROWSER_UNRESPONSIVE');
           const snapshot = await deadline(() => this.api.tabs.sendMessage(tab.id, {type: 'snapshot'}, {frameId: 0}), 15000, 'BROWSER_UNRESPONSIVE');
           const prepared = prepareSnapshot(snapshot, item.scope);
@@ -106,7 +109,7 @@ export class AutomaticBrowser {
           await this.diagnostic(item.id, {...counts, stage: 'captured'});
           if (snapshot.loading) { const error = new Error('Page loading.'); error.code = 'CONTENT_NOT_READY'; error.phase = 'page_loading'; throw error; }
           if (!prepared.entries.length) { const error = new Error('No eligible page content.'); error.code = snapshot.login_required ? 'LOGIN_REQUIRED' : 'PAGE_UNSUPPORTED'; throw error; }
-          let phase = 'model_availability';
+          phase = 'model_availability';
           const heartbeat = setInterval(() => this.runtime(item.id, 'planning', null, phase), 10000);
           let planned;
           try { planned = item.scope.engagement === 'AUDIT_ONLY' && !item.scope.purpose_guard ? {ids: [...prepared.entries.filter(e => e.kind === 'control').slice(0,24), ...prepared.entries.filter(e => e.kind === 'text').slice(0,8)].map(e => e.id)} : await this.model('plan', {snapshot, task: item.scope, need: item.disclosure_request?.need || ''}, {session_id: item.id, onStage: current => { if (modelPhases.includes(current)) phase = current; }, beforeInference: () => this.authorizeInference(item)}); }
@@ -133,7 +136,7 @@ export class AutomaticBrowser {
           const waiting = code === 'CONTENT_NOT_READY' && this.now() - attempt.since < 60000;
           attempt.retry_at = this.now() + (waiting ? 0 : 30000);
           if (counts) await this.diagnostic(item.id, {...counts, stage: 'withheld', code});
-          await this.runtime(item.id, waiting ? 'planning' : 'blocked', code, error.phase || (code === 'CONTENT_NOT_READY' ? 'view_validation' : null));
+          await this.runtime(item.id, waiting ? 'planning' : 'blocked', code, error.phase || (code === 'CONTENT_NOT_READY' ? 'view_validation' : phase), code === 'BROWSER_UNRESPONSIVE' ? executionError(error) : undefined);
         }
       }
     } catch (error) { await this.activity.pause(); throw error; }

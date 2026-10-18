@@ -27,6 +27,8 @@ import {hostedModel, hostedScripts} from './generated-hosted.mjs';
 import {LoginSync} from './login-sync.mjs';
 import {loginSyncCapabilities} from '../shared/login-sync.mjs';
 import {apiFailure} from './api-error.mjs';
+import {executionError} from '../shared/bridge-result.mjs';
+import {browserPhases} from '../extension/model-phases.mjs';
 
 export {Registry};
 
@@ -129,7 +131,7 @@ export class Gate extends DurableObject {
           const code = ['MODEL_TIMEOUT', 'MODEL_UNAVAILABLE', 'BROWSER_RATE_LIMITED', 'LOCAL_CLASSIFIER_UNAVAILABLE', 'LOCAL_CLASSIFIER_REFUSED', 'LOCAL_CLASSIFIER_STALE', 'LOCAL_CLASSIFIER_REPLAY'].includes(error.code) ? error.code : 'BROWSER_UNRESPONSIVE';
           if (await this.hostedConsent.current()) await this.hostedLock(async () => {
             const current = await this.hostedConsent.current();
-            for (const item of (await this.browserTasks(current.browser_id)).sessions) if (item.status === 'active') await this.engine.runtime(item.id, {state: 'blocked', code, ...(error.browser_limit ? {browser_limit: error.browser_limit} : {})});
+            for (const item of (await this.browserTasks(current.browser_id)).sessions) if (item.status === 'active') await this.engine.runtime(item.id, {state: 'blocked', code, ...(browserPhases.includes(error.phase) ? {phase: error.phase} : {}), ...(code === 'BROWSER_UNRESPONSIVE' ? {execution_error: executionError(error)} : {}), ...(error.browser_limit ? {browser_limit: error.browser_limit} : {})});
           });
         }
       } while (this.hostedAgain);

@@ -1,5 +1,5 @@
 // Diagnostic identifiers contain no page text, URLs, values or credentials.
-export const executionErrors = Object.freeze(['TASK_VIEW_CHANGED', 'PURPOSE_CHECK_MISSING', 'APPROVAL_CHANGED', 'ORIGIN_CHANGED', 'AUTHORITY_ENDED', 'READER_UNAVAILABLE', 'EVALUATION_FAILED', 'TRANSPORT_FAILED', 'INVALID_RESPONSE', 'COMMAND_CHANGED', 'UNEXPECTED_ERROR']);
+export const executionErrors = Object.freeze(['TASK_VIEW_CHANGED', 'PURPOSE_CHECK_MISSING', 'APPROVAL_CHANGED', 'ORIGIN_CHANGED', 'AUTHORITY_ENDED', 'READER_UNAVAILABLE', 'EVALUATION_FAILED', 'TRANSPORT_FAILED', 'NAVIGATION_RESPONSE_FAILED', 'NAVIGATION_ABORTED', 'NAVIGATION_FAILED', 'INVALID_RESPONSE', 'COMMAND_CHANGED', 'UNEXPECTED_ERROR']);
 const messages = new Map([
   ['The task view changed.', 'TASK_VIEW_CHANGED'],
   ['No matching purpose check.', 'PURPOSE_CHECK_MISSING'],
@@ -14,6 +14,9 @@ export function executionError(error) {
   if (executionErrors.includes(error?.execution_error)) return error.execution_error;
   if (messages.has(error?.message)) return messages.get(error.message);
   if (error?.code === 'INFERENCE_NOT_APPROVED') return 'AUTHORITY_ENDED';
+  if (/net::ERR_HTTP_RESPONSE_CODE_FAILURE\b/.test(error?.message || '')) return 'NAVIGATION_RESPONSE_FAILED';
+  if (/net::ERR_ABORTED\b/.test(error?.message || '')) return 'NAVIGATION_ABORTED';
+  if (/net::ERR_[A-Z_]+\b/.test(error?.message || '')) return 'NAVIGATION_FAILED';
   if (error?.code === 'BROWSER_UNRESPONSIVE' || error?.name === 'ProtocolError') return 'TRANSPORT_FAILED';
   return 'UNEXPECTED_ERROR';
 }

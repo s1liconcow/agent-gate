@@ -21,6 +21,7 @@ await writeFile(new URL('extension/protocol.mjs', root), purposeProtocol(protoco
 for (const destination of ['public/engagement.mjs', 'extension/engagement.mjs']) await copyFile(new URL('shared/engagement.mjs', root), new URL(destination, root));
 for (const destination of ['public/xpath.mjs', 'extension/xpath.mjs']) await copyFile(new URL('shared/xpath.mjs', root), new URL(destination, root));
 for (const destination of ['public/read-grants.mjs', 'extension/read-grants.mjs']) await copyFile(new URL('shared/read-grants.mjs', root), new URL(destination, root));
+await copyFile(new URL('shared/bridge-result.mjs', root), new URL('extension/bridge-result.mjs', root));
 await build({entryPoints: [fileURLToPath(new URL('shared/xpath.mjs', root))], bundle: true, format: 'iife', globalName: 'AgentGateXPath', platform: 'browser', outfile: fileURLToPath(new URL('extension/xpath.js', root))});
 for (const destination of ['public/browser-pairing.mjs', 'extension/browser-pairing.mjs']) await copyFile(new URL('shared/browser-pairing.mjs', root), new URL(destination, root));
 for (const destination of ['public/login-sync-protocol.mjs', 'extension/login-sync-protocol.mjs']) await copyFile(new URL('shared/login-sync.mjs', root), new URL(destination, root));

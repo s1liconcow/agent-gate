@@ -40,6 +40,17 @@ test('perpetually loading pages report a blocker and back off instead of waiting
 test('model timeout reports an explicit blocker and does not publish a view',async()=>{
  const f=fixture();f.browser.model=async()=>{const e=new Error('native stall');e.code='MODEL_TIMEOUT';throw e;};await f.browser.tick();assert.equal(f.browser.busy,false);assert.deepEqual(f.calls.at(-1).input,{state:'blocked',code:'MODEL_TIMEOUT',phase:'model_availability'});assert.equal(f.calls.filter(c=>c.path.endsWith('/view')).length,0);
 });
+test('initial tab and capture failures preserve safe runtime diagnostics', async () => {
+  for (const phase of ['opening_tab', 'capture']) {
+    const f = fixture();
+    const fail = async () => { throw Object.assign(new Error('PRIVATE_WEBSITE_RESPONSE'), {code: 'BROWSER_UNRESPONSIVE', execution_error: 'TRANSPORT_FAILED'}); };
+    if (phase === 'opening_tab') f.browser.ownedTab = fail;
+    else globalThis.chrome.scripting.executeScript = fail;
+    await f.browser.tick();
+    assert.deepEqual(f.calls.at(-1).input, {state: 'blocked', code: 'BROWSER_UNRESPONSIVE', phase, execution_error: 'TRANSPORT_FAILED'});
+    assert.equal(JSON.stringify(f.calls).includes('PRIVATE_WEBSITE_RESPONSE'), false);
+  }
+});
 test('a notification during an active tick is coalesced into an immediate fresh tick',async()=>{
  const f=fixture();let finish,started,modelCalls=0;const ready=new Promise(resolve=>started=resolve);
  f.browser.model=async()=>{if(++modelCalls===1){started();await new Promise(resolve=>finish=resolve);}return {ids:[ref]};};

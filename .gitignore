@@ -83,6 +83,7 @@ outputs/
 /public/xpath.mjs
 /public/read-grants.mjs
 /extension/read-grants.mjs
+/extension/bridge-result.mjs
 /dist/
 
 /src/generated-hosted.mjs

@@ -41,13 +41,14 @@ export class HostedBrowser {
     if (retained && (retained.connection.account_id !== config.account_id || retained.connection.browser_id !== config.browser_id || retained.connection.sessionId !== saved?.sessionId || retained.browser.isConnected?.() === false)) {
       await this.disconnect(); retained = null;
     }
-    let browser = retained?.browser;
+    let browser = retained?.browser, phase = 'browser_acquisition';
     try {
       await this.config(config);
       if (!retained) {
         const opened = await this.openConnection(store, saved?.sessionId, sessionId => store.put('connection', {account_id: config.account_id, browser_id: config.browser_id, sessionId, anchor: null, last_activity_at: this.now()}));
         browser = opened.browser;
         await this.config(config);
+        phase = 'browser_recovery';
         let context, recovered = false;
         if (!opened.fresh && saved?.anchor) {
           for (const candidate of browser.contexts()) for (const page of candidate.pages()) {
@@ -67,8 +68,11 @@ export class HostedBrowser {
         for (const name of ['bindings', 'guarded']) await store.delete('session:' + name);
         const modelUrl = new URL('/hosted-inference.html?model=' + config.model, config.coordinator).href;
         const adapter = new HostedAdapter(browser, context, {scripts: this.scripts, modelUrl, store});
+        phase = 'profile_restore';
         if (!recovered) await adapter.restore(await store.get('login'));
+        phase = 'browser_recovery';
         await adapter.recover();
+        phase = 'browser_anchor';
         if (!adapter.modelPage) { adapter.modelPage = await context.newPage(); await adapter.modelPage.goto(modelUrl, {waitUntil: 'domcontentloaded'}); }
         const anchor = await adapter.target(adapter.modelPage);
         const connection = {account_id: config.account_id, browser_id: config.browser_id, sessionId: opened.sessionId, anchor};
@@ -103,14 +107,17 @@ export class HostedBrowser {
       const verifySession = (packet, phoneKey) => verifyBrowserSession(packet, phoneKey, Date.now(), config.coordinator);
       const automatic = new AutomaticBrowser({api, call, config: () => this.config(config), verifySession, model, activity});
       await api.storage.local.set({automation: {enabled: true, grants_enabled: true}});
+      phase = 'browser_work';
       const answer = await operation({adapter, api, automatic, authorize, config});
       // Saved authentication data is never copied into engine views or MCP output.
       if ((await this.consent.current())?.browser_id === config.browser_id) {
+        phase = 'login_checkpoint';
         await this.saveLogin(adapter, store);
         await store.put('connection', {...connection, last_activity_at: this.now()});
       }
       return answer;
     } catch (error) {
+      error.phase ||= phase;
       if (this.connection?.browser === browser) await this.disconnect();
       else if (browser) await deadline(() => browser.close(), this.disconnectMilliseconds, 'BROWSER_UNRESPONSIVE').catch(() => {});
       throw error;
