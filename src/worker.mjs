@@ -185,7 +185,6 @@ export class Gate extends DurableObject {
     const account = await this.ctx.storage.get('account_id') || 'owner';
     requireAdmin(account, this.env.ADMIN_ACCOUNT_ID);
     const url = new URL(request.url), registry = this.env.REGISTRY.getByName('beta-registry-v1');
-    url.pathname = url.pathname.replace(/^\/api\/admin\//, '/api/owner/admin/');
     let answer;
     if (url.pathname === '/api/owner/admin/invites') {
       if (request.method === 'GET') answer = await registry.listInvites(invitePageQuery(url.searchParams));
@@ -310,18 +309,11 @@ export class Gate extends DurableObject {
       const path = new URL(request.url).pathname;
       const account = request.headers.get('X-AgentGate-Account');
       if (account && account !== await this.ctx.storage.get('account_id')) fail('NOT_FOUND', 'Unknown account.', 404);
-      if (path === '/api/admin/session') {
-        if (request.method !== 'GET') return new Response('Use GET for administration access.', {status: 405, headers: {Allow: 'GET'}});
-        await this.auth(request, 'owner');
-        const account = await this.ctx.storage.get('account_id') || 'owner';
-        requireAdmin(account, this.env.ADMIN_ACCOUNT_ID);
-        return json({admin_account_id: account});
-      }
-      if (path === '/api/admin/accounts' || path === '/api/owner/admin/accounts') {
+      if (path === '/api/owner/admin/accounts') {
         if (request.method !== 'GET') return new Response('Use GET for account administration.', {status: 405, headers: {Allow: 'GET'}});
         return await this.adminAccounts(request);
       }
-      if (path === '/api/admin/invites' || path.startsWith('/api/admin/invites/') || path === '/api/owner/admin/invites' || path.startsWith('/api/owner/admin/invites/')) return await this.adminInvites(request);
+      if (path === '/api/owner/admin/invites' || path.startsWith('/api/owner/admin/invites/')) return await this.adminInvites(request);
       if (path === '/api/owner/profile' && ['GET', 'POST'].includes(request.method)) return await this.ownerProfile(request);
       // Browser work must acquire the hosted queue before the short Gate lock.
       // Waiting for that queue while holding blockConcurrencyWhile deadlocks ticks.
@@ -663,6 +655,10 @@ const app = {
         if (!/^\/api\/admin\/(?:session|accounts|invites(?:\/\d{13}-[a-f0-9]{32}\/revoke)?)$/.test(url.pathname)) return new Response('Not found', {status: 404});
         const account = env.ADMIN_ACCOUNT_ID;
         requireAdmin(account, account);
+        const operation = url.pathname.slice('/api/admin/'.length), session = operation === 'session';
+        if ((session || operation === 'accounts') && request.method !== 'GET') return new Response('Use GET for account administration.', {status: 405, headers: {Allow: 'GET'}});
+        // Keep the account protocol compatible while Durable Object updates propagate.
+        url.pathname = '/api/owner/' + (session ? 'profile' : 'admin/' + operation);
         const headers = new Headers(request.headers);
         headers.delete('X-AgentGate-Account');
         if (account !== 'owner') headers.set('X-AgentGate-Account', account);
@@ -672,7 +668,11 @@ const app = {
           headers.delete('Content-Length');
           return await gate.fetch(new Request(url, {method: 'POST', headers, body: JSON.stringify(input)}));
         }
-        return await gate.fetch(new Request(request, {headers}));
+        const response = await gate.fetch(new Request(new Request(url, request), {headers}));
+        if (!session || !response.ok) return response;
+        const profile = await response.json();
+        requireAdmin(profile.account_id, account);
+        return json({admin_account_id: profile.account_id});
       } catch (error) { return errorResponse(error); }
     }
     if (url.pathname.startsWith('/api/hosted-model/')) return hostedAsset(request, env.HOSTED_MODELS, hostedModel);
