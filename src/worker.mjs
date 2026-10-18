@@ -59,7 +59,7 @@ async function body(request) {
   const raw = new Uint8Array(length); let offset = 0; for (const c of chunks) { raw.set(c, offset); offset += c.length; }
   try { return JSON.parse(new TextDecoder().decode(raw)); } catch { fail('INVALID_BODY', 'The JSON request is invalid.'); }
 }
-export class Gate extends DurableObject {
+export class AccountGate extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env); this.engine = new Engine(ctx.storage); this.engagement = new Engagement(ctx.storage); this.connectors = new Connectors(ctx.storage); this.browsers = new Browsers(ctx.storage); this.tickets = new Map();
     const browserBinding = env.BROWSER_RUN || env.BROWSER;
@@ -692,6 +692,9 @@ export class Gate extends DurableObject {
     await this.dispatch();
   }
 }
+
+// Keep existing bindings and local harness imports valid during the class rename.
+export {AccountGate as Gate};
 
 const app = {
   async fetch(request, env, ctx) {
