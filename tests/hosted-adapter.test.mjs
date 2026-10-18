@@ -33,7 +33,7 @@ test('page readiness cannot hold the hosted work queue indefinitely', async () =
 test('transport load state reports loading without executing website JavaScript', async () => {
   const adapter = new HostedAdapter({}, {}, {});
   let loaded = false;
-  adapter.pages.set('task', {isClosed: () => false, url: () => 'https://example.com', evaluate: () => assert.fail('Readiness needs no website evaluation'), waitForLoadState: async () => {if (!loaded) throw Object.assign(new Error('Loading'), {name: 'TimeoutError'});}});
+  adapter.pages.set('task', {isClosed: () => false, url: () => 'https://example.com', evaluate: () => assert.fail('Readiness needs no website evaluation'), waitForLoadState: async state => {assert.equal(state, 'domcontentloaded'); if (!loaded) throw Object.assign(new Error('Loading'), {name: 'TimeoutError'});}});
   assert.equal((await adapter.tab('task')).status, 'loading');
   loaded = true; assert.equal((await adapter.tab('task')).status, 'complete');
 });

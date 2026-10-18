@@ -414,7 +414,7 @@ export class Gate extends DurableObject {
   async route(request) {
     const url = new URL(request.url), path = url.pathname, method = request.method;
     if (path === '/api/health' && method === 'GET') return json({version: '0.7.1', deployment_id: this.env.CF_VERSION_METADATA?.id || null, paired: Boolean(await this.ctx.storage.get('phone')),
-      cloud_browser: {...this.cloudDeployment, readiness_source: 'browser_load_events_v2', startup_timeout_ms: this.hosted.startupMilliseconds, available: this.hostedConsent.available, configured: Boolean(await this.hostedConsent.current())}});
+      cloud_browser: {...this.cloudDeployment, readiness_source: 'browser_dom_events', startup_timeout_ms: this.hosted.startupMilliseconds, available: this.hostedConsent.available, configured: Boolean(await this.hostedConsent.current())}});
     if (path.startsWith('/api/login-source/')) {
       const extensionOrigin = browserOrigin(request);
       if (!/^chrome-extension:\/\/[a-p]{32}$/.test(extensionOrigin || '')) fail('UNAUTHORIZED', 'Use the login-sync extension.', 403);

@@ -49,6 +49,8 @@ staged fills end the task, and interrupted dispatches remain uncertain.
 Cloud command failures include a bounded `last_command.execution_error` identifier
 without website text or credentials. Login-state saves and connection teardown
 have time limits so an unresponsive browser cannot hold the task queue indefinitely.
+Page readiness waits for the main document. Pending images and background requests
+do not block capture; a new tab stays loading until its first navigation commits.
 
 ```sh
 node --test tests/hosted-browser-factory.test.mjs tests/hosted-browser-limits.test.mjs tests/hosted-browser-lifecycle.test.mjs tests/mcp-discovery.test.mjs

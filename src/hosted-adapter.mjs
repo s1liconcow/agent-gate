@@ -58,7 +58,7 @@ export class HostedAdapter {
     let status = 'complete';
     // Playwright tracks load events on the transport. Reading readiness must
     // not queue JavaScript behind an unresponsive website's main thread.
-    try { await deadline(() => page.waitForLoadState('load', {timeout: 1000}), this.operationMilliseconds, 'BROWSER_UNRESPONSIVE'); }
+    try { await deadline(() => page.waitForLoadState('domcontentloaded', {timeout: 1000}), this.operationMilliseconds, 'BROWSER_UNRESPONSIVE'); }
     catch (error) { if (error.name !== 'TimeoutError') throw error; status = 'loading'; }
     return {id, url: page.url(), status};
   }

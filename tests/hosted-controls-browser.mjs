@@ -86,3 +86,5 @@ try {
   assert.equal(hosted.connection, null); assert.equal(browser.isConnected(), false);
   assert.equal(disconnects, 2); assert.equal(factoryCloses, 0); assert.equal(await store.get('connection'), undefined);
 } finally {await hosted?.disconnect(); await browser.close();}
+
+await import('./hosted-adapter-browser.mjs');
