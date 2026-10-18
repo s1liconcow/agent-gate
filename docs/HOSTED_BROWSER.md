@@ -40,7 +40,8 @@ explicit provider deadlines, midnight waits and incomplete legacy records.
 
 Before opening a cloud session, verify the serving account backend with
 `node scripts/verify-coordinator.mjs COORDINATOR_URL`. For a newly deployed version,
-append its deployment ID and Worker name to use Cloudflare's version override.
+append the Worker version ID printed by Wrangler and the Worker name to use
+Cloudflare's version override.
 Then repeat the ordinary check to confirm the corrected backend serves normal
 requests. Health checks do not acquire a browser or consume browser session time.
 
