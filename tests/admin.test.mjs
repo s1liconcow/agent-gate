@@ -83,11 +83,15 @@ test('admin summary is read-only, filters credentials and page content, and repo
   const store = new HostedState(db, tenant, cloud);
   await store.put('connection', {account_id: tenant, browser_id: cloud, sessionId: 'secret-provider-session', last_activity_at: now - 500});
   await store.put('login', {cookies: ['private-cookie']});
+  await store.put('browser-diagnostic', {observed_at: now - 1000, provider_message: 'Rate limit exceeded',
+    limits: {max_concurrent_sessions: 4, activeSessions: ['private-provider-session']}, credential: 'private-value', retry_sources: {provider_retry_after_at: now + 60000}});
   const before = structuredClone([...db.items]);
   const result = await accountAdminSummary(db, id => id === browser, now);
   assert.deepEqual([...db.items], before);
   assert.equal(result.browsers.length, 2); assert.equal(result.browsers[0].connected, true); assert.equal(result.browsers[1].connected, false);
   assert.equal(result.cloud.connection_recorded, true); assert.equal(result.cloud.last_activity_at, now - 500);
+  assert.equal(result.cloud.last_error.provider_message, 'Rate limit exceeded');
+  assert.equal(result.cloud.last_error.concurrent_limit, 4); assert.equal(result.cloud.last_error.retry_after_at, now + 60000);
   assert.equal(result.usage.cloud_tasks_24h, 1); assert.equal(result.usage.cloud_actions_24h, 1); assert.equal(result.usage.running_cloud, 1);
   for (const value of ['private', 'secret', 'credential_hash', 'phone_key', 'auth_request', 'sessionId']) assert.ok(!JSON.stringify(result).includes(value), value);
 });

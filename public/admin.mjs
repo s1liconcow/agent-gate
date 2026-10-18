@@ -30,6 +30,14 @@ function renderAccounts() {
     if (item.browsers.length) localCell.append(browserDetails(item.browsers));
     const cloudCell = el('td'); cloudCell.append(el('span', item.cloud.enabled ? 'Enabled' : 'Disabled', 'admin-state ' + (item.cloud.enabled ? 'online' : '')),
       el('p', item.cloud.metadata_unavailable ? 'Metadata unavailable' : item.cloud.connection_recorded ? 'Connection recorded' : 'No saved connection'), el('p', date(item.cloud.last_activity_at), 'hint'));
+    if (item.cloud.last_error) {
+      const error = item.cloud.last_error, details = el('details'); details.append(el('summary', 'Provider response'),
+        el('p', 'Recorded ' + date(error.observed_at)), el('p', error.provider_message),
+        el('p', 'Recorded concurrent limit: ' + (error.concurrent_limit ?? 'Unavailable')),
+        el('p', 'Retry-After: ' + (error.retry_after_at ? date(error.retry_after_at) : 'None recorded')),
+        el('p', 'Capacity wait: ' + (error.limit_wait_at ? date(error.limit_wait_at) : 'None recorded')));
+      cloudCell.append(details);
+    }
     if (item.cloud.cooldown_until) {
       cloudCell.append(el('p', 'Waiting until ' + date(item.cloud.cooldown_until), 'admin-state waiting'));
       if (item.cloud.enabled) {

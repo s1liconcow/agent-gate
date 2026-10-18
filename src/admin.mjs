@@ -38,13 +38,13 @@ export async function accountAdminSummary(storage, connected, now = Date.now()) 
     readAccountProfile(storage, account), storage.get('phone'), storage.get('hosted:consent'), storage.get('engagement:receipt'),
     storage.list({prefix: 'browser:', limit: 2001}), storage.list({prefix: 'connector:', limit: 2001}), storage.list({prefix: 'session:', limit: 2001})
   ]);
-  let connection, retry, metadataUnavailable = false;
+  let connection, retry, diagnostic, metadataUnavailable = false;
   if (consent?.browser_id) {
     try {
       const store = new HostedState(storage, account, consent.browser_id, {readOnly: true});
-      [connection, retry] = await Promise.all([store.get('connection'), store.get('browser-retry')]);
+      [connection, retry, diagnostic] = await Promise.all([store.get('connection'), store.get('browser-retry'), store.get('browser-diagnostic')]);
       if (connection && (connection.account_id !== account || connection.browser_id !== consent.browser_id)) throw new Error('Browser ownership changed.');
-    } catch { metadataUnavailable = true; connection = retry = null; }
+    } catch { metadataUnavailable = true; connection = retry = diagnostic = null; }
   }
   const windowStart = now - 86400000;
   const usage = {window_hours: 24, coverage: sessions.size <= 2000 ? 'all_stored_tasks' : 'bounded_sample', stored_tasks: Math.min(sessions.size, 2000), running_local: 0, running_cloud: 0, cloud_tasks_24h: 0, cloud_actions_24h: 0, last_task_at: null};
@@ -64,6 +64,9 @@ export async function accountAdminSummary(storage, connected, now = Date.now()) 
       return {id: item.id, name: item.name, kind: cloud ? 'cloud' : 'local', status: item.expires_at <= now ? 'expired' : item.status, expires_at: safeTime(item.expires_at), connected: !cloud && active && connected(item.id), authorized: active};
     }),
     connectors: [...connectors.values()].slice(0, 2000).filter(item => !['expired', 'revoked'].includes(item.status) && item.expires_at > now).map(item => ({id: item.id, client_name: item.client_name, status: item.status, expires_at: safeTime(item.expires_at)})),
-    cloud: {enabled: cloudEnabled, browser_id: consent?.browser_id || null, connection_recorded: Boolean(connection), last_activity_at: safeTime(connection?.last_activity_at), cooldown_until: retry?.retry_at > now ? retry.retry_at : null, metadata_unavailable: metadataUnavailable},
+    cloud: {enabled: cloudEnabled, browser_id: consent?.browser_id || null, connection_recorded: Boolean(connection), last_activity_at: safeTime(connection?.last_activity_at), cooldown_until: retry?.retry_at > now ? retry.retry_at : null, metadata_unavailable: metadataUnavailable,
+      last_error: diagnostic ? {observed_at: safeTime(diagnostic.observed_at), provider_message: typeof diagnostic.provider_message === 'string' ? diagnostic.provider_message.slice(0, 2000) : '',
+        concurrent_limit: Number.isSafeInteger(diagnostic.limits?.max_concurrent_sessions) ? diagnostic.limits.max_concurrent_sessions : null,
+        retry_after_at: safeTime(diagnostic.retry_sources?.provider_retry_after_at), limit_wait_at: safeTime(diagnostic.retry_sources?.provider_limit_wait_at)} : null},
     usage, metadata_coverage: browsers.size > 2000 || connectors.size > 2000 ? 'bounded_sample' : 'complete', observed_at: now};
 }
