@@ -36,7 +36,7 @@ test('deployment verification rejects a stale account backend even when HTTP hea
 });
 
 test('deployment verification requires working cloud dependencies and provisioning for paired accounts', async () => {
-  const ready = {version: '0.7.1', paired: true, cloud_browser: {browser_binding: true, assets_binding: true, model_installed: true, available: true, configured: true}};
+  const ready = {version: '0.7.1', paired: true, cloud_browser: {readiness_source: 'browser_dom_events', browser_binding: true, assets_binding: true, model_installed: true, available: true, configured: true}};
   const fetcher = value => async () => Response.json(value);
   assert.equal((await verifyCoordinator('https://gate.example', fetcher(ready))).cloud_configured, true);
   for (const key of ['browser_binding', 'assets_binding', 'model_installed', 'available']) {
@@ -44,4 +44,16 @@ test('deployment verification requires working cloud dependencies and provisioni
   }
   await assert.rejects(verifyCoordinator('https://gate.example', fetcher({...ready, cloud_browser: {...ready.cloud_browser, configured: false}})), /no configured cloud browser/);
   assert.equal((await verifyCoordinator('https://gate.example/u/' + 'a'.repeat(32), fetcher({...ready, paired: false, cloud_browser: {...ready.cloud_browser, configured: false}}))).paired, false);
+  await assert.rejects(verifyCoordinator('https://gate.example', fetcher({...ready, cloud_browser: {...ready.cloud_browser, readiness_source: undefined}})), /older coordinator version/);
+});
+
+test('version-specific health checks target an active release and reject a stale account backend', async () => {
+  const deploymentId = 'e33071d3-fc53-4203-adbd-d7659f80df1b', workerName = 'agentgate-control';
+  const ready = {deployment_id: deploymentId, cloud_browser: {readiness_source: 'browser_dom_events', browser_binding: true, assets_binding: true, model_installed: true, available: true}};
+  const fetcher = async (_, options) => {
+    assert.equal(options.headers['Cloudflare-Workers-Version-Overrides'], workerName + '=' + JSON.stringify(deploymentId));
+    return Response.json(ready);
+  };
+  assert.equal((await verifyCoordinator('https://gate.example', fetcher, {deploymentId, workerName})).deployment_id, deploymentId);
+  await assert.rejects(verifyCoordinator('https://gate.example', async () => Response.json({...ready, deployment_id: 'old'}), {deploymentId, workerName}), /expected deployment/);
 });
