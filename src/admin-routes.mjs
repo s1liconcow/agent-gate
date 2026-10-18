@@ -41,8 +41,8 @@ export async function adminRoute(request, env, readBody) {
   if (operation === 'accounts') {
     const query = adminPageQuery(url.searchParams), ids = await registry.adminAccountIds();
     const page = await adminAccountPage(ids, query, id => env.GATE.getByName(id === 'owner' ? 'single-owner-v1' : 'account:' + id).adminSummary());
-    const factory = cloudflareBrowserFactory(env.BROWSER);
-    const [limits, history] = query.cursor || !env.BROWSER ? [null, null] : await Promise.all([factory.inspectLimits(), factory.inspectHistory()]);
+    const browserBinding = env.BROWSER_RUN || env.BROWSER, factory = cloudflareBrowserFactory(browserBinding);
+    const [limits, history] = query.cursor || !browserBinding ? [null, null] : await Promise.all([factory.inspectLimits(), factory.inspectHistory()]);
     return response({...page, cloud_capacity: {limits, history}, observed_at: Date.now()});
   }
   let answer;

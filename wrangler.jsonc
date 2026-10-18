@@ -4,7 +4,7 @@
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
   "vars": {"PUBLIC_ORIGIN": "https://agentgate-control.dchalloner.workers.dev"},
-  "browser": {"binding": "BROWSER"},
+  "browser": {"binding": "BROWSER_RUN"},
   "assets": {"directory": "./public", "binding": "ASSETS", "html_handling": "none", "run_worker_first": ["/api/*", "/hosted-inference.html"]},
   "kv_namespaces": [{"binding": "OAUTH_KV", "id": "c3b893dffeb3448f93313301722dbd2b"}],
   "r2_buckets": [{"binding": "HOSTED_MODELS", "bucket_name": "agentgate-hosted-models"}],
