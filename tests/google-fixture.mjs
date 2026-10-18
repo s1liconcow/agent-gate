@@ -1,7 +1,6 @@
 // Local test provider: real signed ID tokens and the production verifier.
-import {createLocalJWKSet, exportJWK, generateKeyPair, SignJWT} from 'jose';
+import {base64url, createLocalJWKSet, exportJWK, generateKeyPair, SignJWT} from 'jose';
 import {googleAuthRoute, verifyGoogleToken} from '../src/google-auth.mjs';
-import {digest} from '../shared/protocol.mjs';
 let signing;
 const codes = new Map();
 async function keys() {
@@ -17,7 +16,8 @@ export async function fixtureGoogleRoute(request, env) {
   }
   return googleAuthRoute(request, env, {authorizeURL: url.origin + '/_google-fixture/authorize', async exchange(code, login, redirect, settings) {
     const grant = codes.get(code); codes.delete(code);
-    if (!grant || grant.redirect_uri !== redirect || grant.client_id !== settings.GOOGLE_CLIENT_ID || grant.code_challenge !== await digest(login.verifier)) throw new Error('Invalid local authorization code');
+    const challenge = base64url.encode(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(login.verifier))));
+    if (!grant || grant.redirect_uri !== redirect || grant.client_id !== settings.GOOGLE_CLIENT_ID || grant.code_challenge_method !== 'S256' || grant.code_challenge !== challenge) throw new Error('Invalid local authorization code');
     const key = await keys(), email = grant.fixture_email || 'dchalloner@gmail.com';
     const jwt = await new SignJWT({email, email_verified: grant.fixture_verified !== 'false', nonce: grant.nonce})
       .setProtectedHeader({alg: 'RS256', kid: 'local-google'}).setIssuer('https://accounts.google.com')

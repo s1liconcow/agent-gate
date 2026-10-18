@@ -1,11 +1,14 @@
 import {createRemoteJWKSet, jwtVerify} from 'jose';
-import {digest, fail, GateError} from '../shared/protocol.mjs';
+import {b64url, digest, fail, GateError} from '../shared/protocol.mjs';
 import {ADMIN_EMAIL, googleIssuers, requireAdmin} from './admin-identity.mjs';
 import {LOGIN_SECONDS, SESSION_SECONDS, webToken, validWebToken} from './web-sessions.mjs';
 import {publicOrigin} from './origin.mjs';
 
 const keys = createRemoteJWKSet(new URL('https://www.googleapis.com/oauth2/v3/certs'));
 export const sessionCookie = '__Host-agentgate-session', loginCookie = '__Host-agentgate-google';
+export async function pkceChallenge(verifier) {
+  return b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
+}
 const cookie = (name, value, seconds) => name + '=' + value + '; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=' + seconds;
 export function readCookie(request, name) {
   const values = (request.headers.get('Cookie') || '').split(';').map(item => item.trim()).filter(item => item.startsWith(name + '='));
@@ -77,7 +80,7 @@ export async function googleAuthRoute(request, env, provider = googleProvider) {
     const state = await authCall(env, 'login', await digest(binding), nonce, verifier);
     const target = new URL(provider.authorizeURL);
     target.search = new URLSearchParams({client_id: env.GOOGLE_CLIENT_ID, redirect_uri, response_type: 'code', scope: 'openid email profile',
-      state, nonce, code_challenge: await digest(verifier), code_challenge_method: 'S256', prompt: 'select_account', login_hint: ADMIN_EMAIL}).toString();
+      state, nonce, code_challenge: await pkceChallenge(verifier), code_challenge_method: 'S256', prompt: 'select_account', login_hint: ADMIN_EMAIL}).toString();
     return new Response(null, {status: 302, headers: {Location: target.href, 'Set-Cookie': cookie(loginCookie, binding, LOGIN_SECONDS), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'}});
   }
   let outcome = 'failed', stage = 'validate_callback';

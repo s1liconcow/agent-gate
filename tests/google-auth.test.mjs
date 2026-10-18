@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {createLocalJWKSet, exportJWK, generateKeyPair, SignJWT} from 'jose';
-import {verifyGoogleToken, googleProvider, googleAuthRoute, readCookie} from '../src/google-auth.mjs';
+import {verifyGoogleToken, googleProvider, googleAuthRoute, readCookie, pkceChallenge} from '../src/google-auth.mjs';
 import {WebSessions, webToken, SESSION_SECONDS} from '../src/web-sessions.mjs';
 import {digest} from '../shared/protocol.mjs';
 import {Memory} from './flow/support.mjs';
@@ -11,6 +12,19 @@ const key = await generateKeyPair('RS256', {extractable: true});
 const jwks = createLocalJWKSet({keys: [{...await exportJWK(key.publicKey), kid: 'test-key'}]});
 const nonce = webToken(), now = Math.floor(Date.now() / 1000);
 const signed = (changes = {}, signingKey = key.privateKey) => new SignJWT({iss: 'https://accounts.google.com', aud: 'test-client', sub: 'google-admin', email: identity.email, email_verified: true, nonce, iat: now, exp: now + 300, ...changes}).setProtectedHeader({alg: 'RS256', kid: 'test-key'}).sign(signingKey);
+
+test('Google sign-in uses the RFC 7636 S256 challenge of the raw verifier', async () => {
+  // RFC 7636 Appendix B provides an independent reference vector.
+  assert.equal(await pkceChallenge('dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk'), 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM');
+  let verifier;
+  const env = {PUBLIC_ORIGIN: 'https://gate.test', GOOGLE_CLIENT_ID: 'test-client', GOOGLE_CLIENT_SECRET: 'test-secret', REGISTRY: {getByName: () => ({webAuth: async (operation, binding, nonce, value) => {
+    assert.equal(operation, 'login'); verifier = value; return webToken();
+  }})}};
+  const response = await googleAuthRoute(new Request('https://gate.test/api/auth/google/start'), env);
+  const target = new URL(response.headers.get('Location'));
+  assert.equal(target.searchParams.get('code_challenge_method'), 'S256');
+  assert.equal(target.searchParams.get('code_challenge'), createHash('sha256').update(verifier, 'ascii').digest('base64url'));
+});
 
 test('Google ID tokens require a valid signature, issuer, audience, expiry, nonce and verified email', async () => {
   assert.deepEqual(await verifyGoogleToken(await signed(), 'test-client', nonce, jwks), identity);
