@@ -12,6 +12,16 @@ Inspection opens no cloud browser and changes no consent, policy, browser state 
 
 `/account.html` lets an authenticated owner set an account name and optional contact email. Owner-entered emails are explicitly unverified and do not change identity or permissions. Account IDs remain stable.
 
+## Account cleanup
+
+Choose **Show → No local browsers** to find enrolled accounts without a paired local browser. Review their assistant connections, cloud activity and last task before deleting them. This filter excludes the original owner and accounts with unavailable or incomplete browser metadata.
+
+Click **Delete account** to review the current account and its browser, assistant and task counts. Type **DELETE**, then click **Delete account permanently**. Cancel closes the review without changes. If the account changes during review, **Review again** loads its latest details. The original owner account is protected.
+
+Deletion revokes account access, closes local browser connections, erases account credentials, paired devices, saved logins and task history, removes the account from the registry, and releases its beta slot. Cloud browser shutdown and OAuth grant removal retry through the account's alarm. A persistent tombstone prevents deleted accounts from being reinitialized. The registry retains an audit receipt with the administrator, account ID, deletion time and resource counts. Invitation history and shared OAuth client registrations remain available.
+
+The Google-admin API exposes `GET /api/admin/accounts/:id/deletion` for a fresh review and `POST /api/admin/accounts/:id/delete` with `{confirmation: account_id, fingerprint}`. Deletion requires the same-origin CSRF-protected session, an exact target confirmation and the reviewed account fingerprint. Retries release capacity once. **Finish deletion** resumes an interrupted deletion that still appears in the list.
+
 ## Invite links
 
 In **Invite new users**, enter an optional label, set **Maximum uses** (1–100, default 1), choose an expiry (1, 7 or 30 days), and click **Create invite link**. Copy the link before leaving the page; it is shown once. Share it with your invitees. The list shows usage counts and pending, active, used, expired or revoked status. **Revoke** immediately disables a link with uses remaining.

@@ -1,5 +1,6 @@
 import {DurableObject} from 'cloudflare:workers';
-import {b64url, digest, random} from '../shared/protocol.mjs';
+import {b64url, digest, fail, random} from '../shared/protocol.mjs';
+import {accountDeletionInput, deletableAccount, deletionReceipt} from './account-cleanup.mjs';
 import {Invites} from './invites.mjs';
 import {apiFailure} from './api-error.mjs';
 import {WebSessions} from './web-sessions.mjs';
@@ -22,6 +23,35 @@ export class Registry extends DurableObject {
   createInvite(input, account) { return this.inviteOperation('create', input, account); }
   listInvites(query) { return this.inviteOperation('list', query); }
   revokeInvite(id) { return this.inviteOperation('revoke', id); }
+  async accountDeletionPreview(id) {
+    try {
+      deletableAccount(id);
+      if (!await this.hasAccount(id)) fail('NOT_FOUND', 'Unknown account.', 404);
+      return await this.env.GATE.getByName('account:' + id).adminDeletionPreview();
+    } catch (error) {return {error: apiFailure(error)};}
+  }
+  async deleteAccount(id, input, actor, origin) {
+    try {
+      accountDeletionInput(id, input);
+      if (!await this.hasAccount(id)) {
+        const receipt = await this.ctx.storage.get('admin:deletion:' + id);
+        if (receipt && input?.confirmation === id) return {result: {account_id: id, deleted: true, deleted_at: receipt.deleted_at, cleanup_pending: receipt.cleanup_pending}};
+        fail('NOT_FOUND', 'Unknown account.', 404);
+      }
+      return await this.env.GATE.getByName('account:' + id).adminDeleteAccount(id, input, actor, origin);
+    } catch (error) {return {error: apiFailure(error)};}
+  }
+  finishAccountDeletion(record) {
+    deletableAccount(record.account_id);
+    return this.ctx.blockConcurrencyWhile(() => this.ctx.storage.transaction(async storage => {
+      const id = record.account_id, enrolled = await storage.get('account:' + id) === true;
+      const receipt = {...deletionReceipt(record), actor: record.actor, action: record.action, reason: record.reason, counts: record.counts};
+      const count = await storage.get('count') || 0;
+      await storage.put({...(enrolled ? {count: Math.max(0, count - 1)} : {}), ['admin:deletion:' + id]: receipt});
+      if (enrolled) await storage.delete('account:' + id);
+      return receipt;
+    }));
+  }
   async adminAccountIds() {
     const records = await this.ctx.storage.list({prefix: 'account:', limit: 101});
     if (records.size > 100) throw new Error('The account registry exceeds its configured bound.');

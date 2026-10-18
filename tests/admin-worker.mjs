@@ -11,16 +11,24 @@ export class Registry extends ProductionRegistry {
   async expireInvite(id) {const key = 'invite:' + id, item = await this.ctx.storage.get(key); await this.ctx.storage.put(key, {...item, expires_at: Date.now() - 1});}
 }
 export class Gate extends ProductionGate {
-  async seed({id, token, profile, browsers = [], cloud, sessions = []}) {
+  constructor(ctx, env) {
+    super(ctx, env); this.closed = []; this.cleanupFails = false;
+    this.hosted.factory.close = async id => {if (this.cleanupFails) throw new Error('Synthetic provider unavailable'); this.closed.push(id);};
+  }
+  async seed({id, token, profile, browsers = [], connectors = [], cloud, sessions = [], cleanupFails = false}) {
+    this.cleanupFails = cleanupFails;
     await this.ctx.storage.put({...(id === 'owner' ? {} : {account_id: id}), owner_hash: await digest(token), phone: {kty: 'EC', crv: 'P-256', x: 'synthetic', y: 'synthetic'}, 'account:profile': profile});
     for (const browser of browsers) await this.ctx.storage.put('browser:' + browser.id, browser);
+    for (const connector of connectors) await this.ctx.storage.put('connector:' + connector.id, connector);
     for (const session of sessions) await this.ctx.storage.put('session:' + session.id, session);
     if (cloud) {
       await this.ctx.storage.put('hosted:consent', cloud);
-      await new HostedState(this.ctx.storage, id, cloud.browser_id).put('connection', {account_id: id, browser_id: cloud.browser_id, sessionId: 'synthetic-provider-id', last_activity_at: Date.now() - 60000});
+      await new HostedState(this.ctx.storage, id, cloud.browser_id).put('connection', {account_id: id, browser_id: cloud.browser_id, sessionId: id === 'owner' ? 'synthetic-provider-id' : 'synthetic-provider-' + id, last_activity_at: Date.now() - 60000});
     }
   }
   async records() {return [...await this.ctx.storage.list()];}
+  async deletedAccess() {return {connector: await this.checkConnector('9'.repeat(32)), setup: await this.prepareConnectionSetup({})};}
+  async finishCleanup() {this.cleanupFails = false; await this.finishAccountDeletion(); return {closed: this.closed};}
 }
 export default {async fetch(request, env, ctx) {
   const url = new URL(request.url);
@@ -41,6 +49,15 @@ export default {async fetch(request, env, ctx) {
     }
     if (url.pathname === '/_admin-test/registry' && request.method === 'GET') return Response.json(await env.REGISTRY.getByName('beta-registry-v1').records());
     if (url.pathname === '/_admin-test/oauth-context' && request.method === 'GET') return Response.json(await env.OAUTH_KV.get('oauth:connection:' + url.searchParams.get('id'), 'json'));
+    if (url.pathname === '/_admin-test/deleted-access' && request.method === 'GET') return Response.json(await env.GATE.getByName('account:' + url.searchParams.get('account')).deletedAccess());
+    if (url.pathname === '/_admin-test/finish-cleanup' && request.method === 'POST') return Response.json(await env.GATE.getByName('account:' + (await request.json()).id).finishCleanup());
+    if (url.pathname === '/_admin-test/seed-grants' && request.method === 'POST') {
+      const {id} = await request.json();
+      await env.OAUTH_KV.put('grant:' + id + ':test-grant', JSON.stringify({id: 'test-grant', userId: id, clientId: 'test-client', scope: ['browser:delegate']}));
+      await env.OAUTH_KV.put('token:' + id + ':test-grant:test-token', JSON.stringify({grantId: 'test-grant', userId: id}));
+      return Response.json({ok: true});
+    }
+    if (url.pathname === '/_admin-test/grants' && request.method === 'GET') return Response.json({grants: (await env.OAUTH_KV.list({prefix: 'grant:' + url.searchParams.get('account') + ':'})).keys.length, tokens: (await env.OAUTH_KV.list({prefix: 'token:' + url.searchParams.get('account') + ':'})).keys.length});
     if (url.pathname === '/_admin-test/activate-connection' && request.method === 'POST') {
       const {id, invite} = await request.json(), answer = await env.REGISTRY.getByName('beta-registry-v1').activateConnectionAccount(id, invite);
       return Response.json(answer, {status: answer.status || 200});

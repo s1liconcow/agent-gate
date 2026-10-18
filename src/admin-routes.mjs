@@ -8,12 +8,21 @@ export async function adminRoute(request, env, readBody) {
   const url = new URL(request.url);
   if (!url.pathname.startsWith('/api/admin/')) return null;
   const operation = url.pathname.slice('/api/admin/'.length);
-  if (!/^(?:session|accounts|invites(?:\/\d{13}-[a-f0-9]{32}\/revoke)?)$/.test(operation)) return new Response('Not found', {status: 404});
+  const deletion = operation.match(/^accounts\/(owner|[a-f0-9]{32})\/(deletion|delete)$/);
+  if (!deletion && !/^(?:session|accounts|invites(?:\/\d{13}-[a-f0-9]{32}\/revoke)?)$/.test(operation)) return new Response('Not found', {status: 404});
   if (['session', 'accounts'].includes(operation) && request.method !== 'GET') return new Response('Use GET for account administration.', {status: 405, headers: {Allow: 'GET'}});
   const {identity, csrf_token} = await requireWebAdmin(request, env), registry = env.REGISTRY.getByName('beta-registry-v1');
   const headers = {'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff'};
   const response = (value, status = 200) => Response.json({admin_subject: identity.subject, ...value}, {status, headers});
   if (operation === 'session') return response({email: identity.email, csrf_token});
+  if (deletion) {
+    const method = deletion[2] === 'deletion' ? 'GET' : 'POST';
+    if (request.method !== method) return new Response('Use ' + method + ' for this operation.', {status: 405, headers: {Allow: method}});
+    if (url.search) fail('INVALID_REQUEST', 'Account deletion does not accept query parameters.');
+    const answer = method === 'GET' ? await registry.accountDeletionPreview(deletion[1]) : await registry.deleteAccount(deletion[1], await readBody(request), 'google:' + identity.subject, url.origin);
+    if (answer.error) return Response.json(answer, {status: answer.error.status, headers});
+    return response(method === 'GET' ? {preview: answer.result} : answer.result);
+  }
   if (operation === 'accounts') {
     const query = adminPageQuery(url.searchParams), ids = await registry.adminAccountIds();
     const page = await adminAccountPage(ids, query, id => env.GATE.getByName(id === 'owner' ? 'single-owner-v1' : 'account:' + id).adminSummary());

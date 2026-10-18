@@ -5,7 +5,7 @@ export async function existingAdminSession() {
       headers: value === undefined ? {} : {'Content-Type': 'application/json', 'X-AgentGate-CSRF': csrf},
       ...(value === undefined ? {} : {body: JSON.stringify(value)}), cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(20000)});
     const result = await response.json();
-    if (!response.ok) throw Object.assign(new Error(result.error?.message || 'Could not load administration. Use Refresh to try again.'), {status: response.status});
+    if (!response.ok) throw Object.assign(new Error(result.error?.message || 'Could not load administration. Use Refresh to try again.'), {status: response.status, code: result.error?.code});
     return result;
   };
   const session = await api('admin/session');

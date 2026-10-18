@@ -35,6 +35,16 @@ function providersFor(request, id) {
   return providers.get(base);
 }
 
+export async function revokeAccountGrants(origin, env, id) {
+  const api = providersFor(new Request(origin), id).authorization.getOAuthApi(env);
+  let cursor;
+  do {
+    const page = await api.listUserGrants(id, {limit: 100, ...(cursor ? {cursor} : {})});
+    for (const grant of page.items) await api.revokeGrant(grant.id, id);
+    cursor = page.cursor;
+  } while (cursor);
+}
+
 export async function tenantOAuthRoute(request, env, ctx) {
   const url = new URL(request.url), tenant = tenantPath(url.pathname), wellKnown = tenantWellKnown(url.pathname);
   if (!wellKnown && !['/authorize', '/mcp'].includes(tenant?.path) && !tenant?.path.startsWith('/oauth/')) return null;

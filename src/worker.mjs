@@ -14,13 +14,15 @@ import {assetResponse} from './generated-assets.mjs';
 import {digest, exact, fail, GateError, random} from '../shared/protocol.mjs';
 import {tenantPath, tenantWellKnown} from './tenant.mjs';
 import {Registry} from './registry.mjs';
-import {tenantOAuthRoute} from './tenant-oauth.mjs';
+import {tenantOAuthRoute, revokeAccountGrants} from './tenant-oauth.mjs';
+import {deadline} from '../extension/deadline.mjs';
 import {HostedConsent} from './hosted-consent.mjs';
 import {HostedBrowser} from './hosted-browser.mjs';
 import {cloudflareBrowserFactory} from './hosted-cloudflare.mjs';
 import {HostedState} from './hosted-state.mjs';
 import {accountProfile, readAccountProfile} from './account-profile.mjs';
 import {accountAdminSummary} from './admin.mjs';
+import {accountDeletionPreview, beginAccountDeletion, deletionKey, deletionReceipt, purgeDeletedAccount} from './account-cleanup.mjs';
 import {isAdminIdentity} from './admin-identity.mjs';
 import {googleAuthRoute, readWebSession} from './google-auth.mjs';
 import {adminRoute} from './admin-routes.mjs';
@@ -156,7 +158,61 @@ export class Gate extends DurableObject {
     });
   }
   adminSummary() {
-    return accountAdminSummary(this.ctx.storage, id => this.ctx.getWebSockets('browser:' + id).some(ws => ws.readyState === 1));
+    return this.ctx.blockConcurrencyWhile(async () => {
+      const deleted = await this.ctx.storage.get(deletionKey);
+      if (deleted) return {account_id: deleted.account_id, name: 'Account ' + deleted.account_id.slice(0, 8), deleting: true};
+      return accountAdminSummary(this.ctx.storage, id => this.ctx.getWebSockets('browser:' + id).some(ws => ws.readyState === 1));
+    });
+  }
+  adminDeletionPreview() {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      try { return {result: await accountDeletionPreview(this.ctx.storage, id => this.ctx.getWebSockets('browser:' + id).some(ws => ws.readyState === 1))}; }
+      catch (error) { return {error: apiFailure(error)}; }
+    });
+  }
+  adminDeleteAccount(id, input, actor, origin) {
+    // Acquire the hosted queue before the Gate lock, matching browser operations.
+    return this.hosted.serial(async () => {
+      try {
+        const prepared = await this.ctx.blockConcurrencyWhile(async () => {
+          try {
+            await beginAccountDeletion(this.ctx.storage, id, input, actor, browser => this.ctx.getWebSockets('browser:' + browser).some(ws => ws.readyState === 1),
+              {retainedSession: this.hosted.connection?.connection.sessionId, origin, oauth: Boolean(this.env.OAUTH_KV)});
+            this.tickets.clear();
+            for (const socket of this.ctx.getWebSockets()) socket.close(4001, 'Account deleted');
+            this.hosted.privateSession.clear();
+            return {record: await purgeDeletedAccount(this.ctx.storage)};
+          } catch (error) {return {error: apiFailure(error)};}
+        });
+        if (prepared.error) return prepared;
+        const {record} = prepared;
+        await this.env.REGISTRY.getByName('beta-registry-v1').finishAccountDeletion(record);
+        if (deletionReceipt(record).cleanup_pending) this.ctx.waitUntil(this.finishAccountDeletion());
+        else await this.ctx.storage.deleteAlarm();
+        return {result: deletionReceipt(record)};
+      } catch (error) {return {error: apiFailure(error)};}
+    });
+  }
+  finishAccountDeletion() {
+    return this.hosted.serial(async () => {
+      const record = await this.ctx.blockConcurrencyWhile(() => purgeDeletedAccount(this.ctx.storage));
+      if (!record) return;
+      for (const id of [...record.pending_sessions]) {
+        try { await deadline(() => this.hosted.closeOwned(id), 15000, 'CLEANUP_TIMEOUT'); }
+        catch { continue; }
+        record.pending_sessions = record.pending_sessions.filter(value => value !== id);
+        await this.ctx.storage.put(deletionKey, record);
+      }
+      if (record.oauth_cleanup_pending) {
+        try {
+          await revokeAccountGrants(record.origin, this.env, record.account_id);
+          record.oauth_cleanup_pending = false; await this.ctx.storage.put(deletionKey, record);
+        } catch { /* The tombstone denies access while the alarm retries grant cleanup. */ }
+      }
+      await this.env.REGISTRY.getByName('beta-registry-v1').finishAccountDeletion(record);
+      if (deletionReceipt(record).cleanup_pending) await this.ctx.storage.setAlarm(Date.now() + 60000);
+      else await this.ctx.storage.deleteAlarm();
+    });
   }
   async ownerProfile(request) {
     return this.ctx.blockConcurrencyWhile(async () => {
@@ -169,8 +225,9 @@ export class Gate extends DurableObject {
     });
   }
   async locked(callback) {
-    return this.ctx.blockConcurrencyWhile(async () => { try { return {result: await callback()}; } catch (error) { return {error: apiFailure(error)}; } });
+    return this.ctx.blockConcurrencyWhile(async () => { try { await this.requireExistingAccount(); return {result: await callback()}; } catch (error) { return {error: apiFailure(error)}; } });
   }
+  async requireExistingAccount() { if (await this.ctx.storage.get(deletionKey)) fail('ACCOUNT_DELETED', 'This account has been deleted.', 410); }
   createConnector(auth, name, handle) { return this.locked(async () => { const result = await this.connectors.create(auth, name, handle); this.ctx.waitUntil(this.notify()); return result; }); }
   connectorStatus(id) { return this.locked(async () => { const item = await this.connectors.get(id); return {status: item.status, expires_at: item.expires_at}; }); }
   connectorDetails(id) { return this.locked(() => this.connectors.get(id)); }
@@ -257,6 +314,7 @@ export class Gate extends DurableObject {
     fail('NOT_FOUND','Unknown task operation.',404);
   }
   async auth(request, role) {
+    await this.requireExistingAccount();
     const site = new URL(request.url).origin, requestOrigin = request.headers.get('Origin');
     if (role === 'owner' && ((requestOrigin && requestOrigin !== site) || (request.method !== 'GET' && requestOrigin !== site))) fail('UNAUTHORIZED', 'Owner requests require the approval app origin.', 403);
     if (role === 'bridge' && requestOrigin && !/^chrome-extension:\/\/[a-p]{32}$/.test(requestOrigin)) fail('UNAUTHORIZED', 'Bridge requests require the trusted extension.', 403);
@@ -271,6 +329,7 @@ export class Gate extends DurableObject {
   }
   async fetch(request) {
     try {
+      await this.requireExistingAccount();
       const path = new URL(request.url).pathname;
       const account = request.headers.get('X-AgentGate-Account');
       if (account && account !== await this.ctx.storage.get('account_id')) fail('NOT_FOUND', 'Unknown account.', 404);
@@ -559,6 +618,7 @@ export class Gate extends DurableObject {
     } catch { ws.send(JSON.stringify({error: 'RESULT_REJECTED'})); }
   }
   async webSocketClose(ws) {
+    if (await this.ctx.storage.get(deletionKey)) return;
     const id = this.ctx.getTags(ws).find(tag => tag.startsWith('browser:'))?.slice(8);
     if (!id || this.ctx.getWebSockets('browser:' + id).some(socket => socket !== ws && socket.readyState === 1)) return;
     await this.hostedLock(async () => {
@@ -578,6 +638,7 @@ export class Gate extends DurableObject {
     }
   }
   async socketAllowed(ws) {
+    if (await this.ctx.storage.get(deletionKey)) return false;
     const tag = this.ctx.getTags(ws).find(t => t.startsWith('browser:'));
     if (!tag || tag === 'browser:legacy') return !await this.ctx.storage.get('account_id') && !await this.ctx.storage.get('legacy_bridge_retired');
     try { return (await this.browsers.get(tag.slice(8))).status === 'active'; } catch { return false; }
@@ -594,6 +655,7 @@ export class Gate extends DurableObject {
     } catch { /* Notification delivery never grants access; foreground inbox remains available. */ }
   }
   async alarm() {
+    if (await this.ctx.storage.get(deletionKey)) {await this.finishAccountDeletion(); return;}
     await this.ctx.blockConcurrencyWhile(async () => {
       const item = await this.ctx.storage.get('hosted:consent');
       if (item && item.expires_at <= Date.now()) {

@@ -1,9 +1,10 @@
 import {existingAdminSession, allAdminAccounts} from './admin-session.mjs';
 import {InvitePanel} from './admin-invites.mjs';
+import {AccountCleanup} from './admin-cleanup.mjs';
 const $ = id => document.getElementById(id);
 const el = (tag, text, className) => { const node = document.createElement(tag); if (text !== undefined) node.textContent = String(text); if (className) node.className = className; return node; };
 const date = value => Number.isSafeInteger(value) ? new Date(value).toLocaleString() : 'No activity recorded';
-let session, data, loading = false, invitePanel;
+let session, data, loading = false, invitePanel, cleanup;
 function browserDetails(items) {
   const details = el('details'), list = el('ul'); details.append(el('summary', 'View browsers'));
   for (const item of items) { const row = el('li', item.name); row.append(el('span', item.id), el('span', item.kind === 'cloud' ? 'Cloud · ' + (item.authorized ? 'Enabled' : item.status) : (item.connected ? 'Online' : item.authorized ? 'Offline' : item.status))); list.append(row); }
@@ -11,13 +12,19 @@ function browserDetails(items) {
 }
 function renderAccounts() {
   const query = $('search').value.trim().toLowerCase();
-  const items = data.accounts.filter(item => [item.name, item.email, item.account_id].some(value => value?.toLowerCase().includes(query)));
+  const items = data.accounts.filter(item => [item.name, item.email, item.account_id].some(value => value?.toLowerCase().includes(query)) &&
+    ($('accountFilter').value !== 'no-local' || item.account_id !== 'owner' && !item.unavailable && !item.deleting && item.metadata_coverage === 'complete' && !item.browsers.some(browser => browser.kind === 'local')));
   $('accounts').replaceChildren(...items.map(item => {
-    const row = el('tr'), identity = el('td'); identity.append(el('strong', item.name));
+    const row = el('tr'), identity = el('td'); row.dataset.account = item.account_id; identity.append(el('strong', item.name));
     if (item.email) identity.append(el('p', item.email), el('p', 'Owner-entered · unverified', 'hint'));
     const link = el('a', 'Open account'); link.href = item.account_id === 'owner' ? '/' : '/u/' + item.account_id + '/';
     identity.append(el('code', item.account_id), link); row.append(identity);
-    if (item.unavailable) { const unavailable = el('td', 'Account details unavailable. Refresh to retry.'); unavailable.colSpan = 4; row.append(unavailable); return row; }
+    if (item.unavailable || item.deleting) {
+      const unavailable = el('td', item.deleting ? 'Deletion in progress.' : 'Account details unavailable. Refresh to retry.'); unavailable.colSpan = 4;
+      const actions = el('td'); actions.dataset.label = 'Manage';
+      if (item.deleting) {const retry = el('button', 'Finish deletion', 'secondary'); retry.type = 'button'; retry.addEventListener('click', () => cleanup.open(item.account_id)); actions.append(retry);}
+      row.append(unavailable, actions); return row;
+    }
     const local = item.browsers.filter(browser => browser.kind === 'local'), online = local.filter(browser => browser.connected).length;
     const localCell = el('td'); localCell.append(el('span', online + ' online / ' + local.length + ' paired', 'admin-state ' + (online ? 'online' : '')));
     if (item.browsers.length) localCell.append(browserDetails(item.browsers));
@@ -26,10 +33,14 @@ function renderAccounts() {
     if (item.cloud.cooldown_until) cloudCell.append(el('p', 'Waiting until ' + date(item.cloud.cooldown_until), 'admin-state waiting'));
     const usage = el('td'); usage.append(el('span', item.usage.cloud_tasks_24h + ' cloud tasks'), el('p', item.usage.cloud_actions_24h + ' action results'), el('p', item.usage.running_cloud + ' cloud tasks open', 'hint'));
     if (item.usage.coverage === 'bounded_sample') usage.append(el('p', 'Counts cover up to 2,000 stored tasks.', 'hint'));
+    usage.append(el('p', item.usage.last_task_at ? 'Last task ' + date(item.usage.last_task_at) : 'No tasks recorded', 'hint'));
     const assistants = el('td'); assistants.append(el('span', item.connectors.filter(c => c.status === 'connected').length + ' connected'));
     if (item.connectors.length) { const details = el('details'), list = el('ul'); details.append(el('summary', 'View assistants')); for (const c of item.connectors) {const li = el('li', c.client_name); li.append(el('span', c.status), el('span', c.id)); list.append(li);} details.append(list); assistants.append(details); }
     for (const [cell, label] of [[localCell, 'Local browsers'], [cloudCell, 'Cloud browser'], [usage, 'Last 24 hours'], [assistants, 'Assistants']]) cell.dataset.label = label;
-    row.append(localCell, cloudCell, usage, assistants); return row;
+    const manage = el('td'); manage.dataset.label = 'Manage';
+    if (item.account_id === 'owner') manage.append(el('span', 'Protected', 'hint'));
+    else {const button = el('button', 'Delete account', 'secondary delete-account'); button.type = 'button'; button.addEventListener('click', () => cleanup.open(item.account_id)); manage.append(button);}
+    row.append(localCell, cloudCell, usage, assistants, manage); return row;
   }));
   $('empty').hidden = items.length > 0;
   $('accountCount').textContent = items.length + ' of ' + data.total_accounts + ' accounts';
@@ -59,6 +70,8 @@ async function refresh() {
   finally {loading = false; $('refresh').disabled = false;}
 }
 $('search').addEventListener('input', () => {if (data) renderAccounts();});
+$('accountFilter').addEventListener('change', () => {if (data) renderAccounts();});
+cleanup = new AccountCleanup((...args) => session.api(...args), refresh);
 $('refresh').addEventListener('click', refresh);
 $('signOut').addEventListener('click', async () => {
   $('signOut').disabled = true;

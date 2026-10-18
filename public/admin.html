@@ -5,10 +5,11 @@
 <section id="signIn" class="admin-sign-in" hidden><h2>Sign in to administration</h2><p>Use your authorized Google account to view all AgentGate accounts and connected browsers.</p><a class="google-sign-in" href="/api/auth/google/start">Sign in with Google</a></section>
 <section id="dashboard" hidden>
 <div class="admin-stats"><article><span>All accounts</span><strong id="total">—</strong></article><article><span>Local browsers online</span><strong id="online">—</strong></article><article><span>Open cloud tasks</span><strong id="running">—</strong></article></div>
-<div class="admin-toolbar"><label for="search">Search all accounts<input id="search" type="search" placeholder="Account name, email or ID" autocomplete="off"></label><p class="hint" id="updated"></p></div>
-<div class="account-table-wrap"><table class="account-table"><caption class="sr-only">Accounts, connected browsers and cloud activity</caption><thead><tr><th scope="col">Account</th><th scope="col">Local browsers</th><th scope="col">Cloud browser</th><th scope="col">Last 24 hours</th><th scope="col">Assistants</th></tr></thead><tbody id="accounts"></tbody></table></div>
+<div class="admin-toolbar"><label for="search">Search all accounts<input id="search" type="search" placeholder="Account name, email or ID" autocomplete="off"></label><label for="accountFilter" class="account-filter">Show<select id="accountFilter" aria-label="Show accounts"><option value="all">All accounts</option><option value="no-local">No local browsers</option></select></label><p class="hint" id="updated"></p></div>
+<p id="cleanupStatus" class="hint" role="status" aria-live="polite"></p>
+<div class="account-table-wrap"><table class="account-table"><caption class="sr-only">Accounts, connected browsers and cloud activity</caption><thead><tr><th scope="col">Account</th><th scope="col">Local browsers</th><th scope="col">Cloud browser</th><th scope="col">Last 24 hours</th><th scope="col">Assistants</th><th scope="col">Manage</th></tr></thead><tbody id="accounts"></tbody></table></div>
 <p id="empty" class="empty" hidden>No accounts match your search.</p>
-<p class="hint" id="accountCount" role="status" aria-live="polite"></p>
+<p class="hint" id="accountCount" role="status" aria-live="polite" tabindex="-1"></p>
 <p class="hint">Cloud connection status reflects saved metadata. Cloud task counts cover stored tasks; browser time is the shared provider’s recent sample.</p>
 <section class="cloud-capacity"><h2>Shared Cloudflare capacity</h2><p id="capacity">Capacity unavailable.</p><p class="hint" id="history"></p></section>
 <section class="invite-panel" aria-labelledby="inviteHeading">
@@ -18,4 +19,10 @@
 <p id="inviteStatus" class="hint" role="status" aria-live="polite"></p><p id="inviteEmpty" class="hint" hidden>No invites yet. Create a link to invite your first user.</p><ul id="invites" class="invite-list"></ul>
 <nav class="admin-pagination" aria-label="Invitation pages"><button type="button" id="invitePrevious" class="secondary" disabled>Previous invites</button><p class="hint" id="invitePageLabel"></p><button type="button" id="inviteNext" class="secondary" disabled>Next invites</button></nav>
 </section>
-</section></main></body></html>
+</section></main>
+<dialog id="deleteAccountDialog" aria-labelledby="deleteAccountHeading" aria-describedby="deletionWarning"><form id="deleteAccountForm">
+<h2 id="deleteAccountHeading">Delete account?</h2><p id="deleteAccountName"></p><code id="deleteAccountId"></code>
+<ul id="deletionCounts"></ul><p id="deletionWarning">This permanently removes the account, paired devices, saved website logins and task history. Connected assistants lose access. This cannot be undone.</p>
+<label for="deleteConfirmation">Type DELETE to confirm<input id="deleteConfirmation" autocomplete="off" spellcheck="false" autocapitalize="characters"></label>
+<p id="deletionStatus" role="status" aria-live="polite"></p><div class="deletion-actions"><button id="cancelDeletion" class="secondary" type="button">Cancel</button><button id="reviewDeletion" class="secondary" type="button" hidden>Review again</button><button id="confirmDeletion" class="danger" type="submit" disabled>Delete account permanently</button></div>
+</form></dialog></body></html>
