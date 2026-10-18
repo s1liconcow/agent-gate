@@ -4,7 +4,7 @@ import {createServer} from 'node:net';
 import {cp, mkdtemp, mkdir, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
-import {chromium} from '@playwright/test';
+import {chromium} from '../scripts/local-browser.mjs';
 import {build} from 'esbuild';
 import {sealPairing} from '../shared/browser-pairing.mjs';
 import {owner, until, wait} from './flow/support.mjs';

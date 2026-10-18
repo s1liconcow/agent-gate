@@ -1,4 +1,4 @@
-import {chromium} from '@playwright/test';
+import {chromium} from '../scripts/local-browser.mjs';
 import assert from 'node:assert/strict';
 import {mkdtemp, cp, rm, readFile, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';

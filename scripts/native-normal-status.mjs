@@ -1,5 +1,5 @@
 // Read-only model readiness in a normally launched, owned test browser.
-import {chromium} from '@playwright/test';import {spawn} from 'node:child_process';import {mkdir,readFile,writeFile,readdir,unlink} from 'node:fs/promises';import {resolve} from 'node:path';
+import {chromium} from './local-browser.mjs';import {spawn} from 'node:child_process';import {mkdir,readFile,writeFile,readdir,unlink} from 'node:fs/promises';import {resolve} from 'node:path';
 const root=resolve(import.meta.dirname,'..'),profile=resolve(root,'data/native-normal-profile'),output=resolve(root,'artifacts/native-download');await mkdir(profile,{recursive:true});await mkdir(output,{recursive:true});
 const marker=resolve(profile,'.agentgate-test-profile.json');try{await readFile(marker);}catch{if((await readdir(profile)).length)throw new Error('Refuse an unmarked profile.');await writeFile(marker,JSON.stringify({purpose:'AgentGate native readiness, fresh test profile',accounts:false}));}
 // A closed owned browser leaves this transient endpoint file behind.

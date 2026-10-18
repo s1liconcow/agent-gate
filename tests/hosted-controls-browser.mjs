@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {chromium} from '@playwright/test';
+import {chromium} from '../scripts/local-browser.mjs';
 import {readFile} from 'node:fs/promises';
 import {HostedBrowser} from '../src/hosted-browser.mjs';
 import {HostedState} from '../src/hosted-state.mjs';

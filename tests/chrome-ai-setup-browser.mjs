@@ -1,7 +1,7 @@
 // Real settings UI with synthetic Chrome/model adapters. No account, website
 // data, inference service or browser profile belonging to the owner is used.
 import assert from 'node:assert/strict';
-import {chromium} from '@playwright/test';
+import {chromium} from '../scripts/local-browser.mjs';
 import {createServer} from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
@@ -23,7 +23,7 @@ try {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.addInitScript(() => {
-    window.fixture = {profile: {provider: 'openai', model: 'synthetic-model', endpoint: 'https://api.openai.com/v1/chat/completions', format: 'schema'}, preference: null, saves: [], events: [], fail: false};
+    window.fixture = {profile: {provider: 'purpose_browser', model: 'synthetic-model', endpoint: 'browser://purpose', format: 'classifier'}, preference: null, saves: [], events: [], fail: false};
     const get = async keys => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).map(key => [key, key === 'inference_preference' ? fixture.preference : undefined]));
     window.chrome = {storage: {local: {get}, session: {get}}, runtime: {sendMessage: async payload => {
       if (payload.type === 'inference_status') return {ok: true, profile: fixture.profile, has_key: false};
@@ -48,7 +48,7 @@ try {
   await page.goto('http://127.0.0.1:' + server.address().port + '/review.html');
   await page.locator('#inferenceSettings').evaluate(element => { element.open = true; });
   await page.waitForFunction(() => !document.getElementById('provider').disabled);
-  assert.equal(await page.locator('#provider').inputValue(), 'openai');
+  assert.equal(await page.locator('#provider').inputValue(), 'purpose_browser');
   await page.locator('#provider').selectOption('local');
   await page.waitForFunction(() => Boolean(fixture.complete));
   assert.equal(await page.locator('#provider').isDisabled(), true);
@@ -61,11 +61,10 @@ try {
   assert.equal(await page.locator('#providerStatus').textContent(), 'Using Chrome AI.');
   // Unsupported model preparation must preserve the saved provider and unlock
   // the selection so the owner can choose another supported provider.
-  await page.evaluate(() => { fixture.fail = true; fixture.profile = {provider: 'openai', model: 'synthetic-model', endpoint: 'https://api.openai.com/v1/chat/completions', format: 'schema'}; fixture.preference = null; });
-  await page.locator('#provider').selectOption('openai');
+  await page.evaluate(() => { fixture.fail = true; fixture.profile = {provider: 'purpose_browser', model: 'synthetic-model', endpoint: 'browser://purpose', format: 'classifier'}; fixture.preference = null; document.getElementById('provider').value = 'purpose_browser'; });
   await page.locator('#provider').selectOption('local');
   await page.waitForFunction(() => !document.getElementById('provider').disabled && document.getElementById('message').classList.contains('error'));
-  assert.equal(await page.locator('#provider').inputValue(), 'openai');
+  assert.equal(await page.locator('#provider').inputValue(), 'purpose_browser');
   assert.equal(await page.evaluate(() => fixture.saves.length), 1);
   // The retry button also works when Chrome AI was already the saved default.
   await page.evaluate(() => { fixture.fail = false; fixture.profile = null; fixture.preference = 'local'; document.getElementById('provider').value = 'local'; document.getElementById('provider').dispatchEvent(new Event('change')); });

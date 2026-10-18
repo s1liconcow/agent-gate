@@ -16,3 +16,9 @@
 - Fetch the latest remote state, preserve existing changes, and verify the merged result before pushing. Never force-push `main`.
 - Remove stale worktrees and local branches after their work is integrated and recoverable backups are verified.
 - Build the extension in the repository's existing `extension/` folder and preserve its installed model files.
+
+# Local browser checks
+
+- On macOS, run commands that launch Playwright, Chromium, Chrome for Testing, or native browser probes with `sandbox_permissions="require_escalated"` from the first attempt. Codex's Seatbelt sandbox blocks required macOS services and causes browser crashes, including in headless mode.
+- Import local Playwright Chromium through `scripts/local-browser.mjs`. Its preflight stops sandboxed runs before Chrome starts with `LOCAL_BROWSER_SANDBOX`; rerun through the approved execution path or a regular terminal.
+- Keep the sandbox marker and preflight intact. Chromium's `--no-sandbox` flag does not fix the host restriction. Use isolated test profiles and close browsers after each run.

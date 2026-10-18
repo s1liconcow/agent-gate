@@ -92,6 +92,15 @@ The real browser checks use isolated profiles and local Worker state. The demo
 reports fixture decisions, real ONNX observations and unresolved native readiness
 separately. Its cloud acquisition is emulated.
 
+On macOS, Codex must run browser checks outside its Seatbelt command sandbox
+through an approved execution request (`sandbox_permissions="require_escalated"`).
+The sandbox blocks macOS application and Mach services used by Chromium, causing
+“Google Chrome for Testing quit unexpectedly” even with headless mode. Local
+browser runners detect this environment and stop with `LOCAL_BROWSER_SANDBOX`
+before launching Chrome. Rerun through that approved path or a regular terminal.
+Use `scripts/local-browser.mjs` for new local browser checks. See
+[Codex sandboxing](https://learn.chatgpt.com/docs/sandboxing) for execution permissions.
+
 Training and evaluation inputs live under [data/](../data/README.md). Frozen
 fixtures are versioned; weights, profiles, credentials and generated reports stay
 local. Optional Worker/trial bundles go to `dist/`.

@@ -1,6 +1,6 @@
 // Bounded diagnostics of the actual extension/offscreen native runtime.
 import {createServer} from 'node:http';
-import {chromium} from '@playwright/test';
+import {chromium} from './local-browser.mjs';
 import {mkdtemp,rm,mkdir,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';

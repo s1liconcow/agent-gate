@@ -1,6 +1,6 @@
 // Real Chrome cookies, isolated-world export and Playwright profile restoration.
 import assert from 'node:assert/strict';
-import {chromium} from '@playwright/test';
+import {chromium} from '../scripts/local-browser.mjs';
 import {cp, mkdtemp, readFile, writeFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';

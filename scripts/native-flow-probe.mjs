@@ -1,4 +1,4 @@
-import {chromium} from '@playwright/test';
+import {chromium} from './local-browser.mjs';
 import {createServer} from 'node:http';
 import {mkdir} from 'node:fs/promises';
 import {resolve} from 'node:path';

@@ -1,6 +1,6 @@
 // Interaction regression for the phone app: task consent, running tasks and shared logins.
 import assert from 'node:assert/strict';
-import {chromium} from '@playwright/test';
+import {chromium} from '../scripts/local-browser.mjs';
 import {readFile, mkdir} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {canonical, digest, scope, verifyReceipt} from '../shared/protocol.mjs';

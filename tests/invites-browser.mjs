@@ -4,7 +4,7 @@ import {createServer} from 'node:net';
 import {mkdtemp, rm, mkdir, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
-import {chromium} from '@playwright/test';
+import {chromium} from '../scripts/local-browser.mjs';
 import {until, owner} from './flow/support.mjs';
 import {b64url} from '../shared/protocol.mjs';
 import {googleLogin, installGoogleSession} from './google-login.mjs';

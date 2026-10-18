@@ -5,7 +5,7 @@ import {createServer} from 'node:net';
 import {mkdtemp, readFile, writeFile, mkdir, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
-import {chromium} from '@playwright/test';
+import {chromium} from '../scripts/local-browser.mjs';
 import {b64url, canonical, digest} from '../shared/protocol.mjs';
 import {googleLogin} from './google-login.mjs';
 

@@ -1,5 +1,5 @@
 // Normal Chrome setup in an owned, retained test profile; no model/profile copies.
-import {chromium} from '@playwright/test';
+import {chromium} from './local-browser.mjs';
 import {mkdir,readFile,writeFile,readdir,stat,access} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {createServer} from 'node:http';

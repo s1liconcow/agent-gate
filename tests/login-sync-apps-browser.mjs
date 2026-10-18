@@ -1,6 +1,6 @@
 // Real Chrome stores and app controls; transfers require only the browser Share click.
 import assert from 'node:assert/strict';
-import {chromium} from '@playwright/test';
+import {chromium} from '../scripts/local-browser.mjs';
 import {cp, mkdtemp, readFile, writeFile, rm, mkdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';

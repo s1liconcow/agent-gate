@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
-import {chromium} from '@playwright/test';
+import {chromium} from '../scripts/local-browser.mjs';
 
 const root = resolve(import.meta.dirname, '..'), temporary = await mkdtemp(resolve(tmpdir(), 'agentgate-control-capture-'));
 const origin = 'https://catalog.example.test', extension = resolve(root, 'extension');

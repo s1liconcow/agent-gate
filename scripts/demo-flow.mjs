@@ -1,6 +1,6 @@
 // One command drives fixture conformance plus available real local models.
 import assert from 'node:assert/strict';
-import {chromium} from '@playwright/test';
+import {chromium} from './local-browser.mjs';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {cp,mkdtemp,readFile,writeFile,rm,mkdir} from 'node:fs/promises';
