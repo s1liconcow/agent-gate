@@ -26,6 +26,14 @@ test('a stalled task target lookup closes its unpublished page', async () => {
 
 test('page readiness cannot hold the hosted work queue indefinitely', async () => {
   const adapter = new HostedAdapter({}, {}, {operationMilliseconds: 10});
-  adapter.pages.set('task', {isClosed: () => false, url: () => 'https://example.com', evaluate: () => new Promise(() => {})});
+  adapter.pages.set('task', {isClosed: () => false, url: () => 'https://example.com', waitForLoadState: () => new Promise(() => {})});
   await assert.rejects(adapter.tab('task'), {code: 'BROWSER_UNRESPONSIVE'});
+});
+
+test('transport load state reports loading without executing website JavaScript', async () => {
+  const adapter = new HostedAdapter({}, {}, {});
+  let loaded = false;
+  adapter.pages.set('task', {isClosed: () => false, url: () => 'https://example.com', evaluate: () => assert.fail('Readiness needs no website evaluation'), waitForLoadState: async () => {if (!loaded) throw Object.assign(new Error('Loading'), {name: 'TimeoutError'});}});
+  assert.equal((await adapter.tab('task')).status, 'loading');
+  loaded = true; assert.equal((await adapter.tab('task')).status, 'complete');
 });

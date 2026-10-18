@@ -21,8 +21,8 @@ export async function hostedTarget(context, page, milliseconds = 15000) {
 }
 
 export class HostedAdapter {
-  constructor(browser, context, {scripts, anchorId, store, operationMilliseconds = 15000}) {
-    Object.assign(this, {browser, context, scripts, anchorId, store, operationMilliseconds}); this.pages = new Map(); this.worlds = new Map();
+  constructor(browser, context, {scripts, anchorId, store, operationMilliseconds = 15000, progress = async () => {}}) {
+    Object.assign(this, {browser, context, scripts, anchorId, store, operationMilliseconds, progress}); this.pages = new Map(); this.worlds = new Map();
   }
   async target(page) {
     return hostedTarget(this.context, page, this.operationMilliseconds);
@@ -50,18 +50,28 @@ export class HostedAdapter {
     } finally { await this.closeTab(id); }
   }
   page(id) { const page = this.pages.get(id); if (!page || page.isClosed()) throw fault('TAB_CLOSED'); return page; }
-  async tab(id) { const page = this.page(id); return {id, url: page.url(), status: await deadline(() => page.evaluate(() => document.readyState === 'complete' ? 'complete' : 'loading'), this.operationMilliseconds, 'BROWSER_UNRESPONSIVE')}; }
+  async tab(id) {
+    const page = this.page(id);
+    let status = 'complete';
+    // Playwright tracks load events on the transport. Reading readiness must
+    // not queue JavaScript behind an unresponsive website's main thread.
+    try { await deadline(() => page.waitForLoadState('load', {timeout: 1000}), this.operationMilliseconds, 'BROWSER_UNRESPONSIVE'); }
+    catch (error) { if (error.name !== 'TimeoutError') throw error; status = 'loading'; }
+    return {id, url: page.url(), status};
+  }
   async createTab(url) {
     const page = await deadline(signal => this.context.newPage().then(async page => {
       if (signal.aborted) { await page.close().catch(() => {}); throw signal.reason; }
       return page;
     }), this.operationMilliseconds, 'BROWSER_UNRESPONSIVE');
-    let id;
+    let id, phase = 'opening_tab';
     try {
       id = await this.target(page);
       this.pages.set(id, page);
+      phase = 'page_loading'; await this.progress(phase);
       await this.navigate(id, url); return await this.tab(id);
     } catch (error) {
+      error.phase ||= phase;
       if (id) this.pages.delete(id);
       await deadline(() => page.close(), this.operationMilliseconds, 'BROWSER_UNRESPONSIVE').catch(() => {});
       throw error;

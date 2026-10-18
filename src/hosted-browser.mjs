@@ -72,7 +72,7 @@ export class HostedBrowser {
         // and their old DOM refs cannot be restored from saved profile state.
         await this.reset(); this.privateSession.clear();
         for (const name of ['bindings', 'guarded']) await store.delete('session:' + name);
-        const adapter = new HostedAdapter(browser, context, {scripts: this.scripts, anchorId: recovered ? saved.anchor : undefined, store});
+        const adapter = new HostedAdapter(browser, context, {scripts: this.scripts, anchorId: recovered ? saved.anchor : undefined, store, progress: phase => this.progress(phase)});
         phase = 'profile_restore';
         await this.progress(phase);
         if (!recovered) await adapter.restore(await store.get('login'));
