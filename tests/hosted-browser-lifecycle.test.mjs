@@ -312,6 +312,35 @@ test('reconciliation respects a new provider denial and restores durable backoff
   for (let i = 0; i < 3; i++) await assert.rejects(f.hosted.openConnection(f.store), {code: 'BROWSER_RATE_LIMITED'});
   assert.equal(acquired, 1);
 });
+test('a plan upgrade can recover a midnight capacity wait after worker reconstruction', async () => {
+  let now = Date.parse('2026-10-18T20:00:00Z'), acquired = 0, inspected = 0;
+  const observed = now - 900000, midnight = Date.parse('2026-10-19T00:00:00Z') + 365;
+  let denied = true;
+  const factory = hostedBrowserFactory({}, {now: () => now,
+    limits: async () => {
+      inspected++;
+      return {activeSessions: [], maxConcurrentSessions: 4, allowedBrowserAcquisitions: 1, timeUntilNextAllowedBrowserAcquisition: 0};
+    },
+    acquire: async () => {
+      acquired++;
+      if (denied) throw new Error('Unable to create new browser: code: 429: message: Rate limit exceeded');
+      return {sessionId: 'paid-browser'};
+    }, connect: async () => ({close: async () => {}})});
+  const f = fixture(factory, undefined, () => now);
+  await f.store.putRecords({'browser-diagnostic': {http_status: 429, observed_at: observed, provider_message: 'Rate limit exceeded',
+    retry_sources: {minimum_backoff_at: observed + 60000, provider_limit_wait_at: midnight, provider_retry_after_at: null, daily_reset_at: null}},
+    'browser-retry': {attempts: 1, reason: 'acquisition_rate', retry_at: midnight}});
+  const restarted = fixture(factory, f.storage, () => now);
+  await assert.rejects(restarted.hosted.openConnection(restarted.store), {code: 'BROWSER_RATE_LIMITED'});
+  assert.equal(acquired, 1);
+  assert.equal((await restarted.store.get('browser-retry')).retry_at, now + 120000);
+  for (let i = 0; i < 3; i++) await assert.rejects(restarted.hosted.openConnection(restarted.store), {code: 'BROWSER_RATE_LIMITED'});
+  assert.equal(acquired, 1);
+  denied = false; now += 120000;
+  assert.equal((await restarted.hosted.openConnection(restarted.store)).sessionId, 'paid-browser');
+  assert.equal(acquired, 2); assert.ok(inspected >= 2);
+  assert.equal(await restarted.store.get('browser-retry'), undefined);
+});
 test('explicit daily quota and Retry-After prevent reconciliation lookups and acquisition', async () => {
   const now = 1000000;
   for (const error of [
