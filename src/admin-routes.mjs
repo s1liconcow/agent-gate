@@ -21,7 +21,12 @@ export async function adminRoute(request, env, readBody) {
     if (url.search) fail('INVALID_REQUEST', 'Browser retry does not accept query parameters.');
     const input = await readBody(request);
     if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).length !== 1 || input.reason !== 'plan_changed') fail('INVALID_REQUEST', 'Confirm the provider plan changed.');
-    const answer = await env.GATE.getByName(browserRetry[1] === 'owner' ? 'single-owner-v1' : 'account:' + browserRetry[1]).adminBrowserRetry('google:' + identity.subject);
+    let answer;
+    try { answer = await env.GATE.getByName(browserRetry[1] === 'owner' ? 'single-owner-v1' : 'account:' + browserRetry[1]).adminBrowserRetry('google:' + identity.subject); }
+    catch (error) {
+      console.warn('BROWSER_CAPACITY_RETRY_DIAGNOSTIC ' + JSON.stringify({phase: 'backend_rpc', type: error.name, message: String(error.message).slice(0, 500)}));
+      throw error;
+    }
     if (answer.error) return Response.json(answer, {status: answer.error.status, headers});
     return response(answer.result);
   }
