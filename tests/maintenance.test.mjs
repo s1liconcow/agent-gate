@@ -31,6 +31,15 @@ test('live views and saved browser cleanup retain a bounded wakeup', () => {
   assert.equal(maintenanceDeadline({connection: {last_activity_at: now}, viewUntil: now + 45000}, now), now + 45000);
   assert.equal(maintenanceDeadline({cleanup: true}, now), now + 60000);
 });
+
+test('page loading retries stop at the blocked deadline and retain idle browser cleanup', () => {
+  const session = {status: 'active', task: {execution_browser: 'cloud'}, expires_at: now + 600000,
+    runtime: {state: 'planning', code: 'CONTENT_NOT_READY', updated_at: now}};
+  const connection = {last_activity_at: now};
+  assert.equal(maintenanceDeadline({sessions: [session], connection}, now), now + 30000);
+  session.runtime.state = 'blocked';
+  assert.equal(maintenanceDeadline({sessions: [session], connection}, now), now + 120000);
+});
 test('scheduler removes the old recurring alarm and preserves deletion retries', async () => {
   const storage = new Memory(); let alarm = now + 30000, writes = 0;
   storage.getAlarm = async () => alarm;

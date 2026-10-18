@@ -11,7 +11,8 @@ export function maintenanceDeadline({sessions = [], classifiers = [], transfers 
   const live = sessions.filter(item => !ended.has(item.status));
   for (const item of live) {
     add(item.expires_at); add(item.pending?.deadline);
-    if (!hostedBusy && item.task?.execution_browser === 'cloud' && item.status === 'active' && !item.view && !setupBlockers.has(item.runtime?.code)) {
+    if (!hostedBusy && item.task?.execution_browser === 'cloud' && item.status === 'active' && !item.view && !setupBlockers.has(item.runtime?.code) &&
+        !(item.runtime?.state === 'blocked' && item.runtime.code === 'CONTENT_NOT_READY')) {
       add(Math.max(item.runtime?.browser_limit?.retry_at || 0, (item.runtime?.updated_at || now) + 30000));
     }
   }

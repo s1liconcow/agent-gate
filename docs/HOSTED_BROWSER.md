@@ -57,6 +57,8 @@ without website text or credentials. Login-state saves and connection teardown
 have time limits so an unresponsive browser cannot hold the task queue indefinitely.
 Page readiness waits for the main document. Pending images and background requests
 do not block capture; a new tab stays loading until its first navigation commits.
+Maintenance polls retain the page-loading retry window. Once that window ends,
+the task waits for owner help and its process follows the normal idle cleanup.
 
 ```sh
 node --test tests/hosted-browser-factory.test.mjs tests/hosted-browser-limits.test.mjs tests/hosted-browser-lifecycle.test.mjs tests/mcp-discovery.test.mjs

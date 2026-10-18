@@ -62,6 +62,23 @@ test('a hung anchor lookup cannot retain a process or block later cloud work', a
   assert.equal(await f.hosted.serial(async () => 'queue released'), 'queue released');
 });
 
+test('maintenance polls preserve page-loading deadlines until the browser transport changes', async () => {
+  const context = {pages: () => [], newPage: async () => ({}), addCookies: async () => {}, storageState: async () => ({cookies: [], origins: []}),
+    newCDPSession: async () => ({send: async () => ({targetInfo: {targetId: 'anchor'}}), detach: async () => {}})};
+  const browser = {contexts: () => [context], close: async () => {}};
+  const f = fixture({open: async (_, onAcquire) => {await onAcquire('owned'); return {sessionId: 'owned', fresh: true, browser};}});
+  f.hosted.reset = async () => {};
+  let original;
+  await f.hosted.connected(({automatic}) => {original = automatic; automatic.attempts.set('task', {since: 1000, retry_at: 31000});});
+  await f.hosted.connected(({automatic}) => {
+    assert.equal(automatic, original);
+    assert.deepEqual(automatic.attempts.get('task'), {since: 1000, retry_at: 31000});
+  });
+  await f.hosted.disconnect();
+  await f.hosted.connected(({automatic}) => {assert.notEqual(automatic, original); assert.equal(automatic.attempts.size, 0);});
+  await f.hosted.disconnect();
+});
+
 test('idle and expired tasks close the saved process without reconnecting or creating a replacement', async () => {
   const closed = [], f = fixture({open: async () => {throw new Error('Idle cleanup must not open a browser');}, close: async id => closed.push(id)});
   await f.store.put('connection', {...config, sessionId: 'stopped-or-running'});
@@ -132,7 +149,7 @@ test('failed idle closure of an open task retries without extending its activity
   assert.equal(await f.store.get('connection'), undefined);
 });
 test('sign-in and setup blockers sleep through alarms and release their idle browser', async () => {
-  for (const code of ['LOGIN_REQUIRED', 'MODEL_SETUP_REQUIRED', 'INFERENCE_AUTH_FAILED', 'OUT_OF_SCOPE', 'TAB_CLOSED', 'LOCAL_CHECK_REFUSED']) {
+  for (const code of ['LOGIN_REQUIRED', 'MODEL_SETUP_REQUIRED', 'INFERENCE_AUTH_FAILED', 'OUT_OF_SCOPE', 'TAB_CLOSED', 'LOCAL_CHECK_REFUSED', 'CONTENT_NOT_READY']) {
     let now = 100000;
     const closed = [], f = fixture({close: async id => closed.push(id)}, undefined, () => now);
     f.hosted.snapshot = async () => ({sessions: [{id: 'task', status: 'active', browser_runtime: {state: 'blocked', code}}]});

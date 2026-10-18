@@ -11,7 +11,7 @@ import {HOSTED_BROWSER_IDLE_MS} from './hosted-browser-factory.mjs';
 
 const activity = {sync: async () => {}, report: async () => {}, clear: async () => {}, pause: async () => {}, statuses: async () => {}};
 const setupBlockers = new Set(['LOGIN_REQUIRED', 'PERMISSION_REQUIRED', 'MODEL_SETUP_REQUIRED', 'MODEL_UNAVAILABLE',
-  'INFERENCE_CONFIG_CHANGED', 'INFERENCE_AUTH_FAILED', 'INFERENCE_NOT_APPROVED', 'OUT_OF_SCOPE', 'TAB_CLOSED', 'LOCAL_CHECK_REFUSED', 'PAGE_UNSUPPORTED']);
+  'INFERENCE_CONFIG_CHANGED', 'INFERENCE_AUTH_FAILED', 'INFERENCE_NOT_APPROVED', 'OUT_OF_SCOPE', 'TAB_CLOSED', 'LOCAL_CHECK_REFUSED', 'PAGE_UNSUPPORTED', 'CONTENT_NOT_READY']);
 
 export class HostedBrowser {
   constructor({storage, consent, factory, scripts, call, snapshot, reset, classifierReady = async () => false, now = Date.now, loginCheckpointMilliseconds = 15000, disconnectMilliseconds = 5000, startupMilliseconds = 15000}) {
@@ -120,7 +120,9 @@ export class HostedBrowser {
         fail('LOCAL_CLASSIFIER_REFUSED','Every task requires a paired local classifier.');
       };
       const verifySession = (packet, phoneKey) => verifyBrowserSession(packet, phoneKey, Date.now(), config.coordinator);
-      const automatic = new AutomaticBrowser({api, call, config: () => this.config(config), verifySession, model, activity});
+      // Preserve page-loading deadlines and backoff across maintenance polls.
+      // A replacement transport gets a fresh reader and fresh task authority.
+      const automatic = retained.automatic ||= new AutomaticBrowser({api, call, config: () => this.config(config), verifySession, model, activity});
       await api.storage.local.set({automation: {enabled: true, grants_enabled: true}});
       const answer = await operation({adapter, api, automatic, authorize, config});
       // Saved authentication data is never copied into engine views or MCP output.
