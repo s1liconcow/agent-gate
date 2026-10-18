@@ -1,8 +1,10 @@
 # Account administration
 
-Open `/admin.html` in the browser already paired with the original owner account. The existing owner credential authenticates the page. `ADMIN_ACCOUNT_ID=owner` designates that account as the administrator. An absent or invalid designation disables administration. Tenant owner, MCP and bridge credentials cannot list other accounts.
+Open `/admin.html` (or `/admin`) for global AgentGate administration. The page lists every enrolled account and the original owner, loads every account page automatically, and searches the full list. Browser and open-task totals cover all accounts. Account-specific admin links redirect here.
 
-The account registry supplies every enrolled account, including accounts without OAuth grants; the original owner appears first. Pages contain up to 20 accounts with at most four concurrent account summary calls. The page lists account names, optional contact emails, paired browsers and live local WebSocket status, assistant connections, cloud consent and saved connection activity, and cloud task/action-result counts over 24 hours. Failed account reads remain separate from readable accounts.
+Use the browser paired with the designated administrator's account. The page finds that account among the browser's saved pairings. `ADMIN_ACCOUNT_ID=owner` currently designates the original owner; a registered account ID can also be designated. An absent or invalid designation disables administration. Other owners, MCP and bridge credentials cannot list accounts.
+
+The shared account registry supplies every enrolled account, including accounts without OAuth grants; the original owner appears first. `GET /api/admin/accounts` returns up to 20 accounts per request with at most four concurrent account summary calls. `GET /api/admin/session` verifies the administrator's saved pairing. These global endpoints route to the configured administrator independently of the account currently open. The page lists account names, optional contact emails, paired browsers and live local WebSocket status, assistant connections, cloud consent and saved connection activity, and cloud task/action-result counts over 24 hours. Failed account reads remain visible as unavailable rows.
 
 Inspection opens no cloud browser and changes no consent, policy, browser state or encryption key. Per-account counts cover stored tasks, with a 2,000-record bound reported when reached. Shared Cloudflare capacity and browser time are provider snapshots; recent history is a sample and does not establish account billing or current liveness of a saved connection.
 
@@ -16,7 +18,7 @@ The recipient opens the link in desktop Chrome and clicks **Create my space**. A
 
 Invite creation, listing and revocation require the designated administrator's owner credential. The registry stores a hash of each invite token. Links carry the token in a URL fragment, which the join page removes from browser history. Account registration and invitation consumption are saved together. Existing `BETA_INVITE_TOKEN` links remain supported under the existing account limit.
 
-The owner API exposes `GET`/`POST /api/owner/admin/invites` and `POST /api/owner/admin/invites/:id/revoke`. List responses contain metadata and an opaque `next_cursor`; they contain no invite or pairing tokens. Creation accepts `{label, expires_in_days}` and returns `{invite, invite_url}`. New links use the existing registry and require no new bindings, secrets or migration.
+The global API exposes `GET`/`POST /api/admin/invites` and `POST /api/admin/invites/:id/revoke`. Existing `/api/owner/admin/` endpoints remain supported. List responses contain metadata and an opaque `next_cursor`; they contain no invite or pairing tokens. Creation accepts `{label, expires_in_days}` and returns `{invite, invite_url}`. New links use the existing registry and require no new bindings, secrets or migration.
 
 ## OpenAI email
 

@@ -1,6 +1,6 @@
 import {existingOwnerSession, pageAccount, accountBase} from './owner-session.mjs';
 const $ = id => document.getElementById(id), account = pageAccount(location.pathname);
-$('home').href = accountBase(account) + '/'; $('admin').href = accountBase(account) + '/admin.html';
+$('home').href = accountBase(account) + '/'; $('admin').href = '/admin.html';
 let api;
 function show(profile) {
   if (profile.account_id !== account) throw new Error('Account authorization did not match this page.');

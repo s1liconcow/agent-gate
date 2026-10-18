@@ -4,6 +4,7 @@ import {accountProfile, isAdminAccount, readAccountProfile} from '../src/account
 import {adminAccountPage, adminPageQuery, accountAdminSummary, requireAdmin} from '../src/admin.mjs';
 import {HostedState} from '../src/hosted-state.mjs';
 import {Memory} from './flow/support.mjs';
+import {allAdminAccounts} from '../public/admin-session.mjs';
 const tenant = 'a'.repeat(32), other = 'b'.repeat(32), browser = 'c'.repeat(32), cloud = 'd'.repeat(32), now = 100000000;
 
 test('admin designation fails closed and cannot be inherited by tenant owners', () => {
@@ -44,6 +45,31 @@ test('one failing or mismatched account produces no leaked data and leaves other
   });
   assert.equal(result.accounts[0].account_id, 'owner'); assert.equal(result.accounts[1].unavailable, true);
   assert.ok(!JSON.stringify(result).includes('secret'));
+});
+
+test('global administration loads and searches accounts beyond the first API page', async () => {
+  const ids = Array.from({length: 45}, (_, n) => (n + 1).toString(16).padStart(32, '0'));
+  let calls = 0;
+  const data = await allAdminAccounts(async path => {
+    calls++;
+    const page = await adminAccountPage(ids, adminPageQuery(new URL(path, 'https://gate.test').searchParams), async account_id => ({account_id, name: account_id === ids.at(-1) ? 'Final account' : 'Account'}));
+    return {admin_account_id: tenant, ...page, cloud_capacity: calls === 1 ? {limits: 'shared capacity'} : null};
+  }, tenant);
+  assert.equal(calls, 3); assert.equal(data.accounts.length, 46); assert.equal(data.total_accounts, 46);
+  assert.equal(data.accounts.filter(item => item.name.includes('Final')).length, 1);
+  assert.deepEqual(data.cloud_capacity, {limits: 'shared capacity'});
+  assert.equal(data.next_cursor, null);
+});
+
+test('global administration rejects incomplete pagination and changing authorization', async () => {
+  let calls = 0;
+  await assert.rejects(() => allAdminAccounts(async () => ({admin_account_id: ++calls === 1 ? 'owner' : tenant, accounts: [], next_cursor: tenant}), 'owner'), /authorization/);
+  await assert.rejects(() => allAdminAccounts(async () => ({admin_account_id: 'owner', accounts: [], next_cursor: tenant}), 'owner'), /every account/);
+  calls = 0;
+  await assert.rejects(() => allAdminAccounts(async () => {
+    if (++calls === 2) throw new Error('Account page unavailable');
+    return {admin_account_id: 'owner', accounts: [], next_cursor: tenant};
+  }, 'owner'), /Account page unavailable/);
 });
 
 test('admin summary is read-only, filters credentials and page content, and reports actual socket connectivity', async () => {

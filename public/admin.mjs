@@ -1,10 +1,9 @@
-import {existingOwnerSession, pageAccount, accountBase} from './owner-session.mjs';
+import {existingAdminSession, allAdminAccounts} from './admin-session.mjs';
 import {InvitePanel} from './admin-invites.mjs';
-const $ = id => document.getElementById(id), account = pageAccount(location.pathname);
-$('home').href = accountBase(account) + '/'; $('profileLink').href = accountBase(account) + '/account.html';
+const $ = id => document.getElementById(id);
 const el = (tag, text, className) => { const node = document.createElement(tag); if (text !== undefined) node.textContent = String(text); if (className) node.className = className; return node; };
 const date = value => Number.isSafeInteger(value) ? new Date(value).toLocaleString() : 'No activity recorded';
-let api, data, loading = false, cursors = [null], page = 0, capacity, invitePanel;
+let session, data, loading = false, invitePanel;
 function browserDetails(items) {
   const details = el('details'), list = el('ul'); details.append(el('summary', 'View browsers'));
   for (const item of items) { const row = el('li', item.name); row.append(el('span', item.id), el('span', item.kind === 'cloud' ? 'Cloud · ' + (item.authorized ? 'Enabled' : item.status) : (item.connected ? 'Online' : item.authorized ? 'Offline' : item.status))); list.append(row); }
@@ -33,30 +32,29 @@ function renderAccounts() {
     row.append(localCell, cloudCell, usage, assistants); return row;
   }));
   $('empty').hidden = items.length > 0;
+  $('accountCount').textContent = items.length + ' of ' + data.total_accounts + ' accounts';
 }
-async function refresh(reset = false) {
-  if (loading) return; if (reset) {cursors = [null]; page = 0;}
-  loading = true; $('refresh').disabled = $('next').disabled = $('previous').disabled = true;
+async function refresh() {
+  if (loading) return;
+  loading = true; $('refresh').disabled = true;
+  $('status').textContent = 'Loading all AgentGate accounts…';
   try {
-    api ||= await existingOwnerSession(indexedDB, account);
-    const response = await api('admin/accounts' + (cursors[page] ? '?cursor=' + encodeURIComponent(cursors[page]) : ''));
-    if (response.admin_account_id !== account) throw new Error('Admin authorization did not match this account.');
-    data = response; if (!cursors[page]) capacity = data.cloud_capacity;
+    session ||= await existingAdminSession(indexedDB);
+    data = await allAdminAccounts(session.api, session.account);
+    $('home').href = session.account_url; $('profileLink').href = session.account_url + 'account.html';
     $('total').textContent = data.total_accounts;
     $('online').textContent = data.accounts.reduce((n, item) => n + (item.browsers || []).filter(b => b.connected).length, 0);
     $('running').textContent = data.accounts.reduce((n, item) => n + (item.usage?.running_cloud || 0), 0);
-    const limits = capacity?.limits?.limits;
+    const limits = data.cloud_capacity?.limits?.limits;
     $('capacity').textContent = limits ? (limits.active_sessions ?? 'Unknown') + ' active browser sessions · ' + (limits.max_concurrent_sessions ?? 'Unknown') + ' concurrent limit · ' + (limits.allowed_browser_acquisitions ?? 'Unknown') + ' new browsers currently allowed' : 'Cloudflare capacity unavailable.';
-    const history = capacity?.history?.summary;
+    const history = data.cloud_capacity?.history?.summary;
     $('history').textContent = history ? Math.round(history.browser_lifetime_today_ms / 60000) + ' browser minutes today (UTC), across ' + history.sample_sessions + ' sessions in the provider’s recent sample.' : 'No provider history available.';
-    $('updated').textContent = 'Updated ' + date(data.observed_at); $('pageLabel').textContent = 'Page ' + (page + 1);
+    $('updated').textContent = 'Updated ' + date(data.observed_at);
     $('dashboard').hidden = false; $('status').textContent = ''; renderAccounts();
-    invitePanel ||= new InvitePanel(api); await invitePanel.refresh();
-  } catch (error) { $('dashboard').hidden = true; $('status').textContent = error.message; }
-  finally {loading = false; $('refresh').disabled = false; $('next').disabled = !data?.next_cursor; $('previous').disabled = page === 0;}
+    invitePanel ||= new InvitePanel((...args) => session.api(...args)); await invitePanel.refresh();
+  } catch (error) { if (error.status === 403) session = null; $('dashboard').hidden = true; $('status').textContent = error.message; }
+  finally {loading = false; $('refresh').disabled = false;}
 }
 $('search').addEventListener('input', () => {if (data) renderAccounts();});
-$('refresh').addEventListener('click', () => refresh(true));
-$('next').addEventListener('click', () => {if (!loading && data?.next_cursor) {cursors[++page] = data.next_cursor; refresh();}});
-$('previous').addEventListener('click', () => {if (!loading && page) {page--; refresh();}});
+$('refresh').addEventListener('click', refresh);
 await refresh();

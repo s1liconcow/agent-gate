@@ -185,6 +185,7 @@ export class Gate extends DurableObject {
     const account = await this.ctx.storage.get('account_id') || 'owner';
     requireAdmin(account, this.env.ADMIN_ACCOUNT_ID);
     const url = new URL(request.url), registry = this.env.REGISTRY.getByName('beta-registry-v1');
+    url.pathname = url.pathname.replace(/^\/api\/admin\//, '/api/owner/admin/');
     let answer;
     if (url.pathname === '/api/owner/admin/invites') {
       if (request.method === 'GET') answer = await registry.listInvites(invitePageQuery(url.searchParams));
@@ -309,11 +310,18 @@ export class Gate extends DurableObject {
       const path = new URL(request.url).pathname;
       const account = request.headers.get('X-AgentGate-Account');
       if (account && account !== await this.ctx.storage.get('account_id')) fail('NOT_FOUND', 'Unknown account.', 404);
-      if (path === '/api/owner/admin/accounts') {
+      if (path === '/api/admin/session') {
+        if (request.method !== 'GET') return new Response('Use GET for administration access.', {status: 405, headers: {Allow: 'GET'}});
+        await this.auth(request, 'owner');
+        const account = await this.ctx.storage.get('account_id') || 'owner';
+        requireAdmin(account, this.env.ADMIN_ACCOUNT_ID);
+        return json({admin_account_id: account});
+      }
+      if (path === '/api/admin/accounts' || path === '/api/owner/admin/accounts') {
         if (request.method !== 'GET') return new Response('Use GET for account administration.', {status: 405, headers: {Allow: 'GET'}});
         return await this.adminAccounts(request);
       }
-      if (path === '/api/owner/admin/invites' || path.startsWith('/api/owner/admin/invites/')) return await this.adminInvites(request);
+      if (path === '/api/admin/invites' || path.startsWith('/api/admin/invites/') || path === '/api/owner/admin/invites' || path.startsWith('/api/owner/admin/invites/')) return await this.adminInvites(request);
       if (path === '/api/owner/profile' && ['GET', 'POST'].includes(request.method)) return await this.ownerProfile(request);
       // Browser work must acquire the hosted queue before the short Gate lock.
       // Waiting for that queue while holding blockConcurrencyWhile deadlocks ticks.
@@ -649,6 +657,24 @@ export class Gate extends DurableObject {
 const app = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    if (url.pathname === '/admin') return Response.redirect(url.origin + '/admin.html', 302);
+    if (url.pathname.startsWith('/api/admin/')) {
+      try {
+        if (!/^\/api\/admin\/(?:session|accounts|invites(?:\/\d{13}-[a-f0-9]{32}\/revoke)?)$/.test(url.pathname)) return new Response('Not found', {status: 404});
+        const account = env.ADMIN_ACCOUNT_ID;
+        requireAdmin(account, account);
+        const headers = new Headers(request.headers);
+        headers.delete('X-AgentGate-Account');
+        if (account !== 'owner') headers.set('X-AgentGate-Account', account);
+        const gate = env.GATE.getByName(account === 'owner' ? 'single-owner-v1' : 'account:' + account);
+        if (request.method === 'POST') {
+          const input = await body(request);
+          headers.delete('Content-Length');
+          return await gate.fetch(new Request(url, {method: 'POST', headers, body: JSON.stringify(input)}));
+        }
+        return await gate.fetch(new Request(request, {headers}));
+      } catch (error) { return errorResponse(error); }
+    }
     if (url.pathname.startsWith('/api/hosted-model/')) return hostedAsset(request, env.HOSTED_MODELS, hostedModel);
     if (url.pathname === '/api/signup' && request.method === 'POST') {
       if (request.headers.get('Origin') !== url.origin) return json({error: 'Enroll from the beta invitation page.'}, 403);
@@ -662,6 +688,7 @@ const app = {
     const tenant = tenantPath(url.pathname);
     const known = tenant || tenantWellKnown(url.pathname);
     if (known && !await env.REGISTRY.getByName('beta-registry-v1').hasAccount(known.id)) return new Response('Not found', {status: 404});
+    if (tenant?.path === '/admin.html') return Response.redirect(url.origin + '/admin.html', 302);
     if (tenant?.path === '/manifest.webmanifest' && request.method === 'GET') {
       const base = '/u/' + tenant.id + '/';
       return new Response(JSON.stringify({name: 'AgentGate approvals', short_name: 'AgentGate', id: base, start_url: base, scope: base, display: 'standalone', background_color: '#0d1117', theme_color: '#0d1117', icons: [{src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any'}, {src: '/icon-192.png', sizes: '192x192', type: 'image/png'}, {src: '/icon-512.png', sizes: '512x512', type: 'image/png'}]}), {headers: {'Content-Type': 'application/manifest+json', 'Cache-Control': 'no-cache'}});
