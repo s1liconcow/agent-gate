@@ -35,6 +35,7 @@ import {executionError} from '../shared/bridge-result.mjs';
 import {browserPhases} from '../extension/model-phases.mjs';
 import {scheduleMaintenance} from './maintenance.mjs';
 import {ownerBrowsers, ownerSessions, ownerState} from './owner-state.mjs';
+import {retryBrowserCapacity} from './browser-capacity-retry.mjs';
 
 export {Registry};
 
@@ -173,6 +174,21 @@ export class Gate extends DurableObject {
       if (deleted) return {account_id: deleted.account_id, name: 'Account ' + deleted.account_id.slice(0, 8), deleting: true};
       return accountAdminSummary(this.ctx.storage, id => this.ctx.getWebSockets('browser:' + id).some(ws => ws.readyState === 1));
     });
+  }
+  async adminBrowserRetry(administrator) {
+    try {
+      await this.requireExistingAccount();
+      const result = await retryBrowserCapacity(this.hosted, administrator);
+      await this.ctx.blockConcurrencyWhile(async () => {
+        const current = await this.hostedConsent.current();
+        if (current) for (const item of (await this.browserTasks(current.browser_id)).sessions) {
+          if (item.status === 'active' && item.runtime?.code === 'BROWSER_RATE_LIMITED') await this.engine.runtime(item.id, {state: 'starting', code: null, phase: 'browser_acquisition'});
+        }
+        await this.scheduleMaintenance();
+      });
+      this.kickHosted();
+      return {result};
+    } catch (error) { return {error: apiFailure(error)}; }
   }
   adminDeletionPreview() {
     return this.ctx.blockConcurrencyWhile(async () => {

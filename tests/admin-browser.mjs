@@ -4,7 +4,7 @@ import {createServer} from 'node:net';
 import {mkdtemp, rm, mkdir, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
-import {chromium} from '@playwright/test';
+import {chromium} from '../scripts/local-browser.mjs';
 import {until} from './flow/support.mjs';
 import {googleLogin} from './google-login.mjs';
 
@@ -27,7 +27,7 @@ try {
   worker.stdout.on('data', chunk => workerLog += chunk); worker.stderr.on('data', chunk => workerLog += chunk);
   await until(async () => {try {return (await http('/api/health')).ok;} catch {return false;}}, 60000);
   const accounts = [
-    {id: 'owner', token: ownerToken, profile: {name: 'David · operator', email: 'david@example.com'},
+    {id: 'owner', token: ownerToken, profile: {name: 'David · operator', email: 'david@example.com'}, browserCooldown: true,
       browsers: [{id: local, name: 'David’s Chrome', status: 'active', expires_at: time + 86400000, credential_hash: 'never-return'}, {id: cloud, name: 'Cloud browser', kind: 'hosted', status: 'active', expires_at: time + 86400000}],
       cloud: {account_id: 'owner', browser_id: cloud, expires_at: time + 86400000},
       sessions: [{id: 'e'.repeat(32), status: 'closed', created_at: time - 60000, expires_at: time + 1000, task: {execution_browser: 'cloud', goal: 'private-goal'}, history: [{type: 'click', at: time - 5000}]}]},
@@ -65,6 +65,12 @@ try {
   assert.equal((await http('/api/admin/accounts', {admin: true, headers: {Origin: 'https://other.example'}})).status, 403);
   for (const csrf of ['', 'forged']) assert.equal((await http('/api/admin/invites', {admin: true, body: {}, headers: {'X-AgentGate-CSRF': csrf}})).status, 403);
   assert.equal((await http('/api/admin/invites', {admin: true, body: {}, headers: {Origin: 'https://other.example'}})).status, 403);
+  const browserRetryPath = '/api/admin/accounts/owner/browser-retry';
+  assert.equal((await http(browserRetryPath, {token: ownerToken, body: {reason: 'plan_changed'}})).status, 401);
+  assert.equal((await http(browserRetryPath, {admin: true, body: {reason: 'plan_changed'}, headers: {'X-AgentGate-CSRF': ''}})).status, 403);
+  assert.equal((await http(browserRetryPath, {admin: true, body: {reason: 'plan_changed'}, headers: {Origin: 'https://other.example'}})).status, 403);
+  assert.equal((await http(browserRetryPath, {admin: true, body: {}})).status, 400);
+  assert.equal((await http(browserRetryPath, {admin: true})).status, 405);
   const invite = await (await http('/api/admin/invites', {admin: true, body: {label: 'Google administrator', expires_in_days: 7}})).json();
   assert.equal(invite.invite.created_by, 'google:google-admin');
   assert.equal((await http('/api/admin/invites/' + invite.invite.id + '/revoke', {admin: true, body: {}})).status, 200);
@@ -92,6 +98,14 @@ try {
   await page.screenshot({path: resolve(root, 'artifacts/admin/mobile.png'), fullPage: true});
   await page.setViewportSize({width: 1280, height: 950}); await page.screenshot({path: resolve(root, 'artifacts/admin/desktop.png'), fullPage: true});
   check('the sign-in button completes OAuth in the browser and the global list searches every account without device pairing');
+  await page.getByLabel('Search all accounts').fill('owner');
+  await page.getByRole('button', {name: 'Retry after plan change', exact: true}).click();
+  await page.getByText('Saved cooldown released. Approved cloud tasks can retry with the current plan.', {exact: true}).waitFor();
+  assert.equal(await page.getByRole('button', {name: 'Retry after plan change', exact: true}).count(), 0);
+  assert.equal((await (await http('/api/admin/accounts', {admin: true})).json()).accounts[0].cloud.cooldown_until, null);
+  assert.equal((await http(browserRetryPath, {admin: true, body: {reason: 'plan_changed'}})).status, 200);
+  await page.getByLabel('Search all accounts').fill(other);
+  check('plan-change recovery requires Google administration and CSRF, releases a legacy cooldown, and is idempotent');
   const deletionPath = '/api/admin/accounts/' + other;
   assert.equal((await http(deletionPath + '/delete', {token: ownerToken, body: {}})).status, 401);
   assert.equal((await http(deletionPath + '/delete', {admin: true, body: {}, headers: {'X-AgentGate-CSRF': ''}})).status, 403);

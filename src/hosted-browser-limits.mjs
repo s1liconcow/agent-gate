@@ -59,9 +59,10 @@ export function reconcileBrowserRetry(diagnostic, retry, inspection, now = Date.
     // limits wait cannot prove that an explicit header did not also apply.
     return null;
   }
-  // A capacity snapshot can outlive a plan upgrade, including a wait until
-  // midnight. Fresh capacity permits one acquisition after local backoff;
-  // Cloudflare still enforces browser-time quota on that acquisition.
+  const nextDay = Math.floor(diagnostic.observed_at / 86400000) * 86400000 + 86400000;
+  // Acquisition-rate capacity alone does not clear browser-time quota. Keep a
+  // midnight wait when the category may hide that separate daily limit.
+  if (Math.abs(sources.provider_limit_wait_at - nextDay) <= 3000) return null;
   if (floor > now || !inspection) return null;
   const limits = inspection.limits;
   if (inspection.http_status !== 200 || !Number.isSafeInteger(inspection.observed_at) || inspection.observed_at > now || now - inspection.observed_at > 5000 ||

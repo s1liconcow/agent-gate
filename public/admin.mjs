@@ -30,7 +30,18 @@ function renderAccounts() {
     if (item.browsers.length) localCell.append(browserDetails(item.browsers));
     const cloudCell = el('td'); cloudCell.append(el('span', item.cloud.enabled ? 'Enabled' : 'Disabled', 'admin-state ' + (item.cloud.enabled ? 'online' : '')),
       el('p', item.cloud.metadata_unavailable ? 'Metadata unavailable' : item.cloud.connection_recorded ? 'Connection recorded' : 'No saved connection'), el('p', date(item.cloud.last_activity_at), 'hint'));
-    if (item.cloud.cooldown_until) cloudCell.append(el('p', 'Waiting until ' + date(item.cloud.cooldown_until), 'admin-state waiting'));
+    if (item.cloud.cooldown_until) {
+      cloudCell.append(el('p', 'Waiting until ' + date(item.cloud.cooldown_until), 'admin-state waiting'));
+      if (item.cloud.enabled) {
+        const retry = el('button', 'Retry after plan change', 'secondary'); retry.type = 'button';
+        retry.addEventListener('click', async () => {
+          retry.disabled = true;
+          try { await session.api('admin/accounts/' + item.account_id + '/browser-retry', {reason: 'plan_changed'}); await refresh(); $('status').textContent = 'Saved cooldown released. Approved cloud tasks can retry with the current plan.'; }
+          catch (error) { $('status').textContent = error.message; retry.disabled = false; }
+        });
+        cloudCell.append(retry);
+      }
+    }
     const usage = el('td'); usage.append(el('span', item.usage.cloud_tasks_24h + ' cloud tasks'), el('p', item.usage.cloud_actions_24h + ' action results'), el('p', item.usage.running_cloud + ' cloud tasks open', 'hint'));
     if (item.usage.coverage === 'bounded_sample') usage.append(el('p', 'Counts cover up to 2,000 stored tasks.', 'hint'));
     usage.append(el('p', item.usage.last_task_at ? 'Last task ' + date(item.usage.last_task_at) : 'No tasks recorded', 'hint'));

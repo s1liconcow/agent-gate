@@ -10,6 +10,8 @@ Google sign-in uses the existing web client and `/api/auth/google/callback`, wit
 
 Inspection opens no cloud browser and changes no consent, policy, browser state or encryption key. Per-account counts cover stored tasks, with a 2,000-record bound reported when reached. Shared Cloudflare capacity and browser time are provider snapshots; recent history is a sample and does not establish account billing or current liveness of a saved connection.
 
+After upgrading the Cloudflare Workers plan, redeploy the Worker and click **Retry after plan change** beside an account's saved browser cooldown. This Google-admin action requires current provider capacity and elapsed local backoff. It records the original deadline and administrator, releases the saved wait, and resumes approved tasks. The next acquisition checks Cloudflare's actual allowance. Saved logins and browser consent are retained. The API is `POST /api/admin/accounts/:id/browser-retry` with `{reason: "plan_changed"}` and the existing session CSRF token.
+
 `/account.html` lets an authenticated owner set an account name and optional contact email. Owner-entered emails are explicitly unverified and do not change identity or permissions. Account IDs remain stable.
 
 ## Account cleanup

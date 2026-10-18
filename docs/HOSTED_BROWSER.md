@@ -32,11 +32,11 @@ acquisitions and respects backoff. An expired or disconnected local classifier
 revokes tasks on both executor routes.
 
 After a plan upgrade, redeploy the Worker so Cloudflare applies the new allowance.
-A fresh capacity query can shorten a recorded capacity-snapshot wait, including
-a wait until midnight UTC, after local backoff. The next authorized acquisition
-checks the actual allowance; a new denial saves fresh backoff. Explicit provider
-Retry-After and daily-time deadlines, and legacy records without deadline
-provenance, remain binding.
+An administrator can then use **Retry after plan change** to release an older
+cooldown after a fresh capacity check and local backoff. The action retains the
+saved error and original deadline. The next approved task checks the actual
+allowance; a new denial saves fresh backoff. Automatic retries still preserve
+explicit provider deadlines, midnight waits and incomplete legacy records.
 
 The cloud CDP connection and isolated reader stay attached between task actions.
 Messages reuse the exact execution context holding captured refs; creating a new

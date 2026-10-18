@@ -124,14 +124,9 @@ test('failed, stale, malformed and capacity-limited observations preserve saved 
     ...[{allowed_browser_acquisitions: 0}, {time_until_next_acquisition_ms: 1}, {active_sessions: 4}, {active_sessions: -1}, {max_concurrent_sessions: null}].map(change => ({...ready, limits: {...ready.limits, ...change}}))
   ]) assert.equal(reconcileBrowserRetry(diagnostic, retry, inspection, later), null);
 });
-test('fresh capacity permits a new acquisition after a recorded midnight snapshot wait', () => {
+test('acquisition capacity cannot automatically shorten a midnight wait that may represent daily browser time', () => {
   const midnight = Math.floor(now / 86400000) * 86400000 + 86400000;
   const diagnostic = {observed_at: now, provider_message: fault('Rate limit exceeded').message,
     retry_sources: {minimum_backoff_at: now + 60000, provider_limit_wait_at: midnight + 195, provider_retry_after_at: null, daily_reset_at: null}};
-  const retry = {attempts: 1, retry_at: midnight + 195};
-  assert.equal(reconcileBrowserRetry(diagnostic, retry, available(now + 59999), now + 59999), null);
-  const result = reconcileBrowserRetry(diagnostic, retry, available(now + 180000), now + 180000);
-  assert.equal(result.original_retry_at, midnight + 195);
-  assert.equal(result.reconciled_retry_at, now + 60000);
-  assert.equal(result.evidence, 'fresh_provider_limits_allow_acquisition');
+  assert.equal(reconcileBrowserRetry(diagnostic, {attempts: 1, retry_at: midnight + 195}, available(now + 180000), now + 180000), null);
 });

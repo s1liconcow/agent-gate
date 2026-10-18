@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {HostedBrowser} from '../src/hosted-browser.mjs';
 import {HostedState} from '../src/hosted-state.mjs';
 import {hostedBrowserFactory} from '../src/hosted-browser-factory.mjs';
+import {retryBrowserCapacity} from '../src/browser-capacity-retry.mjs';
 
 class Memory {
   items = new Map();
@@ -312,7 +313,7 @@ test('reconciliation respects a new provider denial and restores durable backoff
   for (let i = 0; i < 3; i++) await assert.rejects(f.hosted.openConnection(f.store), {code: 'BROWSER_RATE_LIMITED'});
   assert.equal(acquired, 1);
 });
-test('a plan upgrade can recover a midnight capacity wait after worker reconstruction', async () => {
+test('an administrator plan-change retry recovers a midnight wait after worker reconstruction', async () => {
   let now = Date.parse('2026-10-18T20:00:00Z'), acquired = 0, inspected = 0;
   const observed = now - 900000, midnight = Date.parse('2026-10-19T00:00:00Z') + 365;
   let denied = true;
@@ -332,6 +333,10 @@ test('a plan upgrade can recover a midnight capacity wait after worker reconstru
     'browser-retry': {attempts: 1, reason: 'acquisition_rate', retry_at: midnight}});
   const restarted = fixture(factory, f.storage, () => now);
   await assert.rejects(restarted.hosted.openConnection(restarted.store), {code: 'BROWSER_RATE_LIMITED'});
+  assert.equal(acquired, 0);
+  assert.equal((await retryBrowserCapacity(restarted.hosted, 'google:administrator')).status, 'ready');
+  assert.equal((await restarted.store.get('browser-diagnostic')).administrator_retry.original_retry_at, midnight);
+  await assert.rejects(restarted.hosted.openConnection(restarted.store), {code: 'BROWSER_RATE_LIMITED'});
   assert.equal(acquired, 1);
   assert.equal((await restarted.store.get('browser-retry')).retry_at, now + 120000);
   for (let i = 0; i < 3; i++) await assert.rejects(restarted.hosted.openConnection(restarted.store), {code: 'BROWSER_RATE_LIMITED'});
@@ -340,6 +345,41 @@ test('a plan upgrade can recover a midnight capacity wait after worker reconstru
   assert.equal((await restarted.hosted.openConnection(restarted.store)).sessionId, 'paid-browser');
   assert.equal(acquired, 2); assert.ok(inspected >= 2);
   assert.equal(await restarted.store.get('browser-retry'), undefined);
+});
+test('administrator retries retain logins and quota evidence, stay account-bound and never acquire a browser', async () => {
+  const now = 1000000, factory = {open: () => assert.fail('Retry cannot open a browser'),
+    inspectLimits: async () => ({http_status: 200, observed_at: now, limits: {active_sessions: 0, max_concurrent_sessions: 4, allowed_browser_acquisitions: 1, time_until_next_acquisition_ms: 0}})};
+  for (const sources of [undefined, {daily_reset_at: now + 900000}, {provider_retry_after_at: now + 900000}]) {
+    const f = fixture(factory, undefined, () => now), diagnostic = {observed_at: now - 300000, provider_message: 'Provider quota response', retry_sources: sources};
+    await f.store.putRecords({'browser-diagnostic': diagnostic, 'browser-retry': {attempts: 1, retry_at: now + 900000}, login: {cookies: ['saved-login'], origins: []}});
+    const other = new HostedState(f.storage, config.account_id, 'c'.repeat(32)); await other.put('browser-retry', {retry_at: now + 900000});
+    assert.equal((await retryBrowserCapacity(f.hosted, 'google:administrator')).status, 'ready');
+    assert.equal((await f.store.get('browser-retry')).retry_at, now);
+    const saved = await f.store.get('browser-diagnostic');
+    assert.equal(saved.provider_message, diagnostic.provider_message); assert.deepEqual(saved.retry_sources, sources);
+    assert.equal(saved.administrator_retry.requested_by, 'google:administrator');
+    assert.deepEqual(await f.store.get('login'), {cookies: ['saved-login'], origins: []});
+    assert.equal((await other.get('browser-retry')).retry_at, now + 900000);
+    assert.deepEqual(await retryBrowserCapacity(f.hosted, 'google:administrator'), {status: 'ready'});
+  }
+});
+test('administrator retries preserve cooldowns when backoff, capacity or consent prevent recovery', async () => {
+  const now = 1000000, ready = {http_status: 200, observed_at: now, limits: {active_sessions: 0, max_concurrent_sessions: 4, allowed_browser_acquisitions: 1, time_until_next_acquisition_ms: 0}};
+  for (const inspection of [null, {...ready, http_status: 403}, {...ready, observed_at: now - 5001}, {...ready, observed_at: now + 1},
+    ...[{allowed_browser_acquisitions: 0}, {active_sessions: 4}, {time_until_next_acquisition_ms: 1}, {max_concurrent_sessions: null}].map(change => ({...ready, limits: {...ready.limits, ...change}}))]) {
+    const f = fixture({inspectLimits: async () => inspection}, undefined, () => now);
+    const records = {'browser-diagnostic': {observed_at: now - 300000}, 'browser-retry': {attempts: 1, retry_at: now + 900000}};
+    await f.store.putRecords(records);
+    await assert.rejects(retryBrowserCapacity(f.hosted, 'google:administrator'), {code: 'CAPACITY_UNAVAILABLE'});
+    for (const [key, value] of Object.entries(records)) assert.deepEqual(await f.store.get(key), value);
+  }
+  const f = fixture({inspectLimits: () => assert.fail('Local backoff is still active')}, undefined, () => now);
+  await f.store.putRecords({'browser-diagnostic': {observed_at: now - 1000}, 'browser-retry': {attempts: 2, retry_at: now + 900000}});
+  await assert.rejects(retryBrowserCapacity(f.hosted, 'google:administrator'), {code: 'BROWSER_RETRY_WAIT'});
+  const revoked = fixture({inspectLimits: async () => {revoked.hosted.consent.current = async () => null; return ready;}}, undefined, () => now);
+  await revoked.store.putRecords({'browser-diagnostic': {observed_at: now - 300000}, 'browser-retry': {attempts: 1, retry_at: now + 900000}});
+  await assert.rejects(retryBrowserCapacity(revoked.hosted, 'google:administrator'), {code: 'INFERENCE_NOT_APPROVED'});
+  assert.equal((await revoked.store.get('browser-retry')).retry_at, now + 900000);
 });
 test('explicit daily quota and Retry-After prevent reconciliation lookups and acquisition', async () => {
   const now = 1000000;

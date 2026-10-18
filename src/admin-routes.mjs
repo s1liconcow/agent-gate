@@ -9,12 +9,22 @@ export async function adminRoute(request, env, readBody) {
   if (!url.pathname.startsWith('/api/admin/')) return null;
   const operation = url.pathname.slice('/api/admin/'.length);
   const deletion = operation.match(/^accounts\/(owner|[a-f0-9]{32})\/(deletion|delete)$/);
-  if (!deletion && !/^(?:session|accounts|invites(?:\/\d{13}-[a-f0-9]{32}\/revoke)?)$/.test(operation)) return new Response('Not found', {status: 404});
+  const browserRetry = operation.match(/^accounts\/(owner|[a-f0-9]{32})\/browser-retry$/);
+  if (!deletion && !browserRetry && !/^(?:session|accounts|invites(?:\/\d{13}-[a-f0-9]{32}\/revoke)?)$/.test(operation)) return new Response('Not found', {status: 404});
   if (['session', 'accounts'].includes(operation) && request.method !== 'GET') return new Response('Use GET for account administration.', {status: 405, headers: {Allow: 'GET'}});
   const {identity, csrf_token} = await requireWebAdmin(request, env), registry = env.REGISTRY.getByName('beta-registry-v1');
   const headers = {'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff'};
   const response = (value, status = 200) => Response.json({admin_subject: identity.subject, ...value}, {status, headers});
   if (operation === 'session') return response({email: identity.email, csrf_token});
+  if (browserRetry) {
+    if (request.method !== 'POST') return new Response('Use POST to retry browser capacity.', {status: 405, headers: {Allow: 'POST'}});
+    if (url.search) fail('INVALID_REQUEST', 'Browser retry does not accept query parameters.');
+    const input = await readBody(request);
+    if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).length !== 1 || input.reason !== 'plan_changed') fail('INVALID_REQUEST', 'Confirm the provider plan changed.');
+    const answer = await env.GATE.getByName(browserRetry[1] === 'owner' ? 'single-owner-v1' : 'account:' + browserRetry[1]).adminBrowserRetry('google:' + identity.subject);
+    if (answer.error) return Response.json(answer, {status: answer.error.status, headers});
+    return response(answer.result);
+  }
   if (deletion) {
     const method = deletion[2] === 'deletion' ? 'GET' : 'POST';
     if (request.method !== method) return new Response('Use ' + method + ' for this operation.', {status: 405, headers: {Allow: method}});

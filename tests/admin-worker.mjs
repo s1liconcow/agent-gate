@@ -14,8 +14,9 @@ export class Gate extends ProductionGate {
   constructor(ctx, env) {
     super(ctx, env); this.closed = []; this.cleanupFails = false;
     this.hosted.factory.close = async id => {if (this.cleanupFails) throw new Error('Synthetic provider unavailable'); this.closed.push(id);};
+    this.hosted.factory.inspectLimits = async () => ({http_status: 200, observed_at: Date.now(), limits: {active_sessions: 0, max_concurrent_sessions: 4, allowed_browser_acquisitions: 1, time_until_next_acquisition_ms: 0}});
   }
-  async seed({id, token, profile, browsers = [], connectors = [], cloud, sessions = [], cleanupFails = false}) {
+  async seed({id, token, profile, browsers = [], connectors = [], cloud, sessions = [], cleanupFails = false, browserCooldown = false}) {
     this.cleanupFails = cleanupFails;
     await this.ctx.storage.put({...(id === 'owner' ? {} : {account_id: id}), owner_hash: await digest(token), phone: {kty: 'EC', crv: 'P-256', x: 'synthetic', y: 'synthetic'}, 'account:profile': profile});
     for (const browser of browsers) await this.ctx.storage.put('browser:' + browser.id, browser);
@@ -24,6 +25,9 @@ export class Gate extends ProductionGate {
     if (cloud) {
       await this.ctx.storage.put('hosted:consent', cloud);
       await new HostedState(this.ctx.storage, id, cloud.browser_id).put('connection', {account_id: id, browser_id: cloud.browser_id, sessionId: id === 'owner' ? 'synthetic-provider-id' : 'synthetic-provider-' + id, last_activity_at: Date.now() - 60000});
+      if (browserCooldown) await new HostedState(this.ctx.storage, id, cloud.browser_id).putRecords({
+        'browser-retry': {attempts: 1, retry_at: Date.now() + 3600000},
+        'browser-diagnostic': {observed_at: Date.now() - 300000, provider_message: 'Rate limit exceeded'}});
     }
   }
   async records() {return [...await this.ctx.storage.list()];}
