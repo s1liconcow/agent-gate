@@ -1,7 +1,6 @@
 import {exact, fail} from '../shared/protocol.mjs';
 
 export const validAccountId = id => id === 'owner' || /^[a-f0-9]{32}$/.test(id || '');
-export const isAdminAccount = (id, configured) => validAccountId(configured) && id === configured;
 
 export function accountProfile(input) {
   exact(input, ['name', 'email']);

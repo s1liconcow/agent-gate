@@ -1,7 +1,8 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Administration · AgentGate</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/admin.css"><script type="module" src="/admin.mjs"></script></head>
-<body><header><a class="brand" id="home" href="/">AgentGate <span class="admin-tag">Administration</span></a><a id="profileLink" href="/account.html">Your account</a></header><main class="admin-page">
+<body><header><a class="brand" id="home" href="/">AgentGate <span class="admin-tag">Administration</span></a><div id="signedIn" class="admin-session" hidden><span id="adminEmail"></span><button id="signOut" class="secondary" type="button">Sign out</button></div></header><main class="admin-page">
 <div class="admin-heading"><div><h1>All AgentGate accounts</h1><p>Global administration of accounts, connected browsers and assistants.</p></div><button class="secondary" id="refresh">Refresh</button></div>
 <p id="status" role="status">Checking administration access…</p>
+<section id="signIn" class="admin-sign-in" hidden><h2>Sign in to administration</h2><p>Use your authorized Google account to view all AgentGate accounts and connected browsers.</p><a class="google-sign-in" href="/api/auth/google/start">Sign in with Google</a></section>
 <section id="dashboard" hidden>
 <div class="admin-stats"><article><span>All accounts</span><strong id="total">—</strong></article><article><span>Local browsers online</span><strong id="online">—</strong></article><article><span>Open cloud tasks</span><strong id="running">—</strong></article></div>
 <div class="admin-toolbar"><label for="search">Search all accounts<input id="search" type="search" placeholder="Account name, email or ID" autocomplete="off"></label><p class="hint" id="updated"></p></div>

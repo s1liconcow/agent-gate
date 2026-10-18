@@ -1,13 +1,9 @@
 import {fail} from '../shared/protocol.mjs';
 import {HostedState} from './hosted-state.mjs';
-import {readAccountProfile, isAdminAccount, validAccountId} from './account-profile.mjs';
+import {readAccountProfile, validAccountId} from './account-profile.mjs';
 
 const ended = new Set(['closed', 'revoked', 'expired']);
 const safeTime = value => Number.isSafeInteger(value) && value >= 0 ? value : null;
-
-export function requireAdmin(account, configured) {
-  if (!isAdminAccount(account, configured)) fail('ADMIN_REQUIRED', 'This account does not have administration access.', 403);
-}
 
 export function adminPageQuery(params) {
   if ([...params.keys()].some(key => !['cursor', 'limit'].includes(key)) || params.getAll('cursor').length > 1 || params.getAll('limit').length > 1) fail('INVALID_REQUEST', 'Invalid account page.');

@@ -2,8 +2,17 @@ import {DurableObject} from 'cloudflare:workers';
 import {b64url, digest, random} from '../shared/protocol.mjs';
 import {Invites} from './invites.mjs';
 import {apiFailure} from './api-error.mjs';
+import {WebSessions} from './web-sessions.mjs';
 
 export class Registry extends DurableObject {
+  webAuth(operation, ...args) {
+    if (!['login', 'consume', 'issue', 'read', 'revoke'].includes(operation)) throw new Error('Unknown sign-in operation.');
+    return this.ctx.blockConcurrencyWhile(async () => {
+      try { return await new WebSessions(this.ctx.storage)[operation](...args); }
+      catch (error) { return {error: apiFailure(error)}; }
+    });
+  }
+  alarm() { return this.ctx.blockConcurrencyWhile(() => new WebSessions(this.ctx.storage).sweep()); }
   async inviteOperation(operation, ...args) {
     return this.ctx.blockConcurrencyWhile(async () => {
       try { return await new Invites(this.ctx.storage)[operation](...args); }

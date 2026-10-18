@@ -1,7 +1,7 @@
 {
   "name": "agentgate-admin-test", "main": "admin-worker.mjs",
   "compatibility_date": "2026-10-01", "compatibility_flags": ["nodejs_compat"],
-  "vars": {"ADMIN_ACCOUNT_ID": "owner"},
+  "vars": {"GOOGLE_CLIENT_ID": "local-google-client", "GOOGLE_CLIENT_SECRET": "local-google-secret"},
   "assets": {"directory": "../public", "binding": "ASSETS", "html_handling": "none", "run_worker_first": true},
   "durable_objects": {"bindings": [{"name": "GATE", "class_name": "Gate"}, {"name": "REGISTRY", "class_name": "Registry"}]},
   "migrations": [{"tag": "admin-test-v1", "new_sqlite_classes": ["Gate", "Registry"]}],

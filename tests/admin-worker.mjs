@@ -2,6 +2,8 @@
 import production, {Gate as ProductionGate, Registry as ProductionRegistry} from '../src/worker.mjs';
 import {digest} from '../shared/protocol.mjs';
 import {HostedState} from '../src/hosted-state.mjs';
+import {fixtureGoogleRoute} from './google-fixture.mjs';
+import {apiFailure} from '../src/api-error.mjs';
 export class Registry extends ProductionRegistry {
   async seed(ids) {await this.ctx.storage.put({count: ids.length, ...Object.fromEntries(ids.map(id => ['account:' + id, true]))});}
   async records() {return [...await this.ctx.storage.list()];}
@@ -23,6 +25,8 @@ export class Gate extends ProductionGate {
 export default {async fetch(request, env, ctx) {
   const url = new URL(request.url);
   if (!['127.0.0.1', 'localhost'].includes(url.hostname)) return new Response('Local tests only', {status: 403});
+  try { const auth = await fixtureGoogleRoute(request, env); if (auth) return auth; }
+  catch (error) { const {status, ...failure} = apiFailure(error); return Response.json({error: failure}, {status}); }
   if (url.pathname.startsWith('/_admin-test/')) {
     if (!env.ADMIN_TEST_TOKEN || request.headers.get('Authorization') !== 'Bearer ' + env.ADMIN_TEST_TOKEN) return new Response('Unauthorized', {status: 403});
     if (url.pathname === '/_admin-test/seed' && request.method === 'POST') {

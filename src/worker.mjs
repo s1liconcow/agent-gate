@@ -19,9 +19,11 @@ import {HostedConsent} from './hosted-consent.mjs';
 import {HostedBrowser} from './hosted-browser.mjs';
 import {cloudflareBrowserFactory} from './hosted-cloudflare.mjs';
 import {HostedState} from './hosted-state.mjs';
-import {accountProfile, readAccountProfile, isAdminAccount} from './account-profile.mjs';
-import {requireAdmin, adminPageQuery, adminAccountPage, accountAdminSummary} from './admin.mjs';
-import {invitePageQuery, validInviteId} from './invites.mjs';
+import {accountProfile, readAccountProfile} from './account-profile.mjs';
+import {accountAdminSummary} from './admin.mjs';
+import {isAdminIdentity} from './admin-identity.mjs';
+import {googleAuthRoute, readWebSession} from './google-auth.mjs';
+import {adminRoute} from './admin-routes.mjs';
 import {hostedAsset} from './hosted-assets.mjs';
 import {hostedModel, hostedScripts} from './generated-hosted.mjs';
 import {LoginSync} from './login-sync.mjs';
@@ -162,46 +164,9 @@ export class Gate extends DurableObject {
         await this.auth(request, 'owner');
         const id = await this.ctx.storage.get('account_id') || 'owner';
         if (request.method === 'POST') await this.ctx.storage.put('account:profile', {...accountProfile(await body(request)), updated_at: Date.now()});
-        return json({...await readAccountProfile(this.ctx.storage, id), admin: isAdminAccount(id, this.env.ADMIN_ACCOUNT_ID)});
+        return json({...await readAccountProfile(this.ctx.storage, id), admin: isAdminIdentity((await readWebSession(request, this.env))?.identity)});
       } catch (error) {return errorResponse(error);}
     });
-  }
-  async adminAccounts(request) {
-    await this.auth(request, 'owner');
-    const account = await this.ctx.storage.get('account_id') || 'owner';
-    requireAdmin(account, this.env.ADMIN_ACCOUNT_ID);
-    const query = adminPageQuery(new URL(request.url).searchParams);
-    const ids = await this.env.REGISTRY.getByName('beta-registry-v1').adminAccountIds();
-    const page = await adminAccountPage(ids, query, id => id === account ? this.adminSummary() : this.env.GATE.getByName(id === 'owner' ? 'single-owner-v1' : 'account:' + id).adminSummary());
-    const [limits, history] = query.cursor ? [null, null] : await Promise.all([
-      this.env.BROWSER ? this.hosted.factory.inspectLimits() : null,
-      this.env.BROWSER ? this.hosted.factory.inspectHistory() : null
-    ]);
-    await this.auth(request, 'owner');
-    return json({admin_account_id: account, ...page, cloud_capacity: {limits, history}, observed_at: Date.now()});
-  }
-  async adminInvites(request) {
-    await this.auth(request, 'owner');
-    const account = await this.ctx.storage.get('account_id') || 'owner';
-    requireAdmin(account, this.env.ADMIN_ACCOUNT_ID);
-    const url = new URL(request.url), registry = this.env.REGISTRY.getByName('beta-registry-v1');
-    let answer;
-    if (url.pathname === '/api/owner/admin/invites') {
-      if (request.method === 'GET') answer = await registry.listInvites(invitePageQuery(url.searchParams));
-      else if (request.method === 'POST') {
-        if (url.search) fail('INVALID_REQUEST', 'Invitation creation does not accept query parameters.');
-        answer = await registry.createInvite(await body(request), account);
-        if (answer.token) { answer.invite_url = url.origin + '/join.html#invite=' + answer.token; delete answer.token; }
-      } else return new Response('Use GET or POST for invitations.', {status: 405, headers: {Allow: 'GET, POST'}});
-    } else {
-      const id = url.pathname.slice('/api/owner/admin/invites/'.length).replace(/\/revoke$/, '');
-      if (!url.pathname.endsWith('/revoke') || !validInviteId(id)) fail('NOT_FOUND', 'Unknown invitation endpoint.', 404);
-      if (request.method !== 'POST') return new Response('Use POST to revoke an invitation.', {status: 405, headers: {Allow: 'POST'}});
-      if (url.search) fail('INVALID_REQUEST', 'Invitation revocation does not accept query parameters.');
-      exact(await body(request), []); answer = await registry.revokeInvite(id);
-    }
-    if (answer.error) return json(answer, answer.error.status);
-    return json({admin_account_id: account, ...answer}, request.method === 'POST' && url.pathname === '/api/owner/admin/invites' ? 201 : 200);
   }
   async locked(callback) {
     return this.ctx.blockConcurrencyWhile(async () => { try { return {result: await callback()}; } catch (error) { return {error: apiFailure(error)}; } });
@@ -309,11 +274,7 @@ export class Gate extends DurableObject {
       const path = new URL(request.url).pathname;
       const account = request.headers.get('X-AgentGate-Account');
       if (account && account !== await this.ctx.storage.get('account_id')) fail('NOT_FOUND', 'Unknown account.', 404);
-      if (path === '/api/owner/admin/accounts') {
-        if (request.method !== 'GET') return new Response('Use GET for account administration.', {status: 405, headers: {Allow: 'GET'}});
-        return await this.adminAccounts(request);
-      }
-      if (path === '/api/owner/admin/invites' || path.startsWith('/api/owner/admin/invites/')) return await this.adminInvites(request);
+      if (path.startsWith('/api/owner/admin/')) fail('ADMIN_REQUIRED', 'Sign in through global administration.', 403);
       if (path === '/api/owner/profile' && ['GET', 'POST'].includes(request.method)) return await this.ownerProfile(request);
       // Browser work must acquire the hosted queue before the short Gate lock.
       // Waiting for that queue while holding blockConcurrencyWhile deadlocks ticks.
@@ -650,31 +611,11 @@ const app = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === '/admin') return Response.redirect(url.origin + '/admin.html', 302);
-    if (url.pathname.startsWith('/api/admin/')) {
-      try {
-        if (!/^\/api\/admin\/(?:session|accounts|invites(?:\/\d{13}-[a-f0-9]{32}\/revoke)?)$/.test(url.pathname)) return new Response('Not found', {status: 404});
-        const account = env.ADMIN_ACCOUNT_ID;
-        requireAdmin(account, account);
-        const operation = url.pathname.slice('/api/admin/'.length), session = operation === 'session';
-        if ((session || operation === 'accounts') && request.method !== 'GET') return new Response('Use GET for account administration.', {status: 405, headers: {Allow: 'GET'}});
-        // Keep the account protocol compatible while Durable Object updates propagate.
-        url.pathname = '/api/owner/' + (session ? 'profile' : 'admin/' + operation);
-        const headers = new Headers(request.headers);
-        headers.delete('X-AgentGate-Account');
-        if (account !== 'owner') headers.set('X-AgentGate-Account', account);
-        const gate = env.GATE.getByName(account === 'owner' ? 'single-owner-v1' : 'account:' + account);
-        if (request.method === 'POST') {
-          const input = await body(request);
-          headers.delete('Content-Length');
-          return await gate.fetch(new Request(url, {method: 'POST', headers, body: JSON.stringify(input)}));
-        }
-        const response = await gate.fetch(new Request(new Request(url, request), {headers}));
-        if (!session || !response.ok) return response;
-        const profile = await response.json();
-        requireAdmin(profile.account_id, account);
-        return json({admin_account_id: profile.account_id});
-      } catch (error) { return errorResponse(error); }
-    }
+    try {
+      const auth = await googleAuthRoute(request, env); if (auth) return auth;
+      const admin = await adminRoute(request, env, body); if (admin) return admin;
+    } catch (error) { return errorResponse(error); }
+    if (url.pathname.startsWith('/api/owner/admin/') || tenantPath(url.pathname)?.path.startsWith('/api/owner/admin/')) return json({error: {code: 'ADMIN_REQUIRED', message: 'Sign in through global administration.'}}, 403);
     if (url.pathname.startsWith('/api/hosted-model/')) return hostedAsset(request, env.HOSTED_MODELS, hostedModel);
     if (url.pathname === '/api/signup' && request.method === 'POST') {
       if (request.headers.get('Origin') !== url.origin) return json({error: 'Enroll from the beta invitation page.'}, 403);

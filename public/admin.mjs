@@ -39,9 +39,9 @@ async function refresh() {
   loading = true; $('refresh').disabled = true;
   $('status').textContent = 'Loading all AgentGate accounts…';
   try {
-    session ||= await existingAdminSession(indexedDB);
-    data = await allAdminAccounts(session.api, session.account);
-    $('home').href = session.account_url; $('profileLink').href = session.account_url + 'account.html';
+    session ||= await existingAdminSession();
+    data = await allAdminAccounts(session.api, session.subject);
+    $('adminEmail').textContent = session.email; $('signedIn').hidden = false; $('signIn').hidden = true;
     $('total').textContent = data.total_accounts;
     $('online').textContent = data.accounts.reduce((n, item) => n + (item.browsers || []).filter(b => b.connected).length, 0);
     $('running').textContent = data.accounts.reduce((n, item) => n + (item.usage?.running_cloud || 0), 0);
@@ -52,9 +52,20 @@ async function refresh() {
     $('updated').textContent = 'Updated ' + date(data.observed_at);
     $('dashboard').hidden = false; $('status').textContent = ''; renderAccounts();
     invitePanel ||= new InvitePanel((...args) => session.api(...args)); await invitePanel.refresh();
-  } catch (error) { if (error.status === 403) session = null; $('dashboard').hidden = true; $('status').textContent = error.message; }
+  } catch (error) {
+    if ([401, 403].includes(error.status)) {session = null; $('signIn').hidden = false; $('signedIn').hidden = true;}
+    $('dashboard').hidden = true; $('status').textContent = error.status === 401 ? '' : error.message;
+  }
   finally {loading = false; $('refresh').disabled = false;}
 }
 $('search').addEventListener('input', () => {if (data) renderAccounts();});
 $('refresh').addEventListener('click', refresh);
+$('signOut').addEventListener('click', async () => {
+  $('signOut').disabled = true;
+  try { await session.api('auth/logout', {}); location.assign('/admin.html'); }
+  catch (error) { $('status').textContent = error.message; $('signOut').disabled = false; }
+});
+const outcome = new URLSearchParams(location.search).get('signin');
+if (outcome) history.replaceState(null, '', '/admin.html');
 await refresh();
+if (outcome && !session) $('status').textContent = {denied: 'This Google account does not have administration access. Sign in with your administrator account.', cancelled: 'Sign-in was cancelled. You can try again.', failed: 'Google sign-in failed or expired. Start again.'}[outcome] || $('status').textContent;

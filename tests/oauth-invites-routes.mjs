@@ -7,20 +7,21 @@ import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
 import {chromium} from '@playwright/test';
 import {b64url, canonical, digest} from '../shared/protocol.mjs';
+import {googleLogin} from './google-login.mjs';
 
 const root = resolve(import.meta.dirname, '..'), temporary = await mkdtemp(resolve(tmpdir(), 'agentgate-oauth-invites-'));
 const listener = createServer(); await new Promise(resolve => listener.listen(0, '127.0.0.1', resolve));
 const port = listener.address().port; await new Promise(resolve => listener.close(resolve));
 const origin = 'http://127.0.0.1:' + port, testToken = crypto.randomUUID(), ownerToken = crypto.randomUUID(), legacy = 'L'.repeat(43);
-let worker, browser, log = '';
-const http = (path, input, {token, cookie} = {}) => fetch(origin + path, {method: input === undefined ? 'GET' : 'POST', redirect: 'manual',
-  headers: {Origin: origin, ...(input === undefined ? {} : {'Content-Type': 'application/json'}), ...(token ? {Authorization: 'Bearer ' + token} : {}), ...(cookie ? {Cookie: cookie} : {})},
+let worker, browser, login, log = '';
+const http = (path, input, {token, cookie, admin} = {}) => fetch(origin + path, {method: input === undefined ? 'GET' : 'POST', redirect: 'manual',
+  headers: {Origin: origin, ...(admin ? {Cookie: login.cookie, 'X-AgentGate-CSRF': login.csrf} : {}), ...(input === undefined ? {} : {'Content-Type': 'application/json'}), ...(token ? {Authorization: 'Bearer ' + token} : {}), ...(cookie ? {Cookie: cookie} : {})},
   ...(input === undefined ? {} : {body: JSON.stringify(input)})});
 async function ok(response, status = 200) {assert.equal(response.status, status, await response.clone().text()); return response.json();}
 const records = () => http('/_admin-test/registry', undefined, {token: testToken}).then(ok);
 const accounts = async () => (await records()).filter(([key]) => key.startsWith('account:')).map(([key]) => key.slice(8));
 async function invitation(label) {
-  const result = await ok(await http('/api/owner/admin/invites', {label}, {token: ownerToken}), 201);
+  const result = await ok(await http('/api/admin/invites', {label}, {admin: true}), 201);
   return {...result.invite, token: new URLSearchParams(new URL(result.invite_url).hash.slice(1)).get('invite')};
 }
 async function authorization() {
@@ -45,7 +46,7 @@ let client;
 try {
   const config = JSON.parse(await readFile(resolve(root, 'wrangler.jsonc'), 'utf8'));
   config.name = 'agentgate-oauth-invite-test'; config.main = resolve(root, 'tests/admin-worker.mjs'); config.assets.directory = resolve(root, 'public'); config.assets.run_worker_first = true;
-  config.vars = {ADMIN_ACCOUNT_ID: 'owner', ADMIN_TEST_TOKEN: testToken, BETA_INVITE_TOKEN: legacy, BETA_MAX_USERS: '100'};
+  config.vars = {GOOGLE_CLIENT_ID: 'local-google-client', GOOGLE_CLIENT_SECRET: 'local-google-secret', ADMIN_TEST_TOKEN: testToken, BETA_INVITE_TOKEN: legacy, BETA_MAX_USERS: '100'};
   config.dev = {inspector_port: 0};
   await writeFile(resolve(temporary, 'wrangler.json'), JSON.stringify(config));
   worker = spawn(process.execPath, [resolve(root, 'node_modules/wrangler/bin/wrangler.js'), 'dev', '--config', resolve(temporary, 'wrangler.json'), '--local', '--ip', '127.0.0.1', '--port', String(port), '--persist-to', resolve(temporary, 'state')],
@@ -58,6 +59,7 @@ try {
     await new Promise(resolve => setTimeout(resolve, 200));
   }
   await ok(await http('/_admin-test/seed', {accounts: [{id: 'owner', token: ownerToken, profile: {name: 'Test owner'}}]}, {token: testToken}));
+  login = await googleLogin(origin);
   client = await ok(await http('/oauth/register', {client_name: 'Invitation checks', redirect_uris: [origin + '/callback'], grant_types: ['authorization_code'], response_types: ['code'], token_endpoint_auth_method: 'none'}), 201);
 
   const denied = await connection();
@@ -75,7 +77,7 @@ try {
   assert.equal((await first.request('complete', signed)).status, 400);
   const alternate = await invitation('Cannot swap invitation');
   assert.equal((await first.request('complete', {...signed, invite: alternate.token})).status, 403);
-  await ok(await http('/api/owner/admin/invites/' + revoked.id + '/revoke', {}, {token: ownerToken}));
+  await ok(await http('/api/admin/invites/' + revoked.id + '/revoke', {}, {admin: true}));
   assert.equal((await first.request('complete', {...signed, invite: revoked.token})).status, 410);
   assert.deepEqual(await accounts(), []);
 

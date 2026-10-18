@@ -1,18 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {accountProfile, isAdminAccount, readAccountProfile} from '../src/account-profile.mjs';
-import {adminAccountPage, adminPageQuery, accountAdminSummary, requireAdmin} from '../src/admin.mjs';
+import {accountProfile, readAccountProfile} from '../src/account-profile.mjs';
+import {adminAccountPage, adminPageQuery, accountAdminSummary} from '../src/admin.mjs';
+import {isAdminIdentity, requireAdmin} from '../src/admin-identity.mjs';
 import {HostedState} from '../src/hosted-state.mjs';
 import {Memory} from './flow/support.mjs';
 import {allAdminAccounts} from '../public/admin-session.mjs';
 const tenant = 'a'.repeat(32), other = 'b'.repeat(32), browser = 'c'.repeat(32), cloud = 'd'.repeat(32), now = 100000000;
 
-test('admin designation fails closed and cannot be inherited by tenant owners', () => {
-  assert.equal(isAdminAccount('owner', undefined), false);
-  assert.equal(isAdminAccount('owner', 'owner'), true);
-  assert.equal(isAdminAccount(tenant, 'owner'), false);
-  for (const configured of [undefined, '*', 'all', 'bad-id']) assert.throws(() => requireAdmin('owner', configured), {code: 'ADMIN_REQUIRED'});
-  assert.throws(() => requireAdmin(tenant, 'owner'), {code: 'ADMIN_REQUIRED'});
+test('only the verified Google administrator identity grants administration', () => {
+  const identity = {provider: 'google', issuer: 'https://accounts.google.com', subject: 'google-admin', email: 'dchalloner@gmail.com', email_verified: true};
+  assert.equal(isAdminIdentity(identity), true);
+  for (const value of [undefined, 'owner', tenant, {...identity, email: 'other@gmail.com'}, {...identity, email_verified: false}, {...identity, email_verified: 'true'}, {...identity, provider: 'profile'}, {...identity, issuer: 'https://fake.example'}]) assert.throws(() => requireAdmin(value), {code: 'ADMIN_REQUIRED'});
 });
 
 test('owner-entered email stays unverified and cannot inject authority or verification claims', async () => {
@@ -53,7 +52,7 @@ test('global administration loads and searches accounts beyond the first API pag
   const data = await allAdminAccounts(async path => {
     calls++;
     const page = await adminAccountPage(ids, adminPageQuery(new URL(path, 'https://gate.test').searchParams), async account_id => ({account_id, name: account_id === ids.at(-1) ? 'Final account' : 'Account'}));
-    return {admin_account_id: tenant, ...page, cloud_capacity: calls === 1 ? {limits: 'shared capacity'} : null};
+    return {admin_subject: tenant, ...page, cloud_capacity: calls === 1 ? {limits: 'shared capacity'} : null};
   }, tenant);
   assert.equal(calls, 3); assert.equal(data.accounts.length, 46); assert.equal(data.total_accounts, 46);
   assert.equal(data.accounts.filter(item => item.name.includes('Final')).length, 1);
@@ -63,12 +62,12 @@ test('global administration loads and searches accounts beyond the first API pag
 
 test('global administration rejects incomplete pagination and changing authorization', async () => {
   let calls = 0;
-  await assert.rejects(() => allAdminAccounts(async () => ({admin_account_id: ++calls === 1 ? 'owner' : tenant, accounts: [], next_cursor: tenant}), 'owner'), /authorization/);
-  await assert.rejects(() => allAdminAccounts(async () => ({admin_account_id: 'owner', accounts: [], next_cursor: tenant}), 'owner'), /every account/);
+  await assert.rejects(() => allAdminAccounts(async () => ({admin_subject: ++calls === 1 ? 'owner' : tenant, accounts: [], next_cursor: tenant}), 'owner'), /authorization/);
+  await assert.rejects(() => allAdminAccounts(async () => ({admin_subject: 'owner', accounts: [], next_cursor: tenant}), 'owner'), /every account/);
   calls = 0;
   await assert.rejects(() => allAdminAccounts(async () => {
     if (++calls === 2) throw new Error('Account page unavailable');
-    return {admin_account_id: 'owner', accounts: [], next_cursor: tenant};
+    return {admin_subject: 'owner', accounts: [], next_cursor: tenant};
   }, 'owner'), /Account page unavailable/);
 });
 

@@ -7,6 +7,7 @@ import {resolve} from 'node:path';
 import {chromium} from '@playwright/test';
 import {until, owner} from './flow/support.mjs';
 import {b64url} from '../shared/protocol.mjs';
+import {googleLogin, installGoogleSession} from './google-login.mjs';
 
 const root = resolve(import.meta.dirname, '..'), temp = await mkdtemp(resolve(tmpdir(), 'agentgate-invites-'));
 const listener = createServer(); await new Promise(resolve => listener.listen(0, '127.0.0.1', resolve));
@@ -14,14 +15,14 @@ const port = listener.address().port; await new Promise(resolve => listener.clos
 const origin = 'http://127.0.0.1:' + port, testToken = crypto.randomUUID(), ownerToken = crypto.randomUUID(), tenantToken = crypto.randomUUID(), tenant = 'a'.repeat(32);
 const legacy = b64url(crypto.getRandomValues(new Uint8Array(32)));
 const report = {worker: 'real local workerd', checks: [], screenshots: []}, output = resolve(root, 'artifacts/invites');
-let worker, browser, log = '';
-async function http(path, {token, body, headers = {}, method = body === undefined ? 'GET' : 'POST'} = {}) {
-  return fetch(origin + path, {method, headers: {Origin: origin, ...(token ? {Authorization: 'Bearer ' + token} : {}), ...(body === undefined ? {} : {'Content-Type': 'application/json'}), ...headers}, ...(body === undefined ? {} : {body: JSON.stringify(body)})});
+let worker, browser, login, log = '';
+async function http(path, {token, admin, body, headers = {}, method = body === undefined ? 'GET' : 'POST'} = {}) {
+  return fetch(origin + path, {method, headers: {Origin: origin, ...(admin ? {Cookie: login.cookie, 'X-AgentGate-CSRF': login.csrf} : {}), ...(token ? {Authorization: 'Bearer ' + token} : {}), ...(body === undefined ? {} : {'Content-Type': 'application/json'}), ...headers}, ...(body === undefined ? {} : {body: JSON.stringify(body)})});
 }
 async function create(label = 'New user') {
-  const response = await http('/api/owner/admin/invites', {token: ownerToken, body: {label}});
+  const response = await http('/api/admin/invites', {admin: true, body: {label}});
   assert.equal(response.status, 201); const result = await response.json();
-  assert.equal(result.admin_account_id, 'owner'); assert.equal(result.invite.status, 'pending');
+  assert.equal(result.admin_subject, 'google-admin'); assert.equal(result.invite.status, 'pending');
   const url = new URL(result.invite_url); assert.equal(url.origin, origin); assert.equal(url.pathname, '/join.html'); assert.equal(url.search, '');
   return {...result, token: new URLSearchParams(url.hash.slice(1)).get('invite')};
 }
@@ -31,15 +32,16 @@ try {
   worker.stdout.on('data', chunk => {log += chunk;}); worker.stderr.on('data', chunk => {log += chunk;});
   await until(async () => {try {return (await http('/api/health')).ok;} catch {return false;}}, 60000);
   assert.equal((await http('/_admin-test/seed', {token: testToken, body: {accounts: [{id: 'owner', token: ownerToken, profile: {name: 'Administrator'}}, {id: tenant, token: tenantToken, profile: {name: 'Tenant'}}]}})).status, 200);
+  login = await googleLogin(origin);
   for (const body of [undefined, {}]) {
-    assert.equal((await http('/api/owner/admin/invites', {body})).status, 403);
-    assert.equal((await http('/api/owner/admin/invites', {token: tenantToken, body})).status, 403);
+    assert.equal((await http('/api/admin/invites', {body})).status, 401);
+    assert.equal((await http('/api/admin/invites', {token: tenantToken, body})).status, 401);
     assert.equal((await http('/u/' + tenant + '/api/owner/admin/invites', {token: tenantToken, body})).status, 403);
-    assert.equal((await http('/api/owner/admin/invites', {token: ownerToken, body, headers: {Origin: 'https://other.example'}})).status, 403);
+    assert.equal((await http('/api/admin/invites', {admin: true, body, headers: {Origin: 'https://other.example'}})).status, 403);
   }
-  assert.equal((await http('/api/owner/admin/invites', {token: ownerToken, body: {expires_in_days: 31}})).status, 400);
-  assert.equal((await http('/api/owner/admin/invites?limit=21', {token: ownerToken})).status, 400);
-  assert.equal((await http('/api/owner/admin/invites', {token: ownerToken, method: 'DELETE'})).status, 405);
+  assert.equal((await http('/api/admin/invites', {admin: true, body: {expires_in_days: 31}})).status, 400);
+  assert.equal((await http('/api/admin/invites?limit=21', {admin: true})).status, 400);
+  assert.equal((await http('/api/admin/invites', {admin: true, method: 'DELETE'})).status, 405);
   report.checks.push('administrator-only creation and listing, origin checks, field validation and methods');
 
   const concurrent = await create('Concurrent redemption');
@@ -60,9 +62,9 @@ try {
   report.checks.push('concurrent redemption creates exactly one isolated account with working owner pairing');
 
   const revoked = await create('Revocation');
-  assert.equal((await http('/api/owner/admin/invites/' + revoked.invite.id + '/revoke', {body: {}})).status, 403);
-  assert.equal((await http('/api/owner/admin/invites/' + revoked.invite.id + '/revoke', {token: ownerToken})).status, 405);
-  for (let i = 0; i < 2; i++) assert.equal((await http('/api/owner/admin/invites/' + revoked.invite.id + '/revoke', {token: ownerToken, body: {}})).status, 200);
+  assert.equal((await http('/api/admin/invites/' + revoked.invite.id + '/revoke', {body: {}})).status, 401);
+  assert.equal((await http('/api/admin/invites/' + revoked.invite.id + '/revoke', {admin: true})).status, 405);
+  for (let i = 0; i < 2; i++) assert.equal((await http('/api/admin/invites/' + revoked.invite.id + '/revoke', {admin: true, body: {}})).status, 200);
   assert.equal((await http('/api/signup', {body: {invite: revoked.token}})).status, 410);
   const expired = await create('Expiry');
   await http('/_admin-test/expire-invite', {token: testToken, body: {id: expired.invite.id}});
@@ -79,9 +81,9 @@ try {
 
   const pagination = [];
   for (let i = 0; i < 22; i++) pagination.push(await create('Page ' + i));
-  const first = await (await http('/api/owner/admin/invites', {token: ownerToken})).json();
+  const first = await (await http('/api/admin/invites', {admin: true})).json();
   assert.equal(first.invites.length, 20); assert.ok(first.next_cursor);
-  const second = await (await http('/api/owner/admin/invites?cursor=' + first.next_cursor, {token: ownerToken})).json();
+  const second = await (await http('/api/admin/invites?cursor=' + first.next_cursor, {admin: true})).json();
   assert.equal(second.next_cursor, null); assert.equal(new Set([...first.invites, ...second.invites].map(item => item.id)).size, 26);
   assert.ok(!JSON.stringify(first).includes('token_hash'));
   for (const item of pagination) assert.ok(!JSON.stringify(first).includes(item.token));
@@ -90,12 +92,8 @@ try {
   browser = await chromium.launch({headless: true});
   const context = await browser.newContext({viewport: {width: 1280, height: 950}, permissions: ['clipboard-read', 'clipboard-write']});
   const page = await context.newPage(), errors = []; page.on('pageerror', error => errors.push(error.message));
-  await page.goto(origin + '/admin.html');
-  await page.evaluate(async token => {
-    const db = await new Promise((resolve, reject) => {const r = indexedDB.open('agentgate-device', 1); r.onupgradeneeded = () => r.result.createObjectStore('keys'); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error);});
-    await new Promise((resolve, reject) => {const tx = db.transaction('keys', 'readwrite'); tx.objectStore('keys').put({token}, 'device'); tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);}); db.close();
-  }, ownerToken);
-  await page.reload(); await page.locator('#invites li').first().waitFor();
+  await installGoogleSession(context, origin, login);
+  await page.goto(origin + '/admin.html'); await page.locator('#invites li').first().waitFor();
   await page.getByLabel('Invite label').fill('<img src=x onerror=alert(1)>');
   await page.getByRole('button', {name: 'Create invite link', exact: true}).click();
   await page.getByText('Invite created. Copy this link before leaving the page.', {exact: true}).waitFor();

@@ -45,12 +45,13 @@ export class LocalCloudflare {
 }
 
 export function verifySettings(actual, original, requireAdmin = true) {
+  const google = new Set(['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET']);
   const before = new Map(original.bindings.filter(item => item.name !== 'ADMIN_ACCOUNT_ID').map(item => [item.name, item]));
   const after = new Map(actual.bindings.map(item => [item.name, item]));
   for (const [name, binding] of before) if (stable(after.get(name)) !== stable(binding)) throw fail('BINDINGS_CHANGED', 'Existing binding changed: ' + name);
-  if ([...after.keys()].some(name => name !== 'ADMIN_ACCOUNT_ID' && !before.has(name))) throw fail('BINDINGS_CHANGED', 'An unexpected binding appeared.');
+  if ([...after.keys()].some(name => name !== 'ADMIN_ACCOUNT_ID' && !google.has(name) && !before.has(name))) throw fail('BINDINGS_CHANGED', 'An unexpected binding appeared.');
   const admin = after.get('ADMIN_ACCOUNT_ID');
-  if (requireAdmin && !admin || admin && (admin.type !== 'plain_text' || admin.text !== 'owner')) throw fail('ADMIN_BINDING_CHANGED', 'The approved administrator must be owner.');
+  if (requireAdmin && (admin || [...google].some(name => after.get(name)?.type !== 'secret_text'))) throw fail('ADMIN_BINDING_CHANGED', 'Administration requires Google sign-in credentials and no account-based administrator.');
   for (const key of ['compatibility_date', 'compatibility_flags', 'usage_model', 'logpush', 'observability', 'placement', 'tags', 'tail_consumers']) if (stable(actual[key]) !== stable(original[key])) throw fail('SETTINGS_CHANGED', 'Existing Worker setting changed: ' + key);
 }
 
@@ -65,7 +66,7 @@ export async function deployRelease({client, release, identity, source, baseline
   progress('Inspecting the active deployment and recent uploaded versions.');
   const state = await inspectRelease(client, release, identity);
   verifySettings(state.settings, baseline.settings, false);
-  if (inspectOnly) return {status: 'inspected', active: state.active, matching_version: state.matching?.id || null, admin_enabled: state.settings.bindings.some(binding => binding.name === 'ADMIN_ACCOUNT_ID'), bundle_sha256: identity.sha256};
+  if (inspectOnly) return {status: 'inspected', active: state.active, matching_version: state.matching?.id || null, admin_enabled: !state.settings.bindings.some(binding => binding.name === 'ADMIN_ACCOUNT_ID') && ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'].every(name => state.settings.bindings.some(binding => binding.name === name && binding.type === 'secret_text')), bundle_sha256: identity.sha256};
   if (release.deployment_approval !== 'approved') throw fail('APPROVAL_REQUIRED', 'Deployment approval is missing from the release manifest.');
   if (state.matching && serves(state.active, state.matching.id)) {
     verifySettings(state.settings, baseline.settings);return {status: 'already_deployed', commit: release.commit, version_id: state.matching.id, deployment_id: state.active.id};
@@ -73,9 +74,8 @@ export async function deployRelease({client, release, identity, source, baseline
   if (state.active.id !== release.rollback.deployment_id) throw fail('DEPLOYMENT_BASELINE_CHANGED', 'The active deployment changed. Inspect before continuing.');
   let version = state.matching;
   if (!version) {
-    const metadata = coordinatorDeploymentMetadata(state.settings, 'Approved owner administration; bundle ' + identity.sha256);
+    const metadata = coordinatorDeploymentMetadata(state.settings, 'Verified Google administration; bundle ' + identity.sha256);
     metadata.bindings = metadata.bindings.filter(binding => binding.name !== 'ADMIN_ACCOUNT_ID');
-    metadata.bindings.push({name: 'ADMIN_ACCOUNT_ID', type: 'plain_text', text: 'owner'});
     Object.assign(metadata.annotations, {'workers/commit_sha': release.commit, 'workers/tag': release.commit.slice(0, 12)});
     const boundary = 'AgentGateRelease' + release.commit;
     if (source.includes(Buffer.from(boundary))) throw fail('RELEASE_INTEGRITY_FAILED', 'Multipart boundary conflicts with the source.');
@@ -88,12 +88,12 @@ export async function deployRelease({client, release, identity, source, baseline
       if (!version) throw fail('UPLOAD_OUTCOME_UNCERTAIN', 'Run --inspect before retrying. No second upload was attempted.');
     }
   } else progress('Reusing the matching uploaded version.');
-  verifySettings(await client.request('GET', 'settings'), baseline.settings);
+  verifySettings(await client.request('GET', 'settings'), baseline.settings, false);
   const current = (await client.request('GET', 'deployments')).deployments[0];
   if (current.id !== release.rollback.deployment_id && !serves(current, version.id)) throw fail('DEPLOYMENT_BASELINE_CHANGED', 'Another deployment completed during upload. Inspect before continuing.');
   if (!serves(current, version.id)) {
     progress('Deploying the approved version at 100% traffic.');
-    try {await client.request('POST', 'deployments', {strategy: 'percentage', code_update_strategy: {mode: 'immediate'}, versions: [{version_id: version.id, percentage: 100}], annotations: {'workers/message': 'Deploy approved ' + release.commit + '; ADMIN_ACCOUNT_ID=owner; preserve resources and consent.'}});}
+    try {await client.request('POST', 'deployments', {strategy: 'percentage', code_update_strategy: {mode: 'immediate'}, versions: [{version_id: version.id, percentage: 100}], annotations: {'workers/message': 'Deploy approved ' + release.commit + '; verified Google administration; preserve resources and consent.'}});}
     catch (error) {
       if (error.code === 'CLOUDFLARE_API_ERROR') throw error;
       let observed;try {observed = (await client.request('GET', 'deployments')).deployments[0];} catch { /* Preserve uncertain outcome. */ }
