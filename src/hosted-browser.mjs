@@ -2,7 +2,7 @@ import {canonical, fail} from '../shared/protocol.mjs';
 import {verifyBrowserSession} from '../shared/hosted-browser.mjs';
 import {AutomaticBrowser} from '../extension/automatic.mjs';
 import {HostedState} from './hosted-state.mjs';
-import {HostedAdapter} from './hosted-adapter.mjs';
+import {HostedAdapter, hostedTarget} from './hosted-adapter.mjs';
 import {hostedAPI} from './hosted-api.mjs';
 import {executeHosted, hostedExecutionFailure} from './hosted-executor.mjs';
 import {deadline} from '../extension/deadline.mjs';
@@ -60,9 +60,7 @@ export class HostedBrowser {
         let context, recovered = false;
         if (!opened.fresh && saved?.anchor) {
           for (const candidate of browser.contexts()) for (const page of candidate.pages()) {
-            const cdp = await candidate.newCDPSession(page);
-            try { if ((await cdp.send('Target.getTargetInfo')).targetInfo.targetId === saved.anchor) {context = candidate; recovered = true;} }
-            finally { await cdp.detach(); }
+            if (await hostedTarget(candidate, page, this.startupMilliseconds) === saved.anchor) {context = candidate; recovered = true;}
           }
         }
         if (!context) {

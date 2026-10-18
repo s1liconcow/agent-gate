@@ -4,16 +4,28 @@ import {executionError} from '../shared/bridge-result.mjs';
 const fault = (code, execution_error) => Object.assign(new Error(code), {code, ...(execution_error ? {execution_error} : {})});
 const transport = `globalThis.chrome ||= {};chrome.runtime ||= {id:'agentgate-hosted',onMessage:{addListener(f){(globalThis.__agentgateListeners ||= new Set()).add(f)},removeListener(f){globalThis.__agentgateListeners?.delete(f)}}};`;
 
+export async function hostedTarget(context, page, milliseconds = 15000) {
+  // Cloudflare runs both Playwright sides in this Worker and already knows the
+  // target. Its own SDK uses toImpl to access these in-process objects. Avoid a
+  // second protocol attachment just to recover an existing target identifier.
+  if (typeof page._connection?.toImpl === 'function') {
+    const id = page._connection.toImpl(page)?.delegate?._targetId;
+    if (typeof id !== 'string' || !id) throw fault('BROWSER_UNRESPONSIVE', 'TRANSPORT_FAILED');
+    return id;
+  }
+  return deadline(async () => {
+    const cdp = await context.newCDPSession(page);
+    try { return (await cdp.send('Target.getTargetInfo')).targetInfo.targetId; }
+    finally { await cdp.detach(); }
+  }, milliseconds, 'BROWSER_UNRESPONSIVE');
+}
+
 export class HostedAdapter {
   constructor(browser, context, {scripts, anchorId, store, operationMilliseconds = 15000}) {
     Object.assign(this, {browser, context, scripts, anchorId, store, operationMilliseconds}); this.pages = new Map(); this.worlds = new Map();
   }
   async target(page) {
-    return deadline(async () => {
-      const cdp = await this.context.newCDPSession(page);
-      try { return (await cdp.send('Target.getTargetInfo')).targetInfo.targetId; }
-      finally { await cdp.detach(); }
-    }, this.operationMilliseconds, 'BROWSER_UNRESPONSIVE');
+    return hostedTarget(this.context, page, this.operationMilliseconds);
   }
   async recover() {
     for (const page of this.context.pages()) {

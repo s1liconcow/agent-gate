@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {HostedAdapter} from '../src/hosted-adapter.mjs';
+import {HostedAdapter, hostedTarget} from '../src/hosted-adapter.mjs';
+
+test('in-process target identity needs no additional protocol attachment', async () => {
+  const page = {_connection: {toImpl: value => {assert.equal(value, page); return {delegate: {_targetId: 'owned-target'}};}}};
+  assert.equal(await hostedTarget({newCDPSession: () => assert.fail('Already attached')}, page), 'owned-target');
+  await assert.rejects(hostedTarget({}, {_connection: {toImpl: () => ({delegate: {}})}}), {code: 'BROWSER_UNRESPONSIVE'});
+});
 
 test('a late task page is closed after its caller times out', async () => {
   let resolvePage, closed = 0;
