@@ -1,5 +1,5 @@
 import {createRemoteJWKSet, jwtVerify} from 'jose';
-import {digest, fail} from '../shared/protocol.mjs';
+import {digest, fail, GateError} from '../shared/protocol.mjs';
 import {ADMIN_EMAIL, googleIssuers, requireAdmin} from './admin-identity.mjs';
 import {LOGIN_SECONDS, SESSION_SECONDS, webToken, validWebToken} from './web-sessions.mjs';
 import {publicOrigin} from './origin.mjs';
@@ -40,7 +40,12 @@ export const googleProvider = {
     const response = await fetch('https://oauth2.googleapis.com/token', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'},
       body: new URLSearchParams({grant_type: 'authorization_code', code, code_verifier: login.verifier, redirect_uri, client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET}),
       redirect: 'error', signal: AbortSignal.timeout(15000)});
-    if (!response.ok) fail('GOOGLE_SIGN_IN_FAILED', 'Google sign-in failed. Start again.', 401);
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      const error = new GateError('GOOGLE_SIGN_IN_FAILED', 'Google sign-in failed. Start again.', 401);
+      error.auth_reason = ['invalid_client', 'invalid_grant', 'unauthorized_client', 'invalid_request'].includes(result.error) ? result.error : 'exchange_failed';
+      throw error;
+    }
     const tokens = await response.json();
     if (typeof tokens.id_token !== 'string' || tokens.id_token.length > 16000) fail('INVALID_IDENTITY', 'Google could not verify this sign-in.', 403);
     return verifyGoogleToken(tokens.id_token, env.GOOGLE_CLIENT_ID, login.nonce);
@@ -69,27 +74,37 @@ export async function googleAuthRoute(request, env, provider = googleProvider) {
       state, nonce, code_challenge: await digest(verifier), code_challenge_method: 'S256', prompt: 'select_account', login_hint: ADMIN_EMAIL}).toString();
     return new Response(null, {status: 302, headers: {Location: target.href, 'Set-Cookie': cookie(loginCookie, binding, LOGIN_SECONDS), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'}});
   }
-  let outcome = 'failed';
+  let outcome = 'failed', stage = 'validate_callback';
   const headers = new Headers({'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'});
   headers.append('Set-Cookie', cookie(loginCookie, '', 0));
   try {
     for (const key of ['state', 'code', 'error']) if (url.searchParams.getAll(key).length > 1) fail('INVALID_REQUEST', 'Invalid Google callback.');
     const binding = readCookie(request, loginCookie);
     if (!validWebToken(binding)) fail('LOGIN_EXPIRED', 'Sign-in expired. Start again.', 401);
+    stage = 'consume_state';
     const login = await authCall(env, 'consume', url.searchParams.get('state'), await digest(binding));
     if (url.searchParams.has('error')) outcome = 'cancelled';
     else {
       const code = url.searchParams.get('code');
       if (!code || code.length > 4096) fail('INVALID_REQUEST', 'Invalid Google callback.');
+      stage = 'exchange_code';
       const identity = await provider.exchange(code, login, redirect_uri, env);
+      stage = 'authorize_identity';
       requireAdmin(identity);
+      stage = 'create_session';
       const token = await authCall(env, 'issue', identity);
       const previous = readCookie(request, sessionCookie);
       if (previous) await authCall(env, 'revoke', previous);
       headers.append('Set-Cookie', cookie(sessionCookie, token, SESSION_SECONDS));
       outcome = null;
     }
-  } catch (error) { if (error.code === 'ADMIN_REQUIRED') outcome = 'denied'; }
+  } catch (error) {
+    const code = typeof error.code === 'string' && /^[A-Z0-9_]{1,80}$/.test(error.code) ? error.code : 'UNEXPECTED_ERROR';
+    console.warn(JSON.stringify({event: 'google_sign_in_failed', stage, code,
+      ...(['invalid_client', 'invalid_grant', 'unauthorized_client', 'invalid_request', 'exchange_failed'].includes(error.auth_reason) ? {reason: error.auth_reason} : {}),
+      ...(['iss', 'aud', 'exp', 'iat', 'nbf', 'nonce', 'email', 'email_verified'].includes(error.claim) ? {claim: error.claim} : {})}));
+    if (error.code === 'ADMIN_REQUIRED') outcome = 'denied';
+  }
   headers.set('Location', origin + '/admin.html' + (outcome ? '?signin=' + outcome : ''));
   return new Response(null, {status: 302, headers});
 }
