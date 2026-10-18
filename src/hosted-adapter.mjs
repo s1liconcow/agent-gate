@@ -5,13 +5,15 @@ const fault = (code, execution_error) => Object.assign(new Error(code), {code, .
 const transport = `globalThis.chrome ||= {};chrome.runtime ||= {id:'agentgate-hosted',onMessage:{addListener(f){(globalThis.__agentgateListeners ||= new Set()).add(f)},removeListener(f){globalThis.__agentgateListeners?.delete(f)}}};`;
 
 export class HostedAdapter {
-  constructor(browser, context, {scripts, anchorId, store}) {
-    Object.assign(this, {browser, context, scripts, anchorId, store}); this.pages = new Map(); this.worlds = new Map();
+  constructor(browser, context, {scripts, anchorId, store, operationMilliseconds = 15000}) {
+    Object.assign(this, {browser, context, scripts, anchorId, store, operationMilliseconds}); this.pages = new Map(); this.worlds = new Map();
   }
   async target(page) {
-    const cdp = await this.context.newCDPSession(page);
-    try { return (await cdp.send('Target.getTargetInfo')).targetInfo.targetId; }
-    finally { await cdp.detach(); }
+    return deadline(async () => {
+      const cdp = await this.context.newCDPSession(page);
+      try { return (await cdp.send('Target.getTargetInfo')).targetInfo.targetId; }
+      finally { await cdp.detach(); }
+    }, this.operationMilliseconds, 'BROWSER_UNRESPONSIVE');
   }
   async recover() {
     for (const page of this.context.pages()) {
@@ -36,11 +38,22 @@ export class HostedAdapter {
     } finally { await this.closeTab(id); }
   }
   page(id) { const page = this.pages.get(id); if (!page || page.isClosed()) throw fault('TAB_CLOSED'); return page; }
-  async tab(id) { const page = this.page(id); return {id, url: page.url(), status: await page.evaluate(() => document.readyState === 'complete' ? 'complete' : 'loading')}; }
+  async tab(id) { const page = this.page(id); return {id, url: page.url(), status: await deadline(() => page.evaluate(() => document.readyState === 'complete' ? 'complete' : 'loading'), this.operationMilliseconds, 'BROWSER_UNRESPONSIVE')}; }
   async createTab(url) {
-    const page = await this.context.newPage(), id = await this.target(page);
-    this.pages.set(id, page);
-    await this.navigate(id, url); return this.tab(id);
+    const page = await deadline(signal => this.context.newPage().then(async page => {
+      if (signal.aborted) { await page.close().catch(() => {}); throw signal.reason; }
+      return page;
+    }), this.operationMilliseconds, 'BROWSER_UNRESPONSIVE');
+    let id;
+    try {
+      id = await this.target(page);
+      this.pages.set(id, page);
+      await this.navigate(id, url); return await this.tab(id);
+    } catch (error) {
+      if (id) this.pages.delete(id);
+      await deadline(() => page.close(), this.operationMilliseconds, 'BROWSER_UNRESPONSIVE').catch(() => {});
+      throw error;
+    }
   }
   async navigate(id, url) {
     const parsed = new URL(url);

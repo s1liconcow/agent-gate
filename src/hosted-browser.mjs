@@ -95,9 +95,10 @@ export class HostedBrowser {
         const connection = {account_id: config.account_id, browser_id: config.browser_id, sessionId: opened.sessionId, anchor};
         retained = this.connection = {browser, adapter, connection};
       }
+      phase = 'browser_work'; await this.progress(phase);
       const {adapter, connection} = retained;
       await store.put('connection', {...connection, last_activity_at: this.now()});
-      const api = hostedAPI(adapter, store, this.privateSession);
+      const api = hostedAPI(adapter, store, this.privateSession, phase => this.progress(phase));
       const authorize = (packet, status) => this.authorize(packet, status, config);
       const call = async (path, data) => { await this.config(config); return this.call(path, data); };
       const model = async (type, input, {beforeInference, onStage, session_id: sessionId} = {}) => {
@@ -123,7 +124,6 @@ export class HostedBrowser {
       const verifySession = (packet, phoneKey) => verifyBrowserSession(packet, phoneKey, Date.now(), config.coordinator);
       const automatic = new AutomaticBrowser({api, call, config: () => this.config(config), verifySession, model, activity});
       await api.storage.local.set({automation: {enabled: true, grants_enabled: true}});
-      phase = 'browser_work';
       const answer = await operation({adapter, api, automatic, authorize, config});
       // Saved authentication data is never copied into engine views or MCP output.
       if ((await this.consent.current())?.browser_id === config.browser_id) {
