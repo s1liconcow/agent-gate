@@ -64,7 +64,7 @@ export function classifierResult(type, result, input) {
 
 export function classificationState(item, type) {
   const status = type === 'plan' ? 'active' : 'checking_action';
-  if (item.status !== status || type === 'plan' && item.view) fail('LOCAL_CLASSIFIER_STALE', 'The task no longer awaits this classification.', 409);
+  if (item.status !== status || type === 'plan' && (item.view || item.read_locked)) fail('LOCAL_CLASSIFIER_STALE', 'The task no longer awaits this classification.', 409);
   return {status, scope_digest: item.scope_digest, view_digest: item.view_digest || null, operation_id: type === 'check_action' ? item.pending?.id : item.disclosure_request?.id || null};
 }
 

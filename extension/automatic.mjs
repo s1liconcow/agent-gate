@@ -1,4 +1,4 @@
-import {canonical, digest, scopedUrl, stagedFields} from './protocol.mjs';
+import {canonical, digest, scopedUrl, stagedFields, secretKinds, view} from './protocol.mjs';
 import {prepareSnapshot, selectedView} from './disclosure.mjs';
 import {localModel} from './model-host.mjs';
 import {deadline} from './deadline.mjs';
@@ -20,7 +20,7 @@ export class AutomaticBrowser {
       await this.receipt(item);
       if (!enabled(item.scope,(await this.api.storage.local.get('automation')).automation)) throw inferenceError('INFERENCE_NOT_APPROVED');
       const current = (await this.call('sessions')).sessions.find(i => i.id === (item.id || item.session_id));
-      if (this.ended.has(current?.id) || !current || canonical(current.scope) !== canonical(item.scope) || (checking ? current.status !== 'checking_action' || current.last_command?.id !== item.command.id : current.status !== 'active' || current.view || current.disclosure_request?.id !== item.disclosure_request?.id || current.dom_request?.id !== item.dom_request?.id || current.dom_request && current.dom_request.deadline <= this.now())) throw inferenceError('INFERENCE_NOT_APPROVED');
+      if (this.ended.has(current?.id) || !current || !checking && current.read_locked || canonical(current.scope) !== canonical(item.scope) || (checking ? current.status !== 'checking_action' || current.last_command?.id !== item.command.id : current.status !== 'active' || current.view || current.disclosure_request?.id !== item.disclosure_request?.id || current.dom_request?.id !== item.dom_request?.id || current.dom_request && current.dom_request.deadline <= this.now())) throw inferenceError('INFERENCE_NOT_APPROVED');
     } catch { throw inferenceError('INFERENCE_NOT_APPROVED'); }
   }
   async runtime(id, state, code = null, phase = null, execution_error) {
@@ -86,11 +86,11 @@ export class AutomaticBrowser {
       const {automation} = await this.api.storage.local.get('automation');
       if (!await this.config()) { await this.activity.clear(); return; }
       const sessions = suppliedSessions ?? (await this.call('sessions')).sessions;
-      const retryable = new Set(sessions.filter(item => item.status === 'active' && !item.view && enabled(item.scope, automation)).map(item => item.id));
+      const retryable = new Set(sessions.filter(item => item.status === 'active' && !item.read_locked && !item.view && enabled(item.scope, automation)).map(item => item.id));
       for (const id of this.attempts.keys()) if (!retryable.has(id)) this.attempts.delete(id);
       await this.activity.sync(sessions, Boolean(automation?.enabled||automation?.grants_enabled));
       for (const item of sessions.filter(i=>i.status==='active'&&!enabled(i.scope,automation)&&!i.view)) await this.runtime(item.id,'blocked','MODEL_SETUP_REQUIRED');
-      for (const item of sessions.filter(i => i.status === 'active' && enabled(i.scope,automation) && i.scope.disclosure === 'local_planner' && !i.view)) {
+      for (const item of sessions.filter(i => i.status === 'active' && !i.read_locked && enabled(i.scope,automation) && i.scope.disclosure === 'local_planner' && !i.view)) {
         if (this.ended.has(item.id)) continue;
         const key = item.disclosure_request?.id || 'initial';
         let attempt = this.attempts.get(item.id);
@@ -107,27 +107,31 @@ export class AutomaticBrowser {
           phase = 'capture';
           await this.runtime(item.id, 'planning', null, phase);
           await deadline(() => this.api.scripting.executeScript({target: {tabId: tab.id, frameIds: [0]}, files: ['content.js']}), 15000, 'BROWSER_UNRESPONSIVE');
-          const snapshot = await deadline(() => this.api.tabs.sendMessage(tab.id, {type: 'snapshot'}, {frameId: 0}), 15000, 'BROWSER_UNRESPONSIVE');
+          const snapshot = await deadline(() => this.api.tabs.sendMessage(tab.id, {type: 'snapshot', include_secrets: item.scope.execution_browser === 'local' && item.scope.permissions.includes('fill_secret')}, {frameId: 0}), 15000, 'BROWSER_UNRESPONSIVE');
+          if (snapshot?.code === 'SECRET_READ_LOCKED') continue;
           const prepared = prepareSnapshot(snapshot, item.scope);
+          const secrets = item.scope.execution_browser === 'local' && item.scope.permissions.includes('fill_secret') ? snapshot.controls.filter(c => c.role === 'secret' && Object.hasOwn(secretKinds,c.secret_kind) && c.label === secretKinds[c.secret_kind]).slice(0,12).map(({ref,secret_kind,label}) => ({ref,secret_kind,label,role:'secret',approval:'per_action'})) : [];
           counts = {captured_text: snapshot.blocks.length, eligible_text: prepared.entries.filter(e => e.kind === 'text').length, captured_controls: snapshot.controls.length, eligible_controls: prepared.entries.filter(e => e.kind === 'control').length};
           await this.diagnostic(item.id, {...counts, stage: 'captured'});
           if (snapshot.loading) { const error = new Error('Page loading.'); error.code = 'CONTENT_NOT_READY'; error.phase = 'page_loading'; throw error; }
-          if (!prepared.entries.length) { const error = new Error('No eligible page content.'); error.code = snapshot.login_required ? 'LOGIN_REQUIRED' : 'PAGE_UNSUPPORTED'; throw error; }
+          if (!prepared.entries.length && !secrets.length) { const error = new Error('No eligible page content.'); error.code = snapshot.login_required ? 'LOGIN_REQUIRED' : 'PAGE_UNSUPPORTED'; throw error; }
           phase = 'model_availability';
           const heartbeat = setInterval(() => this.runtime(item.id, 'planning', null, phase), 10000);
           let planned;
-          try { planned = item.scope.engagement === 'AUDIT_ONLY' && !item.scope.purpose_guard ? {ids: [...prepared.entries.filter(e => e.kind === 'control').slice(0,24), ...prepared.entries.filter(e => e.kind === 'text').slice(0,8)].map(e => e.id)} : await this.model('plan', {snapshot, task: item.scope, need: item.disclosure_request?.need || ''}, {session_id: item.id, onStage: current => { if (modelPhases.includes(current)) phase = current; }, beforeInference: () => this.authorizeInference(item)}); }
-          catch (error) { error.phase = phase; throw error; }
+          try { planned = !prepared.entries.length && secrets.length ? {ids: []} : item.scope.engagement === 'AUDIT_ONLY' && !item.scope.purpose_guard ? {ids: [...prepared.entries.filter(e => e.kind === 'control').slice(0,24), ...prepared.entries.filter(e => e.kind === 'text').slice(0,8)].map(e => e.id)} : await this.model('plan', {snapshot, task: item.scope, need: item.disclosure_request?.need || ''}, {session_id: item.id, onStage: current => { if (modelPhases.includes(current)) phase = current; }, beforeInference: () => this.authorizeInference(item)}); }
+          catch (error) { if (secrets.length) planned = {ids: []}; else { error.phase = phase; throw error; } }
           finally { clearInterval(heartbeat); }
-          const approved = selectedView(prepared, item.scope, {allow: true, ids: planned.ids}, {allow: true});
-          const latest = await deadline(() => this.api.tabs.sendMessage(tab.id, {type: 'snapshot_current', ids: planned.ids}, {frameId: 0}), 15000, 'BROWSER_UNRESPONSIVE');
+          const ordinary = planned.ids.length ? selectedView(prepared, item.scope, {allow: true, ids: planned.ids}, {allow: true}) : {origin: snapshot.origin, text: '', controls: []};
+          const approved = view({...ordinary, controls: [...secrets,...ordinary.controls].slice(0,24)}, item.scope);
+          const selectedIds = [...approved.controls.map(c => c.ref), ...planned.ids.filter(id => !ordinary.controls.some(c => c.ref === id))].slice(0,32);
+          const latest = await deadline(() => this.api.tabs.sendMessage(tab.id, {type: 'snapshot_current', ids: selectedIds}, {frameId: 0}), 15000, 'BROWSER_UNRESPONSIVE');
           if (latest?.capture_id !== snapshot.capture_id || latest?.version !== snapshot.version || latest?.current !== true) {
             await this.diagnostic(item.id, {...counts, stage: 'page_changed'});
             const error = new Error('Selected content changed.'); error.code = 'CONTENT_NOT_READY'; throw error;
           }
           await this.receipt(item);
           const current = (await this.call('sessions')).sessions.find(i => i.id === item.id);
-          if (this.ended.has(item.id) || current?.status !== 'active' || current.view || canonical(current.scope) !== canonical(item.scope) || current.disclosure_request?.id !== item.disclosure_request?.id || new URL((await this.api.tabs.get(tab.id)).url).origin !== site) continue;
+          if (this.ended.has(item.id) || current?.status !== 'active' || current.read_locked || current.view || canonical(current.scope) !== canonical(item.scope) || current.disclosure_request?.id !== item.disclosure_request?.id || new URL((await this.api.tabs.get(tab.id)).url).origin !== site) continue;
           const response = await this.call('sessions/' + item.id + '/view', {...approved, ...(planned.assessment ? {assessment: planned.assessment} : {}), ...(planned.classifier_proof ? {classifier_proof: planned.classifier_proof} : {})});
           const {bindings = {}} = await this.api.storage.session.get('bindings');
           bindings[item.id] = {session_id: item.id, tab_id: tab.id, view: response.view, view_digest: response.view_digest, fills: {}, submit_refs: snapshot.controls.filter(c => c.submit).map(c => c.ref)};

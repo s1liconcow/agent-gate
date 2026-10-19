@@ -1,7 +1,8 @@
 // Runs in Chrome's isolated extension world. The web page cannot access the reference map.
 (() => {
-  const version = '0.7.0-purpose-5-draft-1-checkout-1-heading-1-controls-1';
+  const version = '0.7.0-purpose-5-draft-1-checkout-1-heading-1-controls-1-secrets-1';
   if (globalThis.__agentgateReader?.version === version) return;
+  let readLocked = Boolean(globalThis.__agentgateReader?.readLocked);
   globalThis.__agentgateReader?.dispose?.();
   let references = new Map(), capturedAt = 0, captureId;
   let revision = 0;
@@ -15,7 +16,14 @@
   const label = node => (node.labels?.[0] && renderedText(node.labels[0]) || node.getAttribute('aria-label') || labelledBy(node) || (inputButton(node) ? node.type === 'image' ? node.alt : node.value : node.isContentEditable ? '' : renderedText(node)) || node.getAttribute('placeholder') || node.getAttribute('name') || '').trim().slice(0, 200);
   const visible = node => node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden' && getComputedStyle(node).display !== 'none';
   const pendingCheckout = node => (node.tagName === 'BUTTON' || inputButton(node)) && /^(?:place (?:your )?order|submit order|buy now|pay(?: now|\s+\$)|complete (?:purchase|order)|confirm (?:purchase|order))/i.test(label(node));
-  const allowedField = node => (['INPUT', 'TEXTAREA'].includes(node.tagName) || node.isContentEditable && node.getAttribute('role') === 'textbox') && !inputButton(node) && !['password', 'hidden', 'file', 'checkbox', 'radio'].includes(node.type) && !/(?:password|one-time-code|username|cc-|webauthn)/i.test(node.autocomplete || '') && !/(?:password|passcode|\botp\b|security code|\bpin\b|\b(?:cvv|cvc|card number|credit card|cardholder|expiration|expiry)\b)/i.test(label(node));
+  const allowedField = node => (['INPUT', 'TEXTAREA'].includes(node.tagName) || node.isContentEditable && node.getAttribute('role') === 'textbox') && !inputButton(node) && !secretKind(node) && !['password', 'hidden', 'file', 'checkbox', 'radio'].includes(node.type) && !/(?:password|one-time-code|username|cc-|webauthn)/i.test(node.autocomplete || '') && !/(?:password|passcode|\botp\b|security code|\bpin\b|\b(?:cvv|cvc|card number|credit card|cardholder|expiration|expiry)\b)/i.test(label(node));
+  const secretLabels = {password: 'Password', username: 'Username', card_number: 'Card number', card_expiry: 'Card expiry', card_name: 'Cardholder name', secret: 'Secret'};
+  const secretKind = node => {
+    if (node.tagName !== 'INPUT' || !['password','text','email','tel','number'].includes(node.type)) return null;
+    const autocomplete = (node.autocomplete || '').split(/\s+/).at(-1);
+    if (node.type === 'password' || ['current-password','new-password'].includes(autocomplete)) return 'password';
+    return ({username: 'username', 'cc-number': 'card_number', 'cc-exp': 'card_expiry', 'cc-name': 'card_name'})[autocomplete] || (/^(?:api[_ -]?key|secret|access[_ -]?token)$/i.test(node.name || '') ? 'secret' : null);
+  };
   const fingerprint = node => JSON.stringify([node.tagName, node.type, node.id, node.name, node.getAttribute('href'), node.getAttribute('target'), node.getAttribute('role'), node.isContentEditable, node.readOnly, node.autocomplete, label(node)]);
   const context = (node, complete = false) => {
     // Purpose reads cannot authorize a prefix of an oversized heading. Other
@@ -127,6 +135,7 @@
   const listener = (message, sender, respond) => {
     if (sender.id !== chrome.runtime.id) return false;
     try {
+      if (['snapshot','snapshot_current'].includes(message.type) && readLocked) { respond({ok: false, code: 'SECRET_READ_LOCKED'}); return false; }
       if (message.type === 'snapshot_current') {
         const ids = message.ids;
         const current = Array.isArray(ids) && ids.length > 0 && ids.length <= 32 && new Set(ids).size === ids.length && ids.every(id => {
@@ -137,7 +146,7 @@
       }
       if (message.type === 'snapshot') {
         references = new Map(); capturedAt = performance.now(); captureId = crypto.randomUUID();
-        const controls = [];
+        const controls = [], includeSecrets = message.include_secrets === true && location.protocol === 'https:';
         const gmail = location.hostname === 'mail.google.com';
         const selector = 'input,textarea,button,a[href],[role="button"],[role="link"],[role="row"],[role="textbox"][contenteditable="true"]' + (gmail ? ',tr.zA' : '');
         const main = document.querySelector('[role="main"],main');
@@ -147,7 +156,7 @@
         // before global navigation/help. Ordering does not authorize a candidate.
         const priority = node => {
           const dialog = node.closest('[role="dialog"],[role="alertdialog"]');
-          if (allowedField(node)) return dialog ? 0 : 1;
+          if (includeSecrets && secretKind(node) || allowedField(node)) return dialog ? 0 : 1;
           if (dialog || node.form && (node.tagName === 'BUTTON' || inputButton(node))) return 2;
           if (node.closest('[role="row"],tr' + (gmail ? ',.zA' : ''))) return 4;
           return 3;
@@ -155,10 +164,11 @@
         const candidates = [...document.querySelectorAll(selector)].filter(node => visible(node) && (!node.disabled || pendingCheckout(node)) && !node.readOnly).sort((a, b) => priority(a) - priority(b));
         for (const node of candidates) {
           if (controls.length >= 72) break;
-          if (!visible(node) || node.disabled && !pendingCheckout(node) || node.readOnly || (!allowedField(node) && !inputButton(node) && !['BUTTON', 'A'].includes(node.tagName) && !['button', 'link', 'row'].includes(node.getAttribute('role')) && !(gmail && node.matches('tr.zA')))) continue;
-          const name = label(node); if (!name || /(?:password|passcode|\botp\b|sign in|log in)/i.test(name)) continue;
-          const ref = crypto.randomUUID().replaceAll('-', ''), role = allowedField(node) ? 'field' : node.tagName === 'A' ? 'link' : 'button';
-          references.set(ref, {node, fingerprint: JSON.stringify([fingerprint(node), context(node)]), role}); controls.push({ref, role, label: name, context: context(node), submit: Boolean(node.form && ['submit', 'image'].includes(node.type))});
+          if (!visible(node) || node.disabled && !pendingCheckout(node) || node.readOnly || (!(includeSecrets && secretKind(node)) && !allowedField(node) && !inputButton(node) && !['BUTTON', 'A'].includes(node.tagName) && !['button', 'link', 'row'].includes(node.getAttribute('role')) && !(gmail && node.matches('tr.zA')))) continue;
+          const kind = includeSecrets && secretKind(node);
+          const name = kind ? secretLabels[kind] : label(node); if (!name || !kind && /(?:password|passcode|\botp\b|sign in|log in)/i.test(name) && !(includeSecrets && /^(?:sign in|log in|login)$/i.test(name) && (node.tagName === 'BUTTON' || inputButton(node)))) continue;
+          const ref = crypto.randomUUID().replaceAll('-', ''), role = kind ? 'secret' : allowedField(node) ? 'field' : node.tagName === 'A' ? 'link' : 'button';
+          references.set(ref, {node, fingerprint: JSON.stringify([fingerprint(node), context(node)]), role}); controls.push({ref, role, label: name, ...(kind ? {secret_kind: kind} : {}), context: kind ? '' : context(node), submit: Boolean(node.form && ['submit', 'image'].includes(node.type))});
         }
         const blocks = [], covered = [], texts = new Set(); let total = 0;
         const blockSelector = 'h1,h2,h3,p,li,dt,dd,td,th,[role="status"],[role="heading"],[role="listitem"],div,span';
@@ -182,7 +192,16 @@
       }
       if (message.type === 'execute') {
         const {action, origins} = message, reference = references.get(action.ref), node = reference?.node;
-        if (!origins.includes(location.origin) || !node || !['field', 'button', 'link'].includes(reference.role) || !node.isConnected || !visible(node) || node.disabled || performance.now() - capturedAt > 600000 || JSON.stringify([fingerprint(node), context(node)]) !== reference.fingerprint) { respond({ok: false, code: 'STALE_VIEW'}); return false; }
+        if (!origins.includes(location.origin) || !node || !['field', 'secret', 'button', 'link'].includes(reference.role) || !node.isConnected || !visible(node) || node.disabled || performance.now() - capturedAt > 600000 || JSON.stringify([fingerprint(node), context(node)]) !== reference.fingerprint) { respond({ok: false, code: 'STALE_VIEW'}); return false; }
+        if (action.type === 'fill_secret' && reference.role === 'secret' && !node.readOnly && secretKind(node) === action.secret_kind && typeof action.value === 'string' && action.value.length > 0 && action.value.length <= 2000 && location.protocol === 'https:') {
+          // A form action cannot silently deliver a locally approved secret to another origin.
+          if (node.form && (new URL(node.form.action || location.href).origin !== location.origin || node.form.target && node.form.target !== '_self')) { respond({ok: false, code: 'OUT_OF_SCOPE'}); return false; }
+          readLocked = true;
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(node, action.value);
+          node.dispatchEvent(new Event('input', {bubbles: true})); node.dispatchEvent(new Event('change', {bubbles: true}));
+          // No value-dependent response: page scripts can transform or copy the secret.
+          respond({ok: true, code: 'DISPATCHED'}); return false;
+        }
         if (action.type === 'fill' && reference.role === 'field' && allowedField(node) && typeof action.value === 'string' && action.value.length <= 2000) {
           if (node.isContentEditable) node.textContent = action.value;
           else { const prototype = node.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(prototype, 'value').set.call(node, action.value); }
@@ -190,7 +209,7 @@
           const matches = (node.isContentEditable ? node.textContent : node.value) === action.value;
           respond({ok: matches, code: matches ? 'DISPATCHED' : 'BRIDGE_ERROR'}); return false;
         }
-        if (action.type === 'click' && reference.role !== 'field') {
+        if (action.type === 'click' && ['button','link'].includes(reference.role)) {
           for (const field of message.staged_fields || []) {
             const staged = references.get(field.ref);
             if (!staged || staged.role !== 'field' || !staged.node.isConnected || JSON.stringify([fingerprint(staged.node), context(staged.node)]) !== staged.fingerprint || (staged.node.isContentEditable ? staged.node.textContent : staged.node.value) !== field.value) { respond({ok: false, code: 'STALE_VIEW'}); return false; }
@@ -204,5 +223,5 @@
     return false;
   };
   chrome.runtime.onMessage.addListener(listener);
-  globalThis.__agentgateReader = {version, reference: ref => references.get(ref), label, visible, fingerprint, context, renderedText, dispose() { observer.disconnect(); chrome.runtime.onMessage.removeListener(listener); references.clear(); }};
+  globalThis.__agentgateReader = {version, get readLocked() { return readLocked; }, reference: ref => references.get(ref), label, visible, fingerprint, context, renderedText, dispose() { observer.disconnect(); chrome.runtime.onMessage.removeListener(listener); references.clear(); }};
 })();

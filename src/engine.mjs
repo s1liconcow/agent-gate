@@ -44,10 +44,10 @@ export class Engine {
   public(item) {
     const live = !terminal.has(item.status), runtime=item.runtime || null;
     return {id:item.id, status:item.status, expires_at:item.expires_at, engagement:item.task.engagement, execution_browser:item.task.execution_browser, classifier_backend:item.task.purpose_guard?.model,
-      browser_runtime:runtime, last_command:item.last_command || null,
+      read_locked:Boolean(item.read_locked), browser_runtime:runtime, last_command:item.last_command || null,
       observations:item.history.filter(event=>['action_check','disclosure_check'].includes(event.type)).slice(-24),
       ...(live && item.view ? {view:item.view, view_digest:item.view_digest} : {}),
-      next_action:!live?'Task ended.':item.status==='requested'?'Show approval_url and wait for owner approval.':item.status==='awaiting_action'?'Show approval_url for this exact action.':item.status==='checking_action'?'Wait for the pinned local classifier.':item.status==='executing'?'Wait for execution; keep the same idempotency key.':runtime?.state==='blocked'?'Inspect browser_runtime; do not recreate this task.':!item.view?'Wait for the scoped browser view.':'Use the published refs and view_digest.'};
+      next_action:!live?'Task ended.':item.status==='requested'?'Show approval_url and wait for owner approval.':item.status==='awaiting_action'?'Show approval_url for this exact action.':item.status==='checking_action'?'Wait for the pinned local classifier.':item.status==='executing'?(item.pending?.action.type==='fill_secret'?'Open AgentGate extension Secrets to unlock or approve the fill. Keep the same idempotency key.':'Wait for execution; keep the same idempotency key.'):runtime?.state==='blocked'?'Inspect browser_runtime; do not recreate this task.':item.read_locked?'Secret privacy lock: no new page reads. Use existing refs or finish in the browser.':!item.view?'Wait for the scoped browser view.':'Use the published refs and view_digest.'};
   }
   async list() {
     const items = await this.db.list({prefix: 'session:'});
@@ -70,6 +70,7 @@ export class Engine {
   }
   async publishView(id, candidate) {
     const item = await this.active(id);
+    if (item.read_locked) fail('SECRET_READ_LOCKED','New page reads are disabled after a secret request.',403);
     if (item.task.purpose_guard && item.task.engagement && candidate.assessment) {
       const {assessment, ...published} = candidate;
       exact(assessment, ['decision', 'confidence', 'sensitive']); engagementDecision(item.task.engagement, assessment);
@@ -97,7 +98,11 @@ export class Engine {
     const command = {id: random(), action: approvedAction, requires_approval: needsApproval(approvedAction, item.view, item.task), view_digest: item.view_digest || null, deadline: Math.min(item.expires_at, this.now() + 90000)};
     item.operations++; item.keys[key] = {request_digest: requestDigest, command_id: command.id};
     const fields = stagedFields(item.view, item.fills);
-    if (checksActionPurpose(item.task)) item.status = 'checking_action';
+    if (approvedAction.type === 'fill_secret') {
+      // Persist before dispatch, including failed or uncertain attempts. Never clear this lock.
+      item.read_locked = true; command.requires_approval = false; item.status = 'executing';
+      command.deadline = Math.min(item.expires_at, this.now() + 300000);
+    } else if (checksActionPurpose(item.task)) item.status = 'checking_action';
     else if (command.requires_approval) this.challengeAction(item, command, target, fields);
     else item.status = 'executing';
     item.pending = command; item.last_command = {id: command.id, status: item.status}; await this.save(item);
@@ -173,7 +178,7 @@ export class Engine {
     if (item.status !== 'executing' || result.command_id !== item.pending?.id) fail('STALE_COMMAND', 'This command is no longer pending.', 409);
     if (result.ok && !['DISPATCHED', 'ALREADY_DISPATCHED'].includes(result.code)) fail('INVALID_RESULT', 'The bridge result is inconsistent.');
     if (result.ok && item.pending.action.type === 'fill') item.fills[item.pending.action.ref] = item.pending.action.value;
-    if (item.pending.action.type !== 'fill') { delete item.view; delete item.view_digest; item.fills = {}; if (item.task.purpose_guard) item.runtime = {state: 'starting', code: null, updated_at: this.now()}; }
+    if (!['fill','fill_secret'].includes(item.pending.action.type)) { delete item.view; delete item.view_digest; item.fills = {}; if (item.task.purpose_guard) item.runtime = {state: 'starting', code: null, updated_at: this.now()}; }
     item.last_command = {id: result.command_id, status: result.ok ? 'dispatched' : 'failed', code: result.code, site_outcome: 'unverified', ...(result.execution_error ? {execution_error: result.execution_error} : {})};
     item.history.push({id: result.command_id, type: item.pending.action.type, at: this.now(), code: result.code});
     item.status = 'active'; delete item.pending; delete item.action_challenge; delete item.action_receipt;

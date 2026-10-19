@@ -121,3 +121,11 @@ test('compact native IDs map only to eligible sources; checker cannot add source
   }else await assert.rejects(planner.plan(page,task),e=>e.code==='LOCAL_CHECK_REFUSED');
  }
 });
+
+test('sign-in controls require explicit secret permission and still pass the normal source selection',()=>{
+  const login={origin:task.origins[0],controls:[{ref:'e'.repeat(32),role:'button',label:'Sign in',context:''}],blocks:[]};
+  assert.equal(prepareSnapshot(login,task).entries.length,0);
+  const allowed={...task,permissions:[...task.permissions,'fill_secret']},prepared=prepareSnapshot(login,allowed);
+  assert.equal(prepared.entries.length,1);
+  assert.equal(selectedView(prepared,allowed,{allow:true,ids:['e'.repeat(32)]},{allow:true}).controls[0].label,'Sign in');
+});

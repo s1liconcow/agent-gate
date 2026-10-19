@@ -115,3 +115,24 @@ for(const decision of ['allow','confirm'])test(`consequential classifier ${decis
  assert.equal(await browser.allowed({...packet,command:{...packet.command,payment_cents:2330}}),false);
  assert.equal(await browser.allowed({...packet,command:{...packet.command,requires_approval:decision==='allow'}}),false);
 });
+
+test('secret permission publishes fixed field metadata when no ordinary sources are available', async () => {
+  const f=fixture(), secretItem={...item,scope:{...item.scope,execution_browser:'local',permissions:['read','fill_secret']}};
+  const snapshot={origin:item.scope.origins[0],controls:[{ref,role:'secret',secret_kind:'password',label:'Password',context:''}],blocks:[],capture_id:'secret-capture',version:'secrets'};
+  globalThis.chrome.tabs.sendMessage=async(_,message)=>{
+    if(message.type==='snapshot'){assert.equal(message.include_secrets,true);return snapshot;}
+    return {current:true,capture_id:snapshot.capture_id,version:snapshot.version};
+  };
+  f.browser.call=async(path,input)=>{f.calls.push({path,input});return path==='sessions'?{sessions:[secretItem]}:{view:input,view_digest:'digest'};};
+  f.browser.model=async()=>{throw new Error('Secret metadata must not require model access.');};
+  await f.browser.tick([secretItem]);
+  assert.deepEqual(f.data.bindings[id].view,{origin:item.scope.origins[0],text:'',controls:[{ref,role:'secret',secret_kind:'password',label:'Password',approval:'per_action'}]});
+});
+
+test('read-locked tasks never capture or publish another page, including after a tab change', async () => {
+  const f=fixture();
+  globalThis.chrome.tabs.sendMessage=async()=>{assert.fail('A secret-locked task attempted a page capture.');};
+  globalThis.chrome.scripting.executeScript=async()=>{assert.fail('A secret-locked task attempted reinjection.');};
+  await f.browser.tick([{...item,read_locked:true}]);
+  assert.equal(f.calls.some(call=>call.path.endsWith('/view')),false);
+});

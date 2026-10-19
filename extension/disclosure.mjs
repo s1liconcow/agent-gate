@@ -6,7 +6,7 @@ const forbidden = /\b(?:password|passcode|pin|(?:door|gate|entry|access)\s+(?:en
 const injection = /ignore\s+(?:(?:all|any|the|your|previous|prior)\s+)*(?:instructions|rules)|system\s*prompt|developer\s*message|reveal\s+(?:the\s+)?(?:password|secret|token)|bypass\s+(?:the\s+)?(?:review|filter|policy)|<\|(?:im_start|system)\|>/i;
 // One-time codes reach the same purpose checks as other candidate text.
 const clean = s => typeof s === 'string' && s.length > 0 && s.length <= 2000 && !forbidden.test(s.normalize('NFKC').replace(oneTimeCodeLabel, 'one-time code')) && !injection.test(s.normalize('NFKC'));
-const cleanControl = s => clean(s) && !/\b(?:password|passcode|pin|otp|one.time.code|security code|sign in|log in)\b/i.test(s.normalize('NFKC'));
+const cleanControl = (s, task) => clean(s) && (task?.execution_browser === 'local' && task.permissions.includes('fill_secret') && /^(?:sign in|log in|login)$/i.test(s) || !/\b(?:password|passcode|pin|otp|one.time.code|security code|sign in|log in)\b/i.test(s.normalize('NFKC')));
 const useful = s => /[\p{L}\p{N}]/u.test(s.replace(/\[REDACTED[^\]]*\]/g, ''));
 export function sanitizeForTask(raw, goal, purchasePricing = false) {
   // Exact identifiers and USD amounts in the signed goal survive redaction.
@@ -28,10 +28,10 @@ export function prepareSnapshot(snapshot, task) {
   if (!task.origins.includes(snapshot.origin) || !Array.isArray(snapshot.controls) || !Array.isArray(snapshot.blocks)) throw new Error('The snapshot is outside the approved task.');
   const entries = [], seen = new Set(), pricing = Boolean(task.purpose_guard && /\b(?:buy|purchase|shop|shopping)\b/i.test(task.goal));
   for (const c of snapshot.controls.slice(0, 72)) {
-    if (!ref.test(c.ref) || seen.has(c.ref) || !['field', 'button', 'link'].includes(c.role) || !cleanControl(c.label) || (c.context && !cleanControl(c.context))) continue;
+    if (!ref.test(c.ref) || seen.has(c.ref) || !['field', 'button', 'link'].includes(c.role) || !cleanControl(c.label,task) || (c.context && !cleanControl(c.context,task))) continue;
     if (!task.permissions.includes(c.role === 'field' ? 'fill' : 'click')) continue;
-    const label = sanitizeForTask(c.label, task.goal, pricing).slice(0, 120); if (!cleanControl(label) || !useful(label)) continue;
-    const context = c.context ? sanitizeText(c.context).slice(0, 180) : ''; if (context && !cleanControl(context)) continue;
+    const label = sanitizeForTask(c.label, task.goal, pricing).slice(0, 120); if (!cleanControl(label,task) || !useful(label)) continue;
+    const context = c.context ? sanitizeText(c.context).slice(0, 180) : ''; if (context && !cleanControl(context,task)) continue;
     seen.add(c.ref); entries.push({id: c.ref, kind: 'control', role: c.role, text: label, context});
   }
   for (const b of snapshot.blocks.slice(0, 96)) {
@@ -82,7 +82,7 @@ export function selectedView(prepared, task, selection, verification) {
   validateSelection(selection, prepared.entries.map(e => e.id)); exact(verification, ['allow']);
   if (verification.allow !== true) throw new Error('Local disclosure checks did not agree. Review the page locally.');
   const selected = selection.ids.map(id => prepared.entries.find(e => e.id === id));
-  if (selected.some(e => !e || !(e.kind === 'control' ? cleanControl(e.text) : clean(e.text)))) throw new Error('The model selected an unknown or excluded item.');
+  if (selected.some(e => !e || !(e.kind === 'control' ? cleanControl(e.text,task) : clean(e.text)))) throw new Error('The model selected an unknown or excluded item.');
   const controls = selected.filter(e => e.kind === 'control').map(e => ({ref: e.id, role: e.role, label: e.text, approval: 'per_action'}));
   const text = selected.filter(e => e.kind === 'text').map(e => e.text).join('\n').slice(0, 2000);
   if (!text && controls.length && controls.every(c => /^(?:select(?: all)?|more|refresh|settings|help)(?:\s|[.…])?$/i.test(c.label))) {

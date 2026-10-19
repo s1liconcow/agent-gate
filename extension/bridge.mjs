@@ -7,12 +7,23 @@ import {initializeBrowser} from './browser-setup.mjs';
 import {purposeBrowserModel} from './purpose-browser-model.mjs';
 import {auditActiveSessions, auditConnectionEnded, auditEvent, auditPrune, auditRecording, auditStatuses} from './audit-log.mjs';
 import {SessionRecordings} from './session-recording.mjs';
+import {SecretVault} from './secret-vault.mjs';
+import {SecretFillGate} from './secret-fill.mjs';
 import {PairedLocalClassifier} from './local-classifier.mjs';
 const ready = Promise.all([chrome.storage.local.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'}), chrome.storage.session.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'}), chrome.storage.session.remove(['source', 'binding', 'snapshot'])]);
 let socket, heartbeat, reconnectTimer, setupPromise, setupCredential, queue = Promise.resolve(), pairingQueue = Promise.resolve();
 let connectionGeneration = 0, reviewSessions = [];
 const leases = new Map();
 const recordings = new SessionRecordings({audit: auditRecording});
+const vault = new SecretVault();
+const secretGate = new SecretFillGate({vault, open: async () => {
+  const url = chrome.runtime.getURL('secrets.html'), existing = (await chrome.tabs.query({})).find(tab => tab.url === url);
+  if (existing) await chrome.tabs.update(existing.id, {active: true}); else await chrome.tabs.create({url});
+}});
+function resumeSecretRequests() {
+  const packets = [...secretGate.pending.values()].map(item => item.packet);
+  queue = queue.then(async () => { for (const packet of packets) await execute(packet); }).catch(() => {});
+}
 const automatic = new AutomaticBrowser({call, config, verifySession, audit: auditEvent, recordings});
 const classifier = new PairedLocalClassifier({call, config});
 async function config() { await ready; return (await chrome.storage.local.get('settings')).settings; }
@@ -27,7 +38,7 @@ async function setupBrowser() {
 }
 async function forget(settings) {
   if ((await config())?.bridge_token !== settings.bridge_token) return;
-  connectionGeneration++; reviewSessions = [];
+  connectionGeneration++; reviewSessions = []; vault.lock(); secretGate.clear();
   clearTimeout(reconnectTimer); clearInterval(heartbeat);
   setupPromise = null; setupCredential = null;
   if (socket) { socket.onclose = socket.onmessage = socket.onerror = socket.onopen = null; socket.close(); socket = null; }
@@ -118,7 +129,9 @@ async function execute(packet) {
     if (!(packet.scope.disclosure === 'bounded' ? automation?.grants_enabled ?? automation?.enabled : automation?.enabled)) throw new Error('Automatic task execution is paused.');
     const approvedAction = action(command.action, packet.scope, binding.view);
     auditTarget = binding.view.controls.find(control => control.ref === approvedAction.ref) || null;
-    if (checksActionPurpose(packet.scope)) { if (!await automatic.allowed(packet)) throw new Error('No matching local purpose approval.'); }
+    if (approvedAction.type === 'fill_secret') {
+      if (command.requires_approval !== false) throw new Error('Secret approval is enforced by the local vault.');
+    } else if (checksActionPurpose(packet.scope)) { if (!await automatic.allowed(packet)) throw new Error('No matching local purpose approval.'); }
     else if (command.requires_approval !== needsApproval(approvedAction, binding.view, packet.scope)) throw new Error('The action approval policy changed.');
     if (command.requires_approval) {
       const receipt = packet.action_receipt, c = receipt?.challenge;
@@ -131,6 +144,15 @@ async function execute(packet) {
     }
     const tab = await chrome.tabs.get(binding.tab_id);
     if (new URL(tab.url).origin !== binding.view.origin || !packet.scope.origins.includes(new URL(tab.url).origin)) throw new Error('The bound tab changed origin.');
+    let secretValue, secretRevision;
+    if (approvedAction.type === 'fill_secret') {
+      await authorizeCurrentCommand(packet);
+      const authorization = await secretGate.authorize(packet, auditTarget, binding.view.origin);
+      if (authorization.pending) return;
+      if (authorization.denied) throw new Error('The owner denied this secret fill.');
+      secretValue = authorization.value;
+      secretRevision = authorization.revision;
+    }
     if (dispatches[command.id]) {
       result = dispatches[command.id].result || result;
     } else {
@@ -152,7 +174,14 @@ async function execute(packet) {
         } else await chrome.tabs.update(binding.tab_id, {url: approvedAction.url});
         result = {command_id: command.id, ok: true, code: 'DISPATCHED'};
       } else {
-        const answer = await chrome.tabs.sendMessage(binding.tab_id, {type: 'execute', action: approvedAction, origins: packet.scope.origins, staged_fields: Object.entries(binding.fills || {}).map(([ref, value]) => ({ref, value}))}, {frameId: 0});
+        if (approvedAction.type === 'fill_secret') {
+          recordings.blocked.add(id); await recordings.stop(id);
+          binding.read_locked = true; bindings[id] = binding; await chrome.storage.session.set({bindings});
+          await authorizeCurrentCommand(packet);
+        }
+        const dispatchedAction = approvedAction.type === 'fill_secret' ? {...approvedAction, secret_kind: auditTarget.secret_kind, value: secretValue} : approvedAction;
+        if (approvedAction.type === 'fill_secret' && (!vault.unlocked || vault.revision !== secretRevision)) throw new Error('The secret vault changed before filling.');
+        const answer = await chrome.tabs.sendMessage(binding.tab_id, {type: 'execute', action: dispatchedAction, origins: packet.scope.origins, staged_fields: Object.entries(binding.fills || {}).map(([ref, value]) => ({ref, value}))}, {frameId: 0});
         if (!answer || typeof answer.ok !== 'boolean' || !['DISPATCHED', 'STALE_VIEW', 'OUT_OF_SCOPE', 'BRIDGE_ERROR'].includes(answer.code)) throw new Error('Invalid local adapter response.');
         result = {command_id: command.id, ...answer};
       }
@@ -160,7 +189,7 @@ async function execute(packet) {
       if (approvedAction.type === 'fill' && result.ok) {
         binding.fills[approvedAction.ref] = approvedAction.value;
         bindings[id] = binding; await chrome.storage.session.set({bindings});
-      } else if (approvedAction.type !== 'fill') {
+      } else if (!['fill','fill_secret'].includes(approvedAction.type)) {
         delete bindings[id]; await chrome.storage.session.set({bindings});
       }
     }
@@ -212,6 +241,7 @@ function receiveState(packet, connection = socket, generation = connectionGenera
   queue = queue.then(async () => {
     if (socket !== connection || generation !== connectionGeneration) return;
     if (packet.snapshot_version === 1) reviewSessions = packet.sessions.filter(item => ['active', 'checking_action', 'awaiting_action', 'executing'].includes(item.status));
+    if (packet.snapshot_version === 1) secretGate.prune(packet.sessions);
     await automatic.stop(packet.sessions);
     await classifier.tick(packet.classifier_requests || []);
     for (const check of packet.checks || []) await automatic.check(check);
@@ -242,6 +272,27 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     const clip = message.clip;
     if (clip?.session_id) auditRecording(clip.session_id, clip);
     return false;
+  }
+  if (sender.id === chrome.runtime.id && sender.url === chrome.runtime.getURL('secrets.html')) {
+    (async () => {
+      await ready;
+      if (message.type === 'vault_status') return {ok:true,unlocked:vault.unlocked,secrets:vault.unlocked ? await vault.list() : []};
+      if (message.type === 'vault_unlock') {
+        await vault.unlock(message.passphrase);
+        resumeSecretRequests();
+        return {ok:true};
+      }
+      if (message.type === 'vault_lock') { vault.lock(); secretGate.invalidate(); return {ok:true}; }
+      if (message.type === 'vault_save') { await vault.save(message.secret); resumeSecretRequests(); return {ok:true}; }
+      if (message.type === 'vault_remove') { await vault.remove(message.id); resumeSecretRequests(); return {ok:true}; }
+      if (message.type === 'vault_requests') return {ok:true,requests:secretGate.requests()};
+      if (message.type === 'vault_decide') {
+        const packet = secretGate.decide(message.command_id,message.allow);
+        queue = queue.then(() => execute(packet)).catch(() => {}); return {ok:true};
+      }
+      throw new Error('Unsupported vault operation.');
+    })().then(respond).catch(error => respond({ok:false,error:error.message}));
+    return true;
   }
   if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('review.html')) return false;
   (async () => {

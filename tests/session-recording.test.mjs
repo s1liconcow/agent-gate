@@ -59,3 +59,9 @@ test('navigation outside the approved sites replaces captured content with a pau
   assert.deepEqual(f.messages.at(-1), {type: 'frame', session_id: id, loading: false});
   await f.recorder.stop(id);
 });
+
+test('secret-enabled and read-locked tasks never start screen recording', async () => {
+  for(const item of [{scope:{origins:['https://task.example'],permissions:['read','fill_secret']}},{read_locked:true}]) {
+    const f=fixture();await f.recorder.start({...f.item,...item},1);assert.deepEqual(f.calls,[]);assert.equal(f.recorder.sessions.size,0);
+  }
+});

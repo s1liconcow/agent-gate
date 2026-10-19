@@ -5,6 +5,8 @@ AgentGate runs scoped browser tasks with owner consent and a paired local classi
 - [Setup and operation](docs/SETUP.md)
 - [Browser flow and evidence](docs/BASIC_BROWSER_FLOW.md)
 - [Assistant connection and account diagnostics](docs/CONNECTION.md)
+- [Private secret filling](docs/SECRETS.md)
+- [Permissions and shared-login UX proposal](docs/PERMISSIONS_UX_PROPOSAL.md)
 - [Owner administration](docs/ADMIN.md)
 - [Classifier training and evaluation](local-decision/BROWSER_CLASSIFIER.md)
 - [Local research and provenance](local-decision/PURPOSE_RESEARCH.md)

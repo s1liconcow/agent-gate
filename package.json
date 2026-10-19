@@ -34,6 +34,7 @@
     "test:e2e": "npm run demo:flow",
     "test:extension": "npm run build && node tests/extension-disconnect-browser.mjs",
     "test:hosted-controls": "node tests/hosted-controls-browser.mjs",
+    "test:secrets": "npm run build && node --test tests/secret*.test.mjs && node tests/secret-fill-browser.mjs && node tests/secrets-ui-browser.mjs",
     "test:control-capture": "npm run build && node tests/control-capture-browser.mjs"
   },
   "dependencies": {

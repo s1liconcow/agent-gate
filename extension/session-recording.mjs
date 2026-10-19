@@ -16,7 +16,7 @@ export class SessionRecordings {
   run(operation) { const next = this.queue.then(operation, operation); this.queue = next.catch(() => {}); return next; }
   start(item, tabId) {
     return this.run(async () => {
-      if (this.blocked.has(item.id)) return;
+      if (this.blocked.has(item.id) || item.read_locked || item.scope?.permissions?.includes('fill_secret')) return;
       const expires = Math.min(item.expires_at || Infinity, item.session_receipt?.challenge?.expires_at || Infinity);
       if (!Number.isSafeInteger(expires) || expires <= this.now()) return;
       let recording = this.sessions.get(item.id);

@@ -46,6 +46,7 @@
               "enum": [
                 "read",
                 "fill",
+                "fill_secret",
                 "click",
                 "navigate"
               ]
@@ -131,7 +132,7 @@
     },
     {
       "name": "perform_browser_action",
-      "description": "Perform one action on the current published view. Supply its view_digest and an opaque ref for fill/click; navigation stays within signed origins. The pinned local classifier assesses the exact action against the approved goal; the owner engagement mode determines execution or confirmation. Control labels and native form submission do not impose separate action rules. Show approval_url when awaiting_action. Keep one idempotency_key per intended action; never retry an uncertain click with a new key. No selectors, scripts, cookies or screenshots.",
+      "description": "Perform one action on the current published view. Supply its view_digest and an opaque ref for fill/click; navigation stays within signed origins. The pinned local classifier assesses the exact action against the approved goal; the owner engagement mode determines execution or confirmation. Control labels and native form submission do not impose separate action rules. Show approval_url when awaiting_action. Keep one idempotency_key per intended action; never retry an uncertain click with a new key. fill_secret uses a secret ref and owner-provided local vault secret_id; never send a secret value. It requires local browser and fill_secret permission. The owner configures automatic use or confirmation in extension Secrets. New page reads stop for the rest of the task once requested; existing refs remain usable. No selectors, scripts, cookies or screenshots.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -161,6 +162,27 @@
                   "type",
                   "ref",
                   "value"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "fill_secret"
+                  },
+                  "ref": {
+                    "$ref": "#/properties/session_id"
+                  },
+                  "secret_id": {
+                    "$ref": "#/properties/session_id"
+                  }
+                },
+                "required": [
+                  "type",
+                  "ref",
+                  "secret_id"
                 ],
                 "additionalProperties": false
               },
