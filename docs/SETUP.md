@@ -20,6 +20,12 @@ classify or execute this account's tasks.
 
 ## Build the desktop extension
 
+For the root owner account, open `/`, choose **Sign in with Google**, then
+**Use this computer for approvals**. Moving approvals here stops running tasks
+and requires local browsers to reconnect; saved cloud logins stay in place.
+The root owner is the authorized Google administrator. Other accounts retain
+their existing enrollment and approval-device setup.
+
 From the repository root:
 
 ```sh
@@ -33,7 +39,8 @@ model stay in place; no extra extension directory is created.
 
 Open AgentGate from its toolbar icon. Set the **Account link** in **Advanced
 settings** to the URL returned by the assistant. Open **Connect this browser**, click
-**Connect**, and approve the QR pairing in that account's authorized approval app.
+**Connect**, then choose **Open approval app on this computer** and approve the
+connection. You can also scan the QR with that account's authorized approval device.
 When paired, the header offers **Disconnect**. Disconnect removes local pairing
 credentials, closes the socket, ends its tasks and prevents automatic reconnection.
 Connecting again requires a fresh approved QR pairing.

@@ -75,15 +75,16 @@ export async function googleAuthRoute(request, env, provider = googleProvider) {
   const origin = publicOrigin(request, env), redirect_uri = origin + '/api/auth/google/callback';
   if (url.origin !== origin) fail('UNAUTHORIZED', 'Use the AgentGate sign-in page.', 403);
   if (url.pathname.endsWith('/start')) {
-    if (url.search || request.headers.get('Sec-Fetch-Site') === 'cross-site') fail('INVALID_REQUEST', 'Start sign-in from administration.');
+    const destination = url.searchParams.get('destination') || 'admin';
+    if (!['admin', 'approvals'].includes(destination) || [...url.searchParams.keys()].some(key => key !== 'destination') || url.searchParams.getAll('destination').length > 1 || request.headers.get('Sec-Fetch-Site') === 'cross-site') fail('INVALID_REQUEST', 'Start sign-in from AgentGate.');
     const binding = webToken(), nonce = webToken(), verifier = webToken();
-    const state = await authCall(env, 'login', await digest(binding), nonce, verifier);
+    const state = await authCall(env, 'login', await digest(binding), nonce, verifier, destination);
     const target = new URL(provider.authorizeURL);
     target.search = new URLSearchParams({client_id: env.GOOGLE_CLIENT_ID, redirect_uri, response_type: 'code', scope: 'openid email profile',
       state, nonce, code_challenge: await pkceChallenge(verifier), code_challenge_method: 'S256', prompt: 'select_account', login_hint: ADMIN_EMAIL}).toString();
     return new Response(null, {status: 302, headers: {Location: target.href, 'Set-Cookie': cookie(loginCookie, binding, LOGIN_SECONDS), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'}});
   }
-  let outcome = 'failed', stage = 'validate_callback';
+  let outcome = 'failed', stage = 'validate_callback', destination = '/admin.html';
   const headers = new Headers({'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'});
   headers.append('Set-Cookie', cookie(loginCookie, '', 0));
   try {
@@ -92,6 +93,7 @@ export async function googleAuthRoute(request, env, provider = googleProvider) {
     if (!validWebToken(binding)) fail('LOGIN_EXPIRED', 'Sign-in expired. Start again.', 401);
     stage = 'consume_state';
     const login = await authCall(env, 'consume', url.searchParams.get('state'), await digest(binding));
+    if (login.destination === 'approvals') destination = '/';
     if (url.searchParams.has('error')) outcome = 'cancelled';
     else {
       const code = url.searchParams.get('code');
@@ -120,6 +122,6 @@ export async function googleAuthRoute(request, env, provider = googleProvider) {
       ...(['iss', 'aud', 'exp', 'iat', 'nbf', 'nonce', 'email', 'email_verified'].includes(error.claim) ? {claim: error.claim} : {})}));
     if (error.code === 'ADMIN_REQUIRED') outcome = 'denied';
   }
-  headers.set('Location', origin + '/admin.html' + (outcome ? '?signin=' + outcome : ''));
+  headers.set('Location', origin + destination + (outcome ? '?signin=' + outcome : ''));
   return new Response(null, {status: 302, headers});
 }

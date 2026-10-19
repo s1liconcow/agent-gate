@@ -21,6 +21,7 @@ try {
   await page.route(origin + '/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname;
     if (path.startsWith('/api/')) {
+      if (path === '/api/root/session') return route.fulfill({status: 401, contentType: 'application/json', body: JSON.stringify({error: {message: 'Sign in with Google.'}})});
       if (request.method() === 'GET') reads.push(path);
       assert.equal(request.headers().authorization, 'Bearer ' + 'd'.repeat(64));
       let result;

@@ -36,7 +36,7 @@ async function refresh() {
   showGoal();
   if (setupFailed) await providerStatus();
 }
-function showGoal() { const item = sessions.find(i => i.id === $('session').value); $('goal').textContent = item?.browser_runtime?.state === 'blocked' ? item.next_action || 'Task paused. Check your phone.' : ''; showLocalState().catch(() => {}); }
+function showGoal() { const item = sessions.find(i => i.id === $('session').value); $('goal').textContent = item?.browser_runtime?.state === 'blocked' ? item.next_action || 'Task paused. Check your approval app.' : ''; showLocalState().catch(() => {}); }
 async function showLocalState() {
   const {capture_diagnostics = {}, bindings = {}} = await chrome.storage.session.get(['capture_diagnostics', 'bindings']);
   const id = $('session').value, diagnostic = capture_diagnostics[id], published = bindings[id]?.view;
@@ -74,7 +74,7 @@ async function providerStatus() {
   $('keyStatus').textContent = result.has_key ? 'Key saved. Leave blank to keep it for this configuration.' : 'Add an API key.';
   $('providerStatus').textContent = savedProvider ? 'Using ' + (savedProvider.provider === 'purpose_browser' ? 'on-device checks' : savedProvider.provider) + '.' : 'Using Chrome AI.';
   const {settings, automation} = await chrome.storage.local.get(['settings', 'automation']);
-  $('aiStatus').textContent = !settings ? 'Connect with your phone to start.' : automation?.enabled ? 'Ready. Ask your assistant for a task.' : 'Tasks paused.';
+  $('aiStatus').textContent = !settings ? 'Connect with your approval app to start.' : automation?.enabled ? 'Ready. Ask your assistant for a task.' : 'Tasks paused.';
   if (setupFailed) { $('message').hidden = true; setupFailed = false; }
 }
 async function saveProvider() {
@@ -100,20 +100,23 @@ async function pair() {
   const site = origin(new URL(url).origin);
   if (url.startsWith('https:') && !await chrome.permissions.request({origins: [site + '/*']})) throw new Error('Allow account access to connect.');
   const result = await bridge({type: 'start_pairing', url, name: $('browserName').value}); await showQR(result);
-  message('Scan with your paired phone.');
+  message('Open the approval app on this computer, or scan with your approval device.');
+}
+function clearPairing() {
+  $('pairingQR').hidden = true; qrUrl = ''; $('pairingLink').value = ''; $('pairingOpen').removeAttribute('href');
+  $('qr').getContext('2d').clearRect(0, 0, $('qr').width, $('qr').height);
 }
 async function connection() {
   if (!paired) { $('browserPairing').open = true; $('pair').focus(); return; }
   await bridge({type: 'disconnect'});
-  $('pairingQR').hidden = true; qrUrl = '';
-  $('qr').getContext('2d').clearRect(0, 0, $('qr').width, $('qr').height);
+  clearPairing();
   $('browserPairing').open = true;
-  await refresh(); await providerStatus(); message('Disconnected. Connect again with your phone.');
+  await refresh(); await providerStatus(); message('Disconnected. Connect again from your approval app.');
 }
 async function showQR(result) {
-  if (qrUrl !== result.qr_url) { await QRCode.toCanvas($('qr'), result.qr_url, {width: 220, margin: 3, errorCorrectionLevel: 'M'}); qrUrl = result.qr_url; }
+  if (qrUrl !== result.qr_url) { await QRCode.toCanvas($('qr'), result.qr_url, {width: 220, margin: 3, errorCorrectionLevel: 'M'}); qrUrl = result.qr_url; $('pairingLink').value = qrUrl; $('pairingOpen').href = qrUrl; }
   $('pairingQR').hidden = false; $('browserPairing').open = true;
-  $('pairingStatus').textContent = 'Waiting for your phone · ' + Math.max(0, Math.ceil((result.expires_at - Date.now()) / 1000)) + 's left';
+  $('pairingStatus').textContent = 'Waiting for approval · ' + Math.max(0, Math.ceil((result.expires_at - Date.now()) / 1000)) + 's left';
 }
 async function pollPairing() {
   if (pairingPoll || pairingRequest) return; pairingPoll = true;
@@ -122,13 +125,18 @@ async function pollPairing() {
     if (pairingRequest) return;
     if (result.status === 'requested') await showQR(result);
     if (result.status === 'paired' || result.status === 'connected' && qrUrl) {
-      $('pairingQR').hidden = true; qrUrl = ''; $('qr').getContext('2d').clearRect(0, 0, $('qr').width, $('qr').height);
+      clearPairing();
       $('fingerprint').textContent = 'Device key: ' + result.fingerprint;
       $('browserPairing').open = false; await refresh(); await providerStatus(); message('Connected.');
     }
-  } catch (error) { $('pairingQR').hidden = true; message(error.message, true); }
+  } catch (error) { clearPairing(); message(error.message, true); }
   finally { pairingPoll = false; }
 }
+$('copyPairingLink').addEventListener('click', async () => {
+  if (!qrUrl) return;
+  try { await navigator.clipboard.writeText(qrUrl); message('Pairing link copied. Open it in your approval browser.'); }
+  catch { $('pairingLink').focus(); $('pairingLink').select(); message('Select and copy the pairing link.'); }
+});
 for (const [id, handler] of [['connection', connection], ['pair', pair], ['refresh', refresh], ['saveProvider', saveProvider], ['prepareChromeAI', saveProvider]]) $(id).addEventListener('click', async () => { const pairing = ['pair', 'connection'].includes(id); if (pairing) { pairingRequest = true; $('pair').disabled = true; $('connection').disabled = true; } $(id).disabled = true; try { await handler(); } catch (error) { message(error.message, true); } finally { if (pairing) { pairingRequest = false; $('pair').disabled = false; $('connection').disabled = false; } $(id).disabled = false; } });
 $('provider').addEventListener('change', async () => { providerFields(); if (['local', 'purpose_browser'].includes($('provider').value)) { $('provider').disabled = true; try { await saveProvider(); } catch (error) { await providerStatus().catch(() => {}); message(error.message, true); } finally { $('provider').disabled = false; } } });
 $('session').addEventListener('change', showGoal);

@@ -101,3 +101,18 @@ test('duplicate cookies and missing Google configuration cannot establish a sess
   assert.equal(readCookie(request, 'session'), null);
   await assert.rejects(() => googleAuthRoute(request, {}), {code: 'SIGN_IN_UNAVAILABLE'});
 });
+
+test('Google approval sign-in stores its fixed destination in browser-bound state', async () => {
+  const db = new SessionStorage(), store = new WebSessions(db);
+  const env = {PUBLIC_ORIGIN: 'https://gate.test', GOOGLE_CLIENT_ID: 'test-client', GOOGLE_CLIENT_SECRET: 'test-secret',
+    REGISTRY: {getByName: () => ({webAuth: (operation, ...args) => store[operation](...args)})}};
+  const start = await googleAuthRoute(new Request('https://gate.test/api/auth/google/start?destination=approvals'), env);
+  const target = new URL(start.headers.get('Location')), binding = start.headers.getSetCookie()[0].split(';')[0];
+  const callback = new Request('https://gate.test/api/auth/google/callback?state=' + target.searchParams.get('state') + '&code=test&destination=admin', {headers: {Cookie: binding}});
+  const result = await googleAuthRoute(callback, env, {exchange: async () => identity});
+  assert.equal(result.headers.get('Location'), 'https://gate.test/');
+  assert.ok(result.headers.getSetCookie().some(value => value.startsWith('__Host-agentgate-session=')));
+  for (const query of ['destination=https://other.test', 'destination=approvals&destination=admin', 'next=/']) {
+    await assert.rejects(() => googleAuthRoute(new Request('https://gate.test/api/auth/google/start?' + query), env), {code: 'INVALID_REQUEST'});
+  }
+});

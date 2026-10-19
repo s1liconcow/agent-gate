@@ -25,9 +25,10 @@ export class WebSessions {
     if (alarm === null || alarm > value.expires_at) await this.storage.setAlarm(value.expires_at);
     return token;
   }
-  login(binding_hash, nonce, verifier) {
+  login(binding_hash, nonce, verifier, destination = 'admin') {
     if (![binding_hash, nonce, verifier].every(validWebToken)) fail('INVALID_REQUEST', 'Invalid sign-in request.');
-    return this.put(prefixes[0], {binding_hash, nonce, verifier, expires_at: this.now() + LOGIN_SECONDS * 1000});
+    if (!['admin', 'approvals'].includes(destination)) fail('INVALID_REQUEST', 'Invalid sign-in destination.');
+    return this.put(prefixes[0], {binding_hash, nonce, verifier, destination, expires_at: this.now() + LOGIN_SECONDS * 1000});
   }
   async consume(state, binding_hash) {
     if (!validWebToken(state) || !validWebToken(binding_hash)) fail('LOGIN_EXPIRED', 'Sign-in expired. Start again.', 401);

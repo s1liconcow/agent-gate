@@ -3,6 +3,7 @@ import {pairingChallenge, sealPairing} from './browser-pairing.mjs';
 import {engagementChallenge, engagementDescriptions, engagementModes, engagementLabels} from './engagement.mjs';
 import {loginChallenge, loginApps} from './login-sync-protocol.mjs';
 import {ApprovalQueue} from './approval-queue.mjs';
+import {rootLogin} from './root-login.mjs';
 const $ = id => document.getElementById(id);
 const account = location.pathname.match(/^\/u\/([a-f0-9]{32})(?:\/|$)/)?.[1];
 const base = account ? '/u/' + account : '';
@@ -59,7 +60,7 @@ function stored(method, key, value) { return new Promise((resolve, reject) => { 
 function message(content, error = false) { $('message').hidden = false; $('message').textContent = content; $('message').className = 'message' + (error ? ' error' : ''); }
 async function api(path, data) {
   const response = await fetch(base + '/api/' + path, {method: data === undefined ? 'GET' : 'POST', headers: {'Content-Type': 'application/json', ...(device ? {Authorization: 'Bearer ' + device.token} : {})}, ...(data !== undefined ? {body: JSON.stringify(data)} : {}), cache: 'no-store', redirect: 'error'});
-  const result = await response.json(); if (!response.ok) throw new Error(result.error?.message || 'Request failed. Try refreshing.'); return result;
+  const result = await response.json(); if (!response.ok) throw Object.assign(new Error(result.error?.message || 'Request failed. Try refreshing.'), {status: response.status}); return result;
 }
 const remaining = time => Math.max(0, Math.ceil((time - Date.now()) / 1000));
 const el = (tag, content, className) => { const node = document.createElement(tag); if (content !== undefined) node.textContent = content; if (className) node.className = className; return node; };
@@ -85,7 +86,7 @@ $('defaultBrowserForm').addEventListener('submit', async event => {
 async function approveBrowser(item) {
   const c = pairingChallenge(item.challenge);
   const source = item.role === 'login_source';
-  if (scannedBrowser?.id !== item.id || scannedBrowser.source !== source || c.stage !== (source ? 'login_source_pairing' : 'browser_pairing') || source && c.account_id !== (account || 'owner') || c.browser_id !== item.id || c.coordinator !== location.origin + base || c.name !== item.name || c.extension_origin !== item.extension_origin || remaining(c.expires_at) === 0) throw new Error('Scan this browser’s current QR code again.');
+  if (scannedBrowser?.id !== item.id || scannedBrowser.source !== source || c.stage !== (source ? 'login_source_pairing' : 'browser_pairing') || source && c.account_id !== (account || 'owner') || c.browser_id !== item.id || c.coordinator !== location.origin + base || c.name !== item.name || c.extension_origin !== item.extension_origin || remaining(c.expires_at) === 0) throw new Error('Open this browser’s current pairing link or scan its QR code again.');
   const receipt = {challenge: c, signature: b64url(await crypto.subtle.sign({name: 'ECDSA', hash: 'SHA-256'}, device.key, new TextEncoder().encode(canonical(c))))};
   const envelope = await sealPairing(scannedBrowser.secret, c, device.publicKey, receipt);
   await api(`owner/${source ? 'login-sources' : 'browsers'}/${item.id}/approve`, {receipt, envelope}); scannedBrowser = undefined;
@@ -101,7 +102,7 @@ function renderBrowsers(items, pending, source = false) {
     section.append(more('Details', dl));
     const actions = el('div', undefined, 'actions');
     if (item.status === 'requested' && scannedBrowser?.id === item.id && scannedBrowser.source === source) actions.append(button('Connect', () => approveBrowser(item)));
-    else if (item.status === 'requested') section.append(el('p', 'Scan the QR in Chrome to connect.', 'hint'));
+    else if (item.status === 'requested') section.append(el('p', 'Open the pairing link from the Chrome extension, or scan its QR code.', 'hint'));
     else section.append(el('p', item.status === 'active' ? item.socket_connected ? 'Connected · Online' : 'Paired · Offline' : 'Connecting…', 'hint'));
     actions.append(button(item.status === 'requested' ? 'Cancel' : 'Disconnect', () => api(`owner/${source ? 'login-sources' : 'browsers'}/${item.id}/revoke`, {}), 'danger'));
     section.append(actions);
@@ -282,11 +283,15 @@ async function refresh() {
   finally { refreshing = false; $('refresh').disabled = false; scheduleRefresh(); }
 }
 async function showDevice() {
-  $('intro').hidden = true; $('pairing').hidden = true; $('inbox').hidden = false; $('device').hidden = false;
+  $('intro').hidden = true; $('googleSignIn').hidden = true; $('rootSetup').hidden = true; $('pairing').hidden = true; $('inbox').hidden = false; $('device').hidden = false;
   $('fingerprint').textContent = 'Device key: ' + (await digest(device.publicKey)).slice(0, 24);
   $('accountIdentity').textContent = 'Account: ' + (account || 'owner') + ' · Coordinator: ' + location.origin + base;
   $('accountSettings').href = base + '/account.html'; $('adminLink').href = '/admin.html';
-  try {const profile = await api('owner/profile'); if (profile.account_id === (account || 'owner')) $('adminLink').hidden = !profile.admin;} catch { $('adminLink').hidden = true; }
+  try {const profile = await api('owner/profile'); if (profile.account_id === (account || 'owner')) $('adminLink').hidden = !profile.admin;}
+  catch (error) {
+    $('adminLink').hidden = true;
+    if (!account && [401, 403].includes(error.status)) { device = null; await showSignIn(); return; }
+  }
   await refresh();
 }
 $('pairForm').addEventListener('submit', async event => {
@@ -310,12 +315,26 @@ $('notifications').addEventListener('click', async () => {
   } catch (error) { message(error.message, true); }
 });
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => message('The approval app works, but notifications are unavailable.', true));
-device = await stored('get', account ? 'device:' + account : 'device');
-if (device) await showDevice(); else {
-  $('pairing').hidden = false; $('connection').textContent = 'Not paired';
-  if (scannedBrowser) message('Open this link in your paired phone browser.', true);
-  const code = new URLSearchParams(location.hash.slice(1)).get('pair'); if (code) { $('pairCode').value = code; history.replaceState(null, '', base + '/'); }
+async function showSignIn() {
+  $('intro').hidden = false; $('inbox').hidden = true; $('device').hidden = true;
+  $('pairing').hidden = false; $('connection').textContent = 'Not signed in';
+  $('googleSignIn').hidden = Boolean(account);
+  if (account) {
+    $('welcomeHeading').textContent = 'Connect your approval device';
+    $('welcomeDescription').textContent = 'Use your setup code to approve requests in this browser.';
+    $('pairing').open = true; $('connection').textContent = 'Not paired';
+  }
+  if (scannedBrowser && account) message('Open this link in your paired approval browser.', true);
+  const code = new URLSearchParams(location.hash.slice(1)).get('pair'); if (code) { $('pairCode').value = code; $('pairing').open = true; history.replaceState(null, '', base + '/'); }
+  if (!account && !code) await rootLogin({stored, message, connected: async value => { device = value; scannedBrowser = undefined; await showDevice(); }});
+  const outcome = new URLSearchParams(location.search).get('signin');
+  if (!account && outcome) {
+    history.replaceState(null, '', location.pathname + location.hash);
+    message({denied: 'Sign in with the root owner’s Google account.', cancelled: 'Sign-in was cancelled. Try again.', failed: 'Google sign-in failed or expired. Start again.'}[outcome] || 'Start Google sign-in again.', true);
+  }
 }
+device = await stored('get', account ? 'device:' + account : 'device');
+if (device) await showDevice(); else await showSignIn();
 document.addEventListener('visibilitychange', () => {
   clearTimeout(refreshTimer);
   if (!document.hidden) refresh();

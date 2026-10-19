@@ -7,8 +7,8 @@
   <div id="message" class="message" role="status" hidden></div>
   <section class="browser-controls">
       <details id="browserPairing"><summary>Connect this browser</summary>
-        <p class="hint">To connect or switch accounts, set the Account link under Advanced settings to the account URL shown by your assistant, then scan this browser’s QR code in that account’s approval app. The previous pairing remains until separately revoked.</p>
-        <div id="pairingQR" hidden><canvas id="qr" aria-label="Scan to connect this browser"></canvas><p id="pairingStatus" class="hint" role="status"></p></div>
+        <p class="hint">Set the Account link under Advanced settings to the account URL shown by your assistant. Click Connect, then open the approval app on this computer or scan the QR with your approval device.</p>
+        <div id="pairingQR" hidden><canvas id="qr" aria-label="Scan to connect this browser"></canvas><p id="pairingStatus" class="hint" role="status"></p><p><a id="pairingOpen" target="_blank" rel="noopener noreferrer">Open approval app on this computer</a></p><label>Pairing link<input id="pairingLink" readonly autocomplete="off" spellcheck="false"></label><button id="copyPairingLink" class="secondary" type="button">Copy pairing link</button></div>
         <button id="pair">Connect</button>
       </details>
       <div id="taskPanel" hidden><h2>Tasks</h2><button id="refresh" class="secondary compact">Refresh</button><label>Task<select id="session"><option value="">No tasks yet</option></select></label><p id="goal" class="hint"></p></div>

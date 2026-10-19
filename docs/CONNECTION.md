@@ -23,6 +23,13 @@ inference and website logins. Account-specific MCP URLs remain supported. An
 existing account requires its registered browser key and owner credential;
 opening its URL on another computer does not establish ownership.
 
+The root owner can open `/` and sign in with the authorized Google administrator
+account, then choose **Use this computer for approvals**. This moves the root
+approval key to that browser, stops running tasks and requires local browsers to
+reconnect. Saved cloud logins and connected assistants are retained. In the
+extension, **Open approval app on this computer** opens the pairing request
+without a phone or QR scan.
+
 The shared MCP URL routes authenticated tokens to their account's Gate. Each
 account has its own approval key, policy, browser process and encrypted login
 profile. The assistant cannot change engagement. Sensitive confirmations in

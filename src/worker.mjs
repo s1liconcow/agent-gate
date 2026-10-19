@@ -26,6 +26,8 @@ import {accountDeletionPreview, beginAccountDeletion, deletionKey, deletionRecei
 import {isAdminIdentity} from './admin-identity.mjs';
 import {googleAuthRoute, readWebSession} from './google-auth.mjs';
 import {adminRoute} from './admin-routes.mjs';
+import {rootRoute} from './root-routes.mjs';
+import {RootSetup} from './root-setup.mjs';
 import {hostedAsset} from './hosted-assets.mjs';
 import {hostedModel, hostedScripts} from './generated-hosted.mjs';
 import {LoginSync} from './login-sync.mjs';
@@ -159,6 +161,18 @@ export class Gate extends DurableObject {
   }
   async endHostedTasks(browserId) { await this.endBrowserTasks(browserId || (await this.hostedConsent.current())?.browser_id); }
   async endAllTasks() { for (const item of await this.engine.list()) if (!['expired', 'revoked', 'closed'].includes(item.status)) await this.engine.end(item.id); }
+  rootSetupState() { return this.locked(() => new RootSetup(this.ctx.storage).state()); }
+  rootSetupPrepare(input, binding, origin) { return this.locked(() => new RootSetup(this.ctx.storage).prepare(input, binding, origin)); }
+  rootSetupComplete(input, binding) {
+    return this.hosted.serial(() => this.locked(async () => {
+      const result = await new RootSetup(this.ctx.storage).complete(input, binding, () => this.endAllTasks());
+      if (result.changed) {
+        this.tickets.clear();
+        for (const socket of this.ctx.getWebSockets()) socket.close(4001, 'Approval device changed');
+      }
+      return result;
+    }));
+  }
   stopHosted(item) { if (item) this.ctx.waitUntil(this.hosted.stop(item).finally(() => this.ctx.blockConcurrencyWhile(() => this.scheduleMaintenance()))); }
 
   async initializeAccount(id, pairingHash) {
@@ -703,6 +717,7 @@ const app = {
     try {
       const auth = await googleAuthRoute(request, env); if (auth) return auth;
       const admin = await adminRoute(request, env, body); if (admin) return admin;
+      const root = await rootRoute(request, env, body); if (root) return root;
     } catch (error) { return errorResponse(error); }
     if (url.pathname.startsWith('/api/owner/admin/') || tenantPath(url.pathname)?.path.startsWith('/api/owner/admin/')) return json({error: {code: 'ADMIN_REQUIRED', message: 'Sign in through global administration.'}}, 403);
     if (url.pathname.startsWith('/api/hosted-model/')) return hostedAsset(request, env.HOSTED_MODELS, hostedModel);
